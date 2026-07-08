@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import { PageHeader } from "@/components/common/page-header";
+import { Card } from "@/components/ui/card";
 import { ContactChannelCard } from "@/sections/contacts/contact-channel-card";
-import { Geography } from "@/sections/contacts/geography";
 import { ContactForm } from "@/sections/contacts/contact-form";
 import { FinalCta } from "@/sections/contacts/final-cta";
 import { contactChannels } from "@/data/contacts";
@@ -21,7 +22,7 @@ export default function ContactsPage() {
       />
 
       <section className="px-4 sm:px-6">
-        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
           {contactChannels.map((channel) => (
             <ContactChannelCard key={channel.label} channel={channel} />
           ))}
@@ -30,7 +31,16 @@ export default function ContactsPage() {
 
       <section className="px-4 sm:px-6" id="contact-form">
         <div className="mx-auto grid max-w-6xl grid-cols-1 gap-6 lg:grid-cols-2">
-          <Geography />
+          <Card className="flex items-center justify-center p-6">
+            <Image
+              src="/images/panda2.png"
+              alt="Panda Bridge — команда и маскот компании"
+              width={1024}
+              height={1536}
+              loading="lazy"
+              className="h-auto w-full max-w-xs object-contain"
+            />
+          </Card>
           <ContactForm />
         </div>
       </section>

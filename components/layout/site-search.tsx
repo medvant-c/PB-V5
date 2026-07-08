@@ -53,7 +53,7 @@ function SiteSearch() {
         type="button"
         aria-label="Поиск"
         onClick={() => setOpen((value) => !value)}
-        className="flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary hover:bg-black/3"
+        className="flex h-11 w-11 items-center justify-center rounded-lg text-text-secondary hover:bg-black/3"
       >
         <Search className="h-4.5 w-4.5" />
       </button>

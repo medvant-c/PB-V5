@@ -9,9 +9,9 @@ function ContactChannelCard({ channel }: { channel: ContactChannel }) {
       <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
         <Icon className="h-5 w-5" />
       </span>
-      <div>
+      <div className="min-w-0">
         <div className="text-sm font-bold text-text">{channel.label}</div>
-        <div className="text-sm text-text-secondary">{channel.value}</div>
+        <div className="wrap-break-word text-sm text-text-secondary">{channel.value}</div>
         <div className="text-xs text-text-secondary/70">{channel.note}</div>
       </div>
     </>

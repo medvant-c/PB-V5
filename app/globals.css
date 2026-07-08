@@ -48,6 +48,27 @@ body {
   animation: float-card 4s ease-in-out infinite;
 }
 
+/*
+ * Tailwind's `hover:` utilities for transform/animation can't reliably beat
+ * this hand-written class in specificity, so the idle float animation would
+ * otherwise keep overwriting the hover lift every frame. Overriding it here
+ * (same file, plain CSS) guarantees the hover state wins.
+ */
+.animate-float-card:hover {
+  animation: none;
+  transform: translateY(-6px);
+}
+
+@keyframes connector-flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+.animate-connector-flow {
+  animation: connector-flow 0.6s linear infinite;
+}
+
 @keyframes panda-sway {
   0%,
   100% {

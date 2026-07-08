@@ -11,7 +11,7 @@ function WhyUs() {
   return (
     <section className="px-4 sm:px-6">
       <div className="mx-auto max-w-6xl rounded-3xl bg-text px-6 py-10 text-white sm:px-10">
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[280px_1fr]">
+        <div className="grid grid-cols-1 gap-8 xl:grid-cols-[280px_1fr]">
           <div>
             <h2 className="text-2xl font-extrabold sm:text-3xl">Почему Panda Bridge</h2>
             <p className="mt-3 text-sm text-white/70">
@@ -19,7 +19,7 @@ function WhyUs() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4">
             {points.map((point) => {
               const Icon = point.icon;
               return (

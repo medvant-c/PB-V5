@@ -30,10 +30,3 @@ export const reviewStats: Stat[] = [
   { icon: ShieldCheck, value: "98%", label: "клиентов рекомендуют нас" },
   { icon: Layers, value: "90%", label: "клиентов работают с нами повторно" },
 ];
-
-export const contactStats: Stat[] = [
-  { icon: Network, value: "30+", label: "стран присутствия" },
-  { icon: Headset, value: "1000+", label: "клиентов по всему миру" },
-  { icon: Layers, value: "20+", label: "городов в Китае" },
-  { icon: ShieldCheck, value: "6", label: "складов и офисов" },
-];

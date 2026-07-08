@@ -20,9 +20,9 @@ function StatTile({ icon: Icon, value, label, iconClassName }: StatTileProps) {
       >
         <Icon className="h-5 w-5" />
       </span>
-      <div>
-        <div className="text-xl font-bold text-text">{value}</div>
-        <div className="text-sm text-text-secondary">{label}</div>
+      <div className="min-w-0">
+        <div className="truncate text-xl font-bold text-text">{value}</div>
+        <div className="wrap-break-word text-sm text-text-secondary [hyphens:auto]">{label}</div>
       </div>
     </Card>
   );

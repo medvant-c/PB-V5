@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { ChevronDown, ChevronRight, ShieldCheck } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -13,6 +16,9 @@ import {
 import { FloatingProductCard } from "@/components/panda/floating-product-card";
 import { HeroGlobe } from "@/components/panda/hero-globe";
 import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { MobileHeroCarousel } from "@/sections/hero/hero-mobile-carousel";
+import { MobileHeroComposition, MobileSocialProof } from "@/sections/hero/hero-mobile-composition";
 
 const metrics = [
   { value: "6", label: "стран-партнёров" },
@@ -22,6 +28,7 @@ const metrics = [
 
 const leftCards = [
   {
+    id: "start",
     icon: RocketIllustration,
     title: (
       <>
@@ -35,6 +42,7 @@ const leftCards = [
     href: "/start",
   },
   {
+    id: "logistics",
     icon: TruckIllustration,
     title: (
       <>
@@ -48,6 +56,7 @@ const leftCards = [
     href: "/logistics",
   },
   {
+    id: "fulfillment",
     icon: WarehouseIllustration,
     title: (
       <>
@@ -61,6 +70,7 @@ const leftCards = [
     href: "/fulfillment",
   },
   {
+    id: "business",
     icon: BriefcaseIllustration,
     title: (
       <>
@@ -77,6 +87,7 @@ const leftCards = [
 
 const rightCards = [
   {
+    id: "ai",
     icon: RobotIllustration,
     title: (
       <>
@@ -90,6 +101,7 @@ const rightCards = [
     href: "/ai",
   },
   {
+    id: "academy",
     icon: AcademyIllustration,
     title: (
       <>
@@ -103,6 +115,7 @@ const rightCards = [
     href: "/academy",
   },
   {
+    id: "factory",
     icon: FactoryIllustration,
     title: (
       <>
@@ -116,6 +129,7 @@ const rightCards = [
     href: "/factory",
   },
   {
+    id: "payments",
     icon: ShieldCheck,
     title: "Secure Payments",
     label: "Защита",
@@ -147,6 +161,12 @@ const ORBIT_ANGLES = [32, 76, 120, 146];
 // to restore clearance without undoing the horizontal fix.
 const ROW_Y_NUDGE = [0, 0, 0, 46];
 
+// Reference pixel size of the HeroVisual box (max-w-xl × h-155), used as the
+// coordinate space for the connector-line SVG overlay so lines line up with
+// the ellipse-positioned cards regardless of the container's actual render width.
+const STAGE_W = 576;
+const STAGE_H = 620;
+
 function ellipsePoint(angleDeg: number, side: 1 | -1, yNudge: number) {
   const rad = (angleDeg * Math.PI) / 180;
   const offsetX = side * ORBIT_RX * Math.sin(rad) - CARD_W / 2;
@@ -157,22 +177,65 @@ function ellipsePoint(angleDeg: number, side: 1 | -1, yNudge: number) {
   };
 }
 
+// The connector's start point is the card edge that faces the globe (its
+// right edge for left-column cards, left edge for right-column cards), so
+// each dashed line visibly originates from its own card rather than its center.
+function connectorAnchor(angleDeg: number, side: 1 | -1, yNudge: number) {
+  const rad = (angleDeg * Math.PI) / 180;
+  const offsetX = side * ORBIT_RX * Math.sin(rad) - CARD_W / 2;
+  const y = ORBIT_CY - ORBIT_RY * Math.cos(rad) - CARD_H / 2 + yNudge;
+  const innerX = side === -1 ? offsetX + CARD_W : offsetX;
+  return {
+    x: Math.round(STAGE_W / 2 + innerX),
+    y: Math.round(y + CARD_H / 2),
+  };
+}
+
 const productCards = [
   ...leftCards.map((card, i) => ({
     ...card,
     position: ellipsePoint(ORBIT_ANGLES[i], -1, ROW_Y_NUDGE[i]),
+    anchor: connectorAnchor(ORBIT_ANGLES[i], -1, ROW_Y_NUDGE[i]),
     tilt: CARD_TILT,
   })),
   ...rightCards.map((card, i) => ({
     ...card,
     position: ellipsePoint(ORBIT_ANGLES[i], 1, ROW_Y_NUDGE[i]),
+    anchor: connectorAnchor(ORBIT_ANGLES[i], 1, ROW_Y_NUDGE[i]),
     tilt: -CARD_TILT,
   })),
 ];
 
 function HeroVisual() {
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+
   return (
     <div className="relative mx-auto hidden h-155 w-full max-w-xl min-[1400px]:-translate-x-10 min-[1400px]:block">
+      <svg
+        viewBox={`0 0 ${STAGE_W} ${STAGE_H}`}
+        preserveAspectRatio="none"
+        className="pointer-events-none absolute inset-0 z-10 h-full w-full"
+        aria-hidden="true"
+      >
+        {productCards.map((card) => {
+          const isActive = hoveredId === card.id;
+          return (
+            <line
+              key={card.id}
+              x1={card.anchor.x}
+              y1={card.anchor.y}
+              x2={STAGE_W / 2}
+              y2={ORBIT_CY}
+              stroke={isActive ? "var(--color-primary)" : "rgba(102, 112, 133, 0.3)"}
+              strokeWidth={isActive ? 1.75 : 1.25}
+              strokeDasharray={isActive ? "6 4" : "4 4"}
+              strokeLinecap="round"
+              className={cn("transition-[stroke,stroke-width] duration-200", isActive && "animate-connector-flow")}
+            />
+          );
+        })}
+      </svg>
+
       <div className="absolute left-1/2 -top-18 h-172.5 w-172.5 -translate-x-1/2">
         <HeroGlobe />
       </div>
@@ -197,7 +260,7 @@ function HeroVisual() {
 
       {productCards.map((card, i) => (
         <FloatingProductCard
-          key={card.label}
+          key={card.id}
           icon={card.icon}
           title={card.title}
           label={card.label}
@@ -208,47 +271,13 @@ function HeroVisual() {
           floatDelay={`${i * 0.35}s`}
           floatDuration={`${4 + (i % 3) * 0.6}s`}
           href={card.href}
-          className="absolute"
+          className="absolute z-20 h-27 w-52"
           style={card.position}
+          data-service-id={card.id}
+          onMouseEnter={() => setHoveredId(card.id)}
+          onMouseLeave={() => setHoveredId((current) => (current === card.id ? null : current))}
         />
       ))}
-    </div>
-  );
-}
-
-function HeroVisualMobile() {
-  return (
-    <div className="mx-auto mt-10 min-[1400px]:hidden">
-      <div className="relative mx-auto h-80 w-full max-w-xs">
-        <div className="absolute left-1/2 top-0 h-64 w-64 -translate-x-1/2">
-          <HeroGlobe />
-        </div>
-        <div className="absolute bottom-0 left-1/2 h-64 w-44 -translate-x-1/2 animate-panda-sway">
-          <Image
-            src="/images/mascot.png"
-            alt="Panda Bridge"
-            width={220}
-            height={340}
-            className="relative h-full w-auto object-contain drop-shadow-xl"
-          />
-        </div>
-      </div>
-
-      <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {productCards.map((card) => (
-          <FloatingProductCard
-            key={card.label}
-            icon={card.icon}
-            title={card.title}
-            label={card.label}
-            description={card.description}
-            iconClassName={card.iconClassName}
-            dotClassName={card.dotClassName}
-            href={card.href}
-            className="w-full"
-          />
-        ))}
-      </div>
     </div>
   );
 }
@@ -275,19 +304,22 @@ function Hero() {
             масштабирования вашего бизнеса.
           </p>
 
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            <Link href="/contacts" className={buttonVariants({ variant: "primary", size: "lg" })}>
+          <div className="mt-8 flex flex-col items-stretch gap-3 md:flex-row md:items-center md:flex-wrap">
+            <Link
+              href="/contacts"
+              className={buttonVariants({ variant: "primary", size: "lg", className: "md:w-auto" })}
+            >
               Начать работу
             </Link>
             <Link
               href="/ecosystem"
-              className={buttonVariants({ variant: "outline", size: "lg" })}
+              className={buttonVariants({ variant: "outline", size: "lg", className: "md:w-auto" })}
             >
               Изучить экосистему <ChevronRight className="h-4 w-4" />
             </Link>
           </div>
 
-          <div className="mt-10 flex divide-x divide-border border-t border-border pt-6">
+          <div className="mt-10 hidden divide-x divide-border border-t border-border pt-6 min-[1400px]:flex">
             {metrics.map((metric) => (
               <div key={metric.label} className="flex-1 pl-6 first:pl-0">
                 <div className="text-xl font-bold text-text">{metric.value}</div>
@@ -300,7 +332,23 @@ function Hero() {
         <HeroVisual />
       </div>
 
-      <HeroVisualMobile />
+      <MobileHeroComposition />
+      <MobileHeroCarousel>
+        {[...leftCards, ...rightCards].map((card) => (
+          <FloatingProductCard
+            key={card.label}
+            icon={card.icon}
+            title={card.title}
+            label={card.label}
+            description={card.description}
+            iconClassName={card.iconClassName}
+            dotClassName={card.dotClassName}
+            href={card.href}
+            className="h-36 w-[76%] shrink-0 snap-start"
+          />
+        ))}
+      </MobileHeroCarousel>
+      <MobileSocialProof />
 
       <div className="mt-12 hidden justify-center min-[1400px]:flex">
         <div className="flex flex-col items-center gap-1 text-xs font-medium text-text-secondary">

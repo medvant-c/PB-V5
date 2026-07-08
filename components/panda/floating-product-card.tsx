@@ -16,6 +16,9 @@ interface FloatingProductCardProps {
   href?: string;
   style?: CSSProperties;
   className?: string;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+  "data-service-id"?: string;
 }
 
 function FloatingProductCard({
@@ -31,6 +34,9 @@ function FloatingProductCard({
   href,
   style,
   className,
+  onMouseEnter,
+  onMouseLeave,
+  "data-service-id": dataServiceId,
 }: FloatingProductCardProps) {
   const content = (
     <>
@@ -56,8 +62,12 @@ function FloatingProductCard({
   const isFloating = Boolean(floatDelay || floatDuration);
 
   const cardClassName = cn(
-    "flex h-27 w-52 items-start gap-3 rounded-2xl border border-border bg-surface/95 p-3 shadow-lg shadow-primary/5 backdrop-blur-sm",
-    href && "transition-colors hover:border-primary/30 hover:bg-surface",
+    "flex h-full w-full items-start gap-3 rounded-2xl border border-border bg-surface/95 p-3 shadow-lg shadow-primary/5 backdrop-blur-sm transition-[transform,box-shadow,background-color,border-color] duration-200 ease-out",
+    // Only takes effect for non-floating usages (e.g. the mobile carousel) —
+    // when `animate-float-card` is also present, its own `:hover` override in
+    // globals.css wins (see the comment there for why this utility can't).
+    "hover:-translate-y-1.5 hover:shadow-xl hover:shadow-primary/15",
+    href && "hover:border-primary/30 hover:bg-surface",
     isFloating && "animate-float-card",
   );
 
@@ -81,7 +91,13 @@ function FloatingProductCard({
   );
 
   return (
-    <div className={className} style={outerStyle}>
+    <div
+      className={className}
+      style={outerStyle}
+      data-service-id={dataServiceId}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
       {card}
     </div>
   );
