@@ -5,9 +5,9 @@ export const contactChannels: ContactChannel[] = [
   {
     icon: MessageCircle,
     label: "WhatsApp",
-    value: "+86 134 6080 8888",
+    value: "+86 136 3010 0663",
     note: "Быстрый ответ",
-    href: "https://wa.me/8613460808888",
+    href: "https://wa.me/8613630100663",
   },
   {
     icon: Send,
@@ -26,9 +26,9 @@ export const contactChannels: ContactChannel[] = [
   {
     icon: Phone,
     label: "Телефон",
-    value: "+7 (499) 110-88-88",
+    value: "+7 (993) 342-35-05",
     note: "Пн–Вс 09:00 – 21:00 (МСК)",
-    href: "tel:+74991108888",
+    href: "tel:+79933423505",
   },
   {
     icon: MessageCircle,

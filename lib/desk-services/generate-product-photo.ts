@@ -4,6 +4,7 @@ import path from "path";
 import OpenAI, { toFile } from "openai";
 import sharp from "sharp";
 import type { PhotoBrief } from "@/lib/desk-services/product-card-schema";
+import { verifySlideText } from "@/lib/desk-services/verify-slide-text";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -69,6 +70,35 @@ const DESIGN_SYSTEM = `DESIGN SYSTEM (apply identically on every slide — consi
 
 async function loadLogoBadge(): Promise<Buffer> {
   return readFile(path.join(process.cwd(), "public/images/logo-badge.png"));
+}
+
+// One geometric wireframe PER slide type (not a single generic one) — red
+// hatch = forbidden margin, green dashed box = safe content zone, white
+// square = where the real logo lands, plus slide-specific placeholder shapes
+// (card outlines, icon circles, text bars, a crossed-out box for "photo
+// goes here") roughly matching that slide's intended composition. Sent to
+// gpt-image-1 as a second reference image alongside the product photo.
+// Text-only margin instructions were proven unreliable across several live
+// tests (the model kept starting headlines right at the canvas edge); a
+// diffusion model follows a visual structural reference far more reliably
+// than a paragraph of coordinates — and a shape-accurate reference per slide
+// improved composition further than one generic margin-only box did.
+// Deliberately zero text baked into any of them — text in a reference image
+// risks gpt-image-1 reproducing it literally in the output. Index maps 1:1
+// to the fixed slide order: 0 Hero, 1 Advantages, 2 Application+package,
+// 3 Specs+trust, 4 Company (see SYSTEM_PROMPT in the route handler and
+// COMPANY_SLIDE_BRIEF below, which is always appended last).
+const LAYOUT_GUIDE_FILES = [
+  "product-card-layout-guide-hero.png",
+  "product-card-layout-guide-advantages.png",
+  "product-card-layout-guide-application.png",
+  "product-card-layout-guide-specs.png",
+  "product-card-layout-guide-company.png",
+];
+
+async function loadLayoutGuide(index: number): Promise<Buffer> {
+  const file = LAYOUT_GUIDE_FILES[index] ?? LAYOUT_GUIDE_FILES[0];
+  return readFile(path.join(process.cwd(), "public/images", file));
 }
 
 // Prompt instructions alone were proven unreliable across three separate
@@ -139,16 +169,29 @@ async function generateProductPhoto(
   brief: PhotoBrief,
   index: number,
   retrying = false,
+  textRetrying = false,
 ): Promise<Buffer | null> {
   const prompt = `Design one slide of a premium 5-slide product presentation for a marketplace listing (in
 the style of a senior product designer for Wildberries/Ozon/Amazon premium brands).
 
 ${DESIGN_SYSTEM}
 
-Product (from the reference image): ${productTitle}. Keep its real appearance — shape, color, material,
-proportions, and any text/numbers/branding printed on it — exactly as shown; only change the scene/
-background/composition/text around it. Do not invent a model number or any text on the product that isn't
-visible in the reference photo.
+You are given TWO reference images, in this order:
+1. The product photo — keep its real appearance: shape, color, material, proportions, and any text/numbers/
+   branding printed on it, exactly as shown. Do not invent a model number or any text on the product that
+   isn't visible in this photo.
+2. A plain layout wireframe for THIS specific slide — this is a structural/proportion guide, NOT a style
+   reference. Ignore its flat blue-grey color and plain shapes entirely; do not reproduce that look. It marks
+   zones: the red hatched border (top/left/right/bottom) is the reserved safe margin — your output must show
+   only plain background there, nothing else, matching the STRICT SAFE-MARGIN RULE above. The white square
+   marks where a logo is added automatically afterward — leave that exact area empty background too. Inside
+   the green dashed area, the wireframe's shapes tell you roughly where each real element of THIS slide's
+   composition belongs: solid bars mark headline/label/number text lines, outlined rounded rectangles mark
+   glass info-card blocks, circles mark icon badges, and a large dashed box with a crossed-out X inside marks
+   where the product photo itself should be placed and roughly how large. Follow this rough placement and
+   proportion, filling each marked shape with the real, correctly designed version of what it represents.
+
+Product: ${productTitle}.
 
 THIS SPECIFIC SLIDE:
 Theme: ${brief.purpose}.
@@ -160,10 +203,12 @@ Extra notes for this slide: ${brief.notes}.`;
   try {
     const productExtension = productPhotoMimeType.split("/")[1] ?? "png";
     const productFile = await toFile(productPhotoBuffer, `product.${productExtension}`, { type: productPhotoMimeType });
+    const layoutGuideBuffer = await loadLayoutGuide(index);
+    const layoutGuideFile = await toFile(layoutGuideBuffer, "layout-guide.png", { type: "image/png" });
 
     const response = await openai.images.edit({
       model: "gpt-image-1",
-      image: [productFile],
+      image: [productFile, layoutGuideFile],
       prompt,
       size: GENERATION_SIZE,
       quality: "high",
@@ -171,12 +216,38 @@ Extra notes for this slide: ${brief.notes}.`;
     const base64 = response.data?.[0]?.b64_json;
     if (!base64) return null;
 
-    return await compositeLogoAndCrop(base64);
+    const composited = await compositeLogoAndCrop(base64);
+
+    // One regeneration attempt if the rendered Cyrillic text doesn't match
+    // what was asked for — gpt-image-1 reliably garbles a word or two on
+    // some fraction of slides, and a second roll of the dice is cheap
+    // relative to shipping a typo straight into a real marketplace listing.
+    // Only retries once (textRetrying guards it) — if the second attempt is
+    // still wrong, ship it rather than loop indefinitely on a slide the
+    // model can't seem to get right.
+    if (!textRetrying) {
+      const check = await verifySlideText(composited, brief.textOverlay);
+      if (check && !check.matches) {
+        console.error(`Desk generate-product-card: slide ${index + 1} text mismatch, regenerating once`, check.issues);
+        const retried = await generateProductPhoto(
+          productPhotoBuffer,
+          productPhotoMimeType,
+          productTitle,
+          brief,
+          index,
+          retrying,
+          true,
+        );
+        if (retried) return retried;
+      }
+    }
+
+    return composited;
   } catch (error) {
     if (isRateLimitError(error) && !retrying) {
       console.error(`Desk generate-product-card: slide ${index + 1} rate-limited, retrying in 15s`);
       await sleep(15_000);
-      return generateProductPhoto(productPhotoBuffer, productPhotoMimeType, productTitle, brief, index, true);
+      return generateProductPhoto(productPhotoBuffer, productPhotoMimeType, productTitle, brief, index, true, textRetrying);
     }
     console.error(`Desk generate-product-card: slide ${index + 1} generation failed`, error);
     return null;
