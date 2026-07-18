@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Calculator } from "lucide-react";
+import Link from "next/link";
+import { Calculator, Send } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -51,7 +52,12 @@ function DeliveryCalculator() {
         <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
           <Calculator className="h-5 w-5" />
         </span>
-        <div className="text-sm font-bold text-text">Узнайте стоимость доставки за секунды</div>
+        <div>
+          <div className="text-sm font-bold text-text">Оцените примерную стоимость доставки</div>
+          <div className="text-xs text-text-secondary">
+            Быстрая прикидка по весу и объёму — точная цена зависит от маршрута, сезона и таможни
+          </div>
+        </div>
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -103,18 +109,32 @@ function DeliveryCalculator() {
       </button>
 
       {result && (
-        <div className="mt-6 grid grid-cols-1 gap-4 rounded-2xl bg-black/3 p-5 sm:grid-cols-3">
-          <div>
-            <div className="text-xs text-text-secondary">Стоимость</div>
-            <div className="mt-1 text-lg font-bold text-text">от {result.cost.toLocaleString("ru-RU")} ₽</div>
+        <div className="mt-6 rounded-2xl bg-black/3 p-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div>
+              <div className="text-xs text-text-secondary">Ориентировочная стоимость</div>
+              <div className="mt-1 text-lg font-bold text-text">от {result.cost.toLocaleString("ru-RU")} ₽</div>
+            </div>
+            <div>
+              <div className="text-xs text-text-secondary">Срок доставки</div>
+              <div className="mt-1 text-lg font-bold text-text">{result.days}</div>
+            </div>
+            <div>
+              <div className="text-xs text-text-secondary">Рекомендуемый способ</div>
+              <div className="mt-1 text-lg font-bold text-text">{result.method}</div>
+            </div>
           </div>
-          <div>
-            <div className="text-xs text-text-secondary">Срок доставки</div>
-            <div className="mt-1 text-lg font-bold text-text">{result.days}</div>
-          </div>
-          <div>
-            <div className="text-xs text-text-secondary">Рекомендуемый способ</div>
-            <div className="mt-1 text-lg font-bold text-text">{result.method}</div>
+
+          <div className="mt-4 flex flex-col items-start gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-text-secondary">
+              Прикидка для быстрой ориентации — не финальное предложение. Точную цену считаем под ваш груз и маршрут.
+            </p>
+            <Link
+              href="/contacts"
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "shrink-0")}
+            >
+              Получить точный расчёт <Send className="h-4 w-4" />
+            </Link>
           </div>
         </div>
       )}

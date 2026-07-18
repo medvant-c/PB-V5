@@ -10,6 +10,8 @@ export const scenarios: Scenario[] = [
     accent: "green",
     features: ["Поиск товара", "Проверка фабрики", "Первая поставка", "Доставка под ключ"],
     href: "/start",
+    audience: "Для тех, кто ещё не работал с Китаем",
+    related: ["05", "04"],
   },
   {
     number: "02",
@@ -19,6 +21,8 @@ export const scenarios: Scenario[] = [
     accent: "blue",
     features: ["Аналитика и стратегия", "Оптимизация закупок", "Снижение издержек", "Рост прибыли"],
     href: "/business",
+    audience: "Для действующих продавцов, готовых расти",
+    related: ["04", "06"],
   },
   {
     number: "03",
@@ -28,6 +32,8 @@ export const scenarios: Scenario[] = [
     accent: "purple",
     features: ["Разработка продукта", "Поиск и проверка фабрик", "Контроль производства", "Брендирование и упаковка"],
     href: "/factory",
+    audience: "Для брендов, готовых производить своё",
+    related: ["05", "04"],
   },
   {
     number: "04",
@@ -37,6 +43,8 @@ export const scenarios: Scenario[] = [
     accent: "orange",
     features: ["Приёмка и проверка", "Хранение товаров", "Упаковка и стикеровка", "Отправка по миру"],
     href: "/fulfillment",
+    audience: "Для продавцов на маркетплейсах и в рознице",
+    related: ["05", "01"],
   },
   {
     number: "05",
@@ -46,6 +54,8 @@ export const scenarios: Scenario[] = [
     accent: "cyan",
     features: ["Морские перевозки", "Авиа доставка", "Авто доставка", "Таможенное оформление"],
     href: "/logistics",
+    audience: "Для тех, кому нужно перевезти груз",
+    related: ["04", "03"],
   },
   {
     number: "06",
@@ -55,5 +65,7 @@ export const scenarios: Scenario[] = [
     accent: "indigo",
     features: ["AI-аналитика", "Автоматизация", "AI-помощник", "Интеграции и API"],
     href: "/ai",
+    audience: "Для тех, кто хочет управлять процессами через AI",
+    related: ["02", "04"],
   },
 ];

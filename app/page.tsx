@@ -1,5 +1,6 @@
 import { Hero } from "@/sections/hero/hero";
 import { HomeScenarios } from "@/sections/choose-path/home-scenarios";
+import { HomeAiChat } from "@/sections/home/home-ai-chat";
 import { HomeMobilePreviews } from "@/sections/home/home-mobile-previews";
 import { HowItWorks } from "@/sections/how-it-works/how-it-works";
 import { StatsRow } from "@/components/common/stats-row";
@@ -11,6 +12,7 @@ export default function Home() {
       <Hero />
       <StatsRow stats={homeStats} className="hidden pb-4 md:grid" />
       <HomeScenarios />
+      <HomeAiChat />
       <HomeMobilePreviews />
       <HowItWorks />
     </>

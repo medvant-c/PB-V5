@@ -5,7 +5,7 @@ import { Reveal } from "@/components/common/reveal";
 import { Eyebrow } from "@/components/ui/eyebrow";
 
 const milestones = [
-  { year: "2026", title: "Основание Panda Bridge" },
+  { title: "Основание Panda Bridge" },
   { title: "Создание экосистемы" },
   { title: "Запуск первых клиентов" },
   { title: "Открытие офиса в Китае" },
@@ -46,8 +46,7 @@ function OurPathTimeline() {
           {milestones.map((item) => (
             <motion.div key={item.title} variants={itemVariants} className="flex flex-1 flex-col items-center text-center">
               <span className="z-10 h-5 w-5 shrink-0 rounded-full border-4 border-bg bg-primary" />
-              {item.year && <span className="mt-3 text-xs font-bold text-primary">{item.year}</span>}
-              <span className="mt-1 max-w-28 text-sm font-medium text-text">{item.title}</span>
+              <span className="mt-3 text-sm font-medium text-text">{item.title}</span>
             </motion.div>
           ))}
         </motion.div>
@@ -71,7 +70,6 @@ function OurPathTimeline() {
             {milestones.map((item) => (
               <motion.div key={item.title} variants={itemVariants} className="relative">
                 <span className="absolute top-1 -left-8 h-5 w-5 rounded-full border-4 border-bg bg-primary" />
-                {item.year && <span className="block text-xs font-bold text-primary">{item.year}</span>}
                 <span className="text-sm font-medium text-text">{item.title}</span>
               </motion.div>
             ))}

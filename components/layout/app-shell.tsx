@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Menu, Send, X } from "lucide-react";
+import { Menu, Send, UserRound, X } from "lucide-react";
 import { MotionConfig } from "framer-motion";
 import Link from "next/link";
 import { Logo } from "@/components/common/logo";
-import { LanguageProvider, useLanguage } from "@/components/common/language-context";
 import { BackToHomeButton } from "@/components/layout/back-to-home-button";
 import { SidebarContent } from "@/components/layout/sidebar-content";
 import { SiteSearch } from "@/components/layout/site-search";
@@ -13,26 +12,11 @@ import { buttonVariants } from "@/components/ui/button";
 import { SiteFooter } from "@/sections/footer/site-footer";
 import { cn } from "@/lib/utils";
 
-function HeaderLanguageToggle() {
-  const { language, toggleLanguage } = useLanguage();
-
-  return (
-    <button
-      type="button"
-      aria-label="Переключить язык"
-      onClick={toggleLanguage}
-      className="flex h-9 items-center gap-1 rounded-lg px-2 text-sm font-semibold text-text-secondary hover:bg-black/3"
-    >
-      {language}
-    </button>
-  );
-}
-
 function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <LanguageProvider>
+    <>
       {/* Every framer-motion animation site-wide automatically collapses to an
           instant, transform-free state when the user has reduced motion on —
           no per-animation fallback needed. */}
@@ -82,8 +66,14 @@ function AppShell({ children }: { children: React.ReactNode }) {
 
             <div className="flex items-center gap-2">
               <SiteSearch />
+              <Link
+                href="/account"
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
+              >
+                <UserRound className="h-4 w-4" />
+                <span className="hidden sm:inline">Личный кабинет</span>
+              </Link>
               <div className="h-5 w-px bg-border" />
-              <HeaderLanguageToggle />
               <Link
                 href="/contacts"
                 className={cn(buttonVariants({ variant: "primary", size: "sm" }), "hidden sm:inline-flex")}
@@ -100,7 +90,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
         <BackToHomeButton />
       </div>
       </MotionConfig>
-    </LanguageProvider>
+    </>
   );
 }
 

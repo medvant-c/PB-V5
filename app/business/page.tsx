@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Briefcase, Send } from "lucide-react";
+import { ArrowRight, Briefcase, Send } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
 import { PandaCtaBanner } from "@/components/panda/panda-cta-banner";
 import { SectionHeading } from "@/components/product/section-heading";
@@ -8,6 +8,8 @@ import { FeatureChecklist } from "@/components/product/feature-checklist";
 import { DetailList } from "@/components/product/detail-list";
 import { EcosystemFlow } from "@/components/product/ecosystem-flow";
 import { BusinessDashboard } from "@/components/product/widgets/business-dashboard";
+import { PricingTable } from "@/components/product/pricing-table";
+import { pricing } from "@/data/pricing";
 import { Card } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 
@@ -110,17 +112,6 @@ export default function BusinessPage() {
 
       <section className="px-4 sm:px-6">
         <div className="mx-auto max-w-6xl">
-          <Card className="p-6 sm:p-8">
-            <SectionHeading eyebrow="Миссия" title="Наша миссия" />
-            <p className="mt-4 max-w-2xl text-sm text-text-secondary">
-              Помочь продавцам перестать работать «вслепую» и построить настоящий международный бизнес.
-            </p>
-          </Card>
-        </div>
-      </section>
-
-      <section className="px-4 sm:px-6">
-        <div className="mx-auto max-w-6xl">
           <SectionHeading eyebrow="Для кого" title="Panda Business подходит для" />
           <FeatureChecklist items={audience} className="mt-6" />
         </div>
@@ -189,9 +180,33 @@ export default function BusinessPage() {
 
       <section className="px-4 sm:px-6">
         <div className="mx-auto max-w-6xl">
+          <SectionHeading
+            eyebrow="Стоимость"
+            title="Сколько стоят услуги Panda Business"
+            description="Базовые цены на услуги — ориентир для расчёта бюджета. Точная стоимость зависит от объёма и сложности задачи."
+          />
+          <div className="mt-6">
+            <PricingTable categories={pricing.find((item) => item.id === "business")!.categories} />
+          </div>
+          <Link
+            href="/pricing"
+            className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-primary transition-all hover:gap-2.5"
+          >
+            Весь прайс-лист Panda Bridge <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </section>
+
+      <section className="px-4 sm:px-6">
+        <div className="mx-auto max-w-6xl">
           <PandaCtaBanner
             title="Готовы масштабировать бизнес?"
             description="Расскажите о своём текущем обороте и целях — мы проведём аудит и предложим план роста."
+            actions={
+              <Link href="/contacts" className={buttonVariants({ variant: "primary" })}>
+                Обсудить масштабирование <Send className="h-4 w-4" />
+              </Link>
+            }
           />
         </div>
       </section>

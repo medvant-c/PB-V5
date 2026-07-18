@@ -86,8 +86,8 @@ function EcosystemDesktop() {
   const [activeId, setActiveId] = useState<string | null>(null);
 
   return (
-    <div className="hidden overflow-x-auto lg:block">
-      <div className="flex w-max items-start justify-center gap-1 px-1">
+    <div className="hidden overflow-x-auto py-3 lg:block">
+      <div className="mx-auto flex w-max items-start gap-1 px-1">
         {ecosystemNodes.map((node, i) => (
           <div key={node.id} className="flex items-start">
             <div className="w-24 shrink-0">

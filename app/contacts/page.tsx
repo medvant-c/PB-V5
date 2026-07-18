@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import { PageHeader } from "@/components/common/page-header";
-import { Card } from "@/components/ui/card";
+import { PandaAiChat } from "@/components/panda/panda-ai-chat";
 import { ContactChannelCard } from "@/sections/contacts/contact-channel-card";
 import { ContactForm } from "@/sections/contacts/contact-form";
 import { FinalCta } from "@/sections/contacts/final-cta";
@@ -30,17 +29,8 @@ export default function ContactsPage() {
       </section>
 
       <section className="px-4 sm:px-6" id="contact-form">
-        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-6 lg:grid-cols-2">
-          <Card className="flex items-center justify-center p-6">
-            <Image
-              src="/images/panda2.png"
-              alt="Panda Bridge — команда и маскот компании"
-              width={1024}
-              height={1536}
-              loading="lazy"
-              className="h-auto w-full max-w-xs object-contain"
-            />
-          </Card>
+        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start">
+          <PandaAiChat />
           <ContactForm />
         </div>
       </section>

@@ -29,6 +29,8 @@ export interface Scenario {
   accent: "green" | "blue" | "purple" | "orange" | "cyan" | "indigo";
   features: string[];
   href: string;
+  audience: string;
+  related: string[];
 }
 
 export interface CaseMetric {
@@ -76,4 +78,32 @@ export interface ContactChannel {
   value: string;
   note: string;
   href?: string;
+}
+
+export interface PriceItem {
+  service: string;
+  price: string;
+  result: string;
+  /** Optional downloadable sample report shown in the tooltip, e.g. "/documents/analiz-nishi-primer.pdf". */
+  sampleFile?: string;
+  /** Human-readable filename the browser saves the sample as, e.g. "Анализ ниши — пример отчёта.pdf". */
+  sampleFileName?: string;
+}
+
+export interface PriceCategory {
+  title: string;
+  items: PriceItem[];
+}
+
+export interface ProductPricing {
+  id: string;
+  categories: PriceCategory[];
+}
+
+export interface DeskTemplate {
+  category: string;
+  number: string;
+  title: string;
+  when: string;
+  body: string;
 }

@@ -1,0 +1,159 @@
+// Desk ("Рабочий стол") database — file metadata for the internal manager
+// tool at /desk. SQLite is a deliberate starting point (single-server,
+// zero external dependency); if the site later moves to a hosted DB, swap
+// the adapter in lib/prisma.ts and repoint DESK_STORAGE_DRIVER in
+// lib/storage.ts — nothing else in the app needs to change.
+//
+// Prisma 7: the connection URL lives in prisma.config.ts (CLI/migrations)
+// and is passed to a driver adapter at runtime (lib/prisma.ts), not here.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// Which tab in the desk a file belongs to.
+enum DeskFileTab {
+  services
+  training
+  templates
+  calculators
+  orders
+}
+
+model DeskFile {
+  id           String      @id @default(cuid())
+  tab          DeskFileTab
+  // Which card/section within the tab this file is attached to — e.g. a
+  // service slug, a training module id, a calculator/deal reference, or
+  // (for tab: orders) an Order id.
+  // Nullable: templates-tab files aren't attached to a sub-item.
+  relatedId    String?
+  storageKey   String // key/path used by lib/storage.ts to fetch the blob
+  originalName String
+  mimeType     String
+  size         Int
+  uploadedAt   DateTime    @default(now())
+
+  @@index([tab, relatedId])
+}
+
+// Client portal ("Личный кабинет") — clients log in to see their own orders,
+// status history, and documents. Clients/orders are created and managed by
+// staff through /desk; clients only ever read their own data plus log in /
+// set their password. See lib/client-auth.ts for the session mechanics.
+
+enum OrderDirection {
+  start
+  business
+  factory
+  logistics
+  fulfillment
+  ai
+  academy
+}
+
+enum OrderStatus {
+  new
+  in_progress
+  shipping
+  done
+  cancelled
+}
+
+model Client {
+  id           String   @id @default(cuid())
+  // Short human-friendly number shown in the desk UI ("Клиент №N") — the
+  // cuid `id` above stays the real primary key/foreign key everywhere else.
+  // Assigned in app code (lib/display-ids.ts) as max(displayId)+1, since
+  // SQLite only supports autoincrement on the table's own primary key.
+  displayId    Int      @unique
+  email        String   @unique
+  name         String
+  phone        String?
+  country      String?
+  city         String?
+  // Null until the client opens their activation link and sets a password —
+  // an account can exist (created by staff) before it's ever activated.
+  passwordHash String?
+  // Deactivated clients can no longer log into /account (checked in
+  // app/api/account-login/route.ts) — a soft block, not a delete, so their
+  // orders/history stay intact.
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  orders       Order[]
+}
+
+// Catalog of sellable services with prices, picked from a dropdown when a
+// manager adds an order to a client (instead of typing a free-text title).
+// Seeded once from data/pricing.ts (prisma/seed-service-catalog.ts) so the
+// dropdown starts populated with the site's real service list; managers can
+// add missing services/prices on the fly from the desk UI afterwards.
+model ServiceCatalogItem {
+  id        String         @id @default(cuid())
+  // Short unique SKU like "ST-014" (direction prefix + sequence within that
+  // direction) — assigned in app code (lib/display-ids.ts), shown next to
+  // the service name everywhere it's picked or listed.
+  code      String         @unique
+  direction OrderDirection
+  name      String
+  price     String
+  createdAt DateTime       @default(now())
+  orders    Order[]
+
+  @@index([direction])
+}
+
+model Order {
+  id        String             @id @default(cuid())
+  clientId  String
+  client    Client             @relation(fields: [clientId], references: [id])
+  direction OrderDirection
+  title     String
+  // Snapshot of the catalog price at the time the order was created — the
+  // catalog price may change later, but a client's own order shouldn't.
+  price               String?
+  serviceCatalogItemId String?
+  serviceCatalogItem   ServiceCatalogItem? @relation(fields: [serviceCatalogItemId], references: [id])
+  status    OrderStatus        @default(new)
+  // False only for orders a client placed themselves via the /account cart
+  // checkout — lets the desk UI badge the client/order until a manager
+  // actually looks at it. Orders a manager creates by hand are inherently
+  // already "seen", so this defaults to true.
+  seenByManager Boolean        @default(true)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  events    OrderStatusEvent[]
+
+  @@index([clientId])
+}
+
+// History log of status changes for an order — written alongside every
+// Order.status update (same transaction) so the two never drift apart.
+model OrderStatusEvent {
+  id        String      @id @default(cuid())
+  orderId   String
+  order     Order       @relation(fields: [orderId], references: [id])
+  status    OrderStatus
+  note      String?
+  createdAt DateTime    @default(now())
+
+  @@index([orderId])
+}
+
+// One row per "Карточки товара" generation — lets the desk UI show a
+// history of past exports (date, product, archive name) and re-download
+// the result without paying for a fresh OpenAI generation again.
+model ProductCardExport {
+  id           String   @id @default(cuid())
+  productTitle String
+  fileName     String
+  storageKey   String
+  mimeType     String
+  size         Int
+  createdAt    DateTime @default(now())
+}

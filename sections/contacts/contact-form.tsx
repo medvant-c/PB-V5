@@ -1,12 +1,51 @@
 "use client";
 
-import { useState } from "react";
-import { Send } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { useActionState, useEffect } from "react";
+import { useFormStatus } from "react-dom";
+import { Loader2, Send } from "lucide-react";
+import { toast } from "sonner";
+import { submitContactForm } from "@/app/actions/contact";
+import { contactFormInitialState } from "@/app/actions/contact-types";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+
+function FieldError({ messages }: { messages?: string[] }) {
+  if (!messages?.length) return null;
+  return (
+    <p className="mt-1 text-xs text-error" role="alert">
+      {messages[0]}
+    </p>
+  );
+}
+
+function SubmitButton() {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" variant="primary" className="w-full" disabled={pending}>
+      {pending ? (
+        <>
+          Отправляем… <Loader2 className="h-4 w-4 animate-spin" />
+        </>
+      ) : (
+        <>
+          Отправить сообщение <Send className="h-4 w-4" />
+        </>
+      )}
+    </Button>
+  );
+}
 
 function ContactForm() {
-  const [submitted, setSubmitted] = useState(false);
+  const [state, formAction] = useActionState(submitContactForm, contactFormInitialState);
+
+  useEffect(() => {
+    if (state.status === "error" && !state.errors) {
+      toast.error(state.message);
+    }
+  }, [state]);
 
   return (
     <Card className="p-6">
@@ -15,72 +54,74 @@ function ContactForm() {
         Расскажите о задаче — мы предложим лучшее решение
       </p>
 
-      {submitted ? (
-        <div className="mt-6 rounded-xl bg-success/10 p-4 text-sm font-medium text-success">
-          Спасибо! Мы свяжемся с вами в ближайшее время.
+      {state.status === "success" ? (
+        <div className="mt-6 rounded-xl bg-success/10 p-4 text-sm font-medium text-success" role="status">
+          {state.message}
         </div>
       ) : (
+        // Keyed on the returned values so a failed submission remounts the
+        // inputs with the freshly echoed values as defaultValue — React
+        // doesn't re-apply defaultValue to an already-mounted uncontrolled
+        // input on its own.
         <form
+          key={JSON.stringify(state.values ?? {})}
           className="mt-6 space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setSubmitted(true);
-          }}
+          action={formAction}
         >
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label htmlFor="name" className="text-sm font-medium text-text">
-                Ваше имя
-              </label>
-              <input
+              <Label htmlFor="name">Ваше имя</Label>
+              <Input
                 id="name"
+                name="name"
                 type="text"
                 required
                 placeholder="Введите ваше имя"
-                className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+                defaultValue={state.values?.name}
+                className="mt-1.5"
               />
+              <FieldError messages={state.errors?.name} />
             </div>
             <div>
-              <label htmlFor="company" className="text-sm font-medium text-text">
-                Компания
-              </label>
-              <input
+              <Label htmlFor="company">Компания</Label>
+              <Input
                 id="company"
+                name="company"
                 type="text"
                 placeholder="Название компании"
-                className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+                defaultValue={state.values?.company}
+                className="mt-1.5"
               />
             </div>
           </div>
 
           <div>
-            <label htmlFor="contact" className="text-sm font-medium text-text">
-              Email или телефон
-            </label>
-            <input
+            <Label htmlFor="contact">Email или телефон</Label>
+            <Input
               id="contact"
+              name="contact"
               type="text"
               required
               placeholder="Введите email или телефон"
-              className="mt-1.5 w-full rounded-xl border border-border bg-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+              defaultValue={state.values?.contact}
+              className="mt-1.5"
             />
+            <FieldError messages={state.errors?.contact} />
           </div>
 
           <div>
-            <label htmlFor="message" className="text-sm font-medium text-text">
-              Расскажите о вашем проекте
-            </label>
-            <textarea
+            <Label htmlFor="message">Расскажите о вашем проекте</Label>
+            <Textarea
               id="message"
+              name="message"
               rows={4}
               placeholder="Опишите вашу задачу или проект"
-              className="mt-1.5 w-full resize-none rounded-xl border border-border bg-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+              defaultValue={state.values?.message}
+              className="mt-1.5"
             />
           </div>
 
-          <Button type="submit" variant="primary" className="w-full">
-            Отправить сообщение <Send className="h-4 w-4" />
-          </Button>
+          <SubmitButton />
 
           <p className="text-center text-xs text-text-secondary">
             Нажимая кнопку, вы соглашаетесь с политикой конфиденциальности

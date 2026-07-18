@@ -26,6 +26,100 @@
   --color-error: var(--color-error);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  /* shadcn/ui expects this standard token set (foreground/ring/input/
+     destructive/popover/...). Aliased to the project's own palette instead
+     of shipping a second, parallel color system — every future
+     `npx shadcn add` component picks these up automatically. */
+  --color-foreground: var(--color-text);
+  --color-muted-foreground: var(--color-text-secondary);
+  --color-ring: var(--color-primary);
+  --color-input: var(--color-border);
+  --color-destructive: var(--color-error);
+  --color-destructive-foreground: #ffffff;
+  --color-primary-foreground: #ffffff;
+  --color-secondary-foreground: #ffffff;
+  --color-popover: var(--color-surface);
+  --color-popover-foreground: var(--color-text);
+
+  --breakpoint-mobile: 375px;
+  --breakpoint-tablet: 768px;
+  --breakpoint-laptop: 1024px;
+  --breakpoint-desktop: 1440px;
+  --breakpoint-wide: 1920px;
+
+  /* Named type scale (formerly styles/typography.ts). Font-size + paired
+     line-height only — Tailwind pairs those two under one --text-* token,
+     but weight/letter-spacing are separate utilities (font-bold, tracking-tight)
+     applied alongside, same as any other Tailwind text style. Key names are
+     deliberately NOT t-shirt sizes (sm/md/lg/xl/2xl/3xl/...) — Tailwind v4
+     resolves sizing utilities (max-w-*, w-*, h-*, text-*) against shared-key
+     theme namespaces, so reusing those reserved names silently overrides
+     Tailwind's own scale (confirmed the hard way: --spacing-6xl broke every
+     max-w-6xl on the site until this was caught in verification).  */
+  --text-display: 64px;
+  --text-display--line-height: 72px;
+  --text-h1: 48px;
+  --text-h1--line-height: 56px;
+  --text-h2: 36px;
+  --text-h2--line-height: 44px;
+  --text-h3: 28px;
+  --text-h3--line-height: 36px;
+  --text-body-lg: 20px;
+  --text-body-lg--line-height: 30px;
+  --text-small: 14px;
+  --text-small--line-height: 20px;
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+}
+
+/* Glassmorphism panel (formerly styles/glass.ts) — used ad hoc via inline
+   utility classes on the /about page; this makes the same look reusable
+   as a single class instead of retyping the four properties each time. */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 8px 32px 0 rgba(17, 24, 39, 0.1);
+}
+
+/* Minimal styling for react-markdown output inside PandaAiChat — the project
+   doesn't pull in @tailwindcss/typography for one component, so the handful
+   of elements the model actually produces (paragraphs, lists, bold, headings)
+   are styled directly instead. */
+.prose-chat > * + * {
+  margin-top: 0.6em;
+}
+.prose-chat ul,
+.prose-chat ol {
+  padding-left: 1.25em;
+}
+.prose-chat ul {
+  list-style: disc;
+}
+.prose-chat ol {
+  list-style: decimal;
+}
+.prose-chat li + li {
+  margin-top: 0.25em;
+}
+.prose-chat strong {
+  font-weight: 700;
+}
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  font-weight: 700;
+}
+.prose-chat a {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+.prose-chat code {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 0.25em;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
 }
 
 body {
@@ -57,16 +151,6 @@ body {
 .animate-float-card:hover {
   animation: none;
   transform: translateY(-6px);
-}
-
-@keyframes connector-flow {
-  to {
-    stroke-dashoffset: -20;
-  }
-}
-
-.animate-connector-flow {
-  animation: connector-flow 0.6s linear infinite;
 }
 
 @keyframes panda-sway {

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppShell } from "@/components/layout/app-shell";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -14,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Panda Bridge OS — Операционная система для бизнеса с Китаем",
+  title: "Panda Bridge — экосистема для бизнеса с Китаем",
   description:
     "Panda Bridge объединяет запуск бизнеса, производство, склад, логистику, обучение и AI в одну экосистему для работы с Китаем.",
 };
@@ -30,6 +31,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <AppShell>{children}</AppShell>
+        <Toaster position="bottom-right" />
       </body>
     </html>
   );

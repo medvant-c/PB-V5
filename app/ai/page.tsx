@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Bot, Send } from "lucide-react";
+import { ArrowRight, Bot, Send } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
 import { PandaCtaBanner } from "@/components/panda/panda-cta-banner";
 import { SectionHeading } from "@/components/product/section-heading";
@@ -9,8 +9,10 @@ import { DetailList } from "@/components/product/detail-list";
 import { EcosystemFlow } from "@/components/product/ecosystem-flow";
 import { AiChatDemo } from "@/components/product/widgets/ai-chat-demo";
 import { PandaAiChat } from "@/components/panda/panda-ai-chat";
+import { PricingTable } from "@/components/product/pricing-table";
 import { Card } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
+import { pricing } from "@/data/pricing";
 
 export const metadata: Metadata = {
   title: "Panda AI — Panda Bridge",
@@ -229,7 +231,7 @@ export default function AiPage() {
           <SectionHeading
             eyebrow="Уникальные преимущества"
             title="Чем Panda AI отличается от обычных чат-ботов"
-            description="В отличие от универсальных ИИ, Panda AI работает с контекстом бизнеса пользователя — это операционная система для принятия решений, а не просто собеседник."
+            description="В отличие от универсальных ИИ, Panda AI работает с контекстом бизнеса пользователя — помогает принимать решения, а не просто отвечает на вопросы."
           />
           <FeatureChecklist items={advantages} className="mt-6" />
         </div>
@@ -257,9 +259,33 @@ export default function AiPage() {
 
       <section className="px-4 sm:px-6">
         <div className="mx-auto max-w-6xl">
+          <SectionHeading
+            eyebrow="Стоимость"
+            title="Сколько стоят AI-услуги Panda"
+            description="Базовые цены на услуги — ориентир для расчёта бюджета. Точная стоимость зависит от объёма и сложности задачи."
+          />
+          <div className="mt-6">
+            <PricingTable categories={pricing.find((item) => item.id === "ai")!.categories} />
+          </div>
+          <Link
+            href="/pricing"
+            className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-primary transition-all hover:gap-2.5"
+          >
+            Весь прайс-лист Panda Bridge <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </section>
+
+      <section className="px-4 sm:px-6">
+        <div className="mx-auto max-w-6xl">
           <PandaCtaBanner
             title="Хотите вести бизнес через диалог с AI?"
             description="Расскажите о своей задаче — покажем, как Panda AI применяется именно к вашему бизнесу."
+            actions={
+              <Link href="/contacts" className={buttonVariants({ variant: "primary" })}>
+                Обсудить AI для бизнеса <Send className="h-4 w-4" />
+              </Link>
+            }
           />
         </div>
       </section>

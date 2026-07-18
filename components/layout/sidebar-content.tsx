@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { Send } from "lucide-react";
 import { Logo } from "@/components/common/logo";
-import { LanguageSwitcher } from "@/components/common/language-switcher";
 import { NavLink } from "@/components/layout/nav-link";
 import { buttonVariants } from "@/components/ui/button";
-import { directionsNav, mainNav, secondaryNav } from "@/data/navigation";
+import { directionsNavGroups, mainNav, secondaryNav } from "@/data/navigation";
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
@@ -20,8 +19,15 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
         <div className="my-2 border-t border-border" />
 
-        {directionsNav.map((item) => (
-          <NavLink key={item.href} item={item} onNavigate={onNavigate} />
+        {directionsNavGroups.map((group) => (
+          <div key={group.label}>
+            <div className="px-3 pt-3 pb-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+              {group.label}
+            </div>
+            {group.items.map((item) => (
+              <NavLink key={item.href} item={item} onNavigate={onNavigate} />
+            ))}
+          </div>
         ))}
 
         <div className="my-2 border-t border-border" />
@@ -31,7 +37,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         ))}
       </nav>
 
-      <div className="space-y-3 border-t border-border px-4 py-4">
+      <div className="border-t border-border px-4 py-4">
         <Link
           href="/contacts"
           onClick={onNavigate}
@@ -39,7 +45,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         >
           Начать работу <Send className="h-4 w-4" />
         </Link>
-        <LanguageSwitcher />
       </div>
     </div>
   );

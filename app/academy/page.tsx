@@ -1,14 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { GraduationCap, Send } from "lucide-react";
+import { ArrowRight, GraduationCap, Send } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
 import { PandaCtaBanner } from "@/components/panda/panda-cta-banner";
 import { SectionHeading } from "@/components/product/section-heading";
 import { FeatureChecklist } from "@/components/product/feature-checklist";
 import { EcosystemFlow } from "@/components/product/ecosystem-flow";
 import { AcademyProgress } from "@/components/product/widgets/academy-progress";
+import { PricingTable } from "@/components/product/pricing-table";
 import { Card } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
+import { pricing } from "@/data/pricing";
 
 export const metadata: Metadata = {
   title: "Panda Academy — Panda Bridge",
@@ -168,6 +170,25 @@ export default function AcademyPage() {
             description="После обучения ученик переходит в другие сервисы экосистемы."
           />
           <FeatureChecklist items={nextSteps} className="mt-6" />
+        </div>
+      </section>
+
+      <section className="px-4 sm:px-6">
+        <div className="mx-auto max-w-6xl">
+          <SectionHeading
+            eyebrow="Стоимость"
+            title="Сколько стоит обучение в Panda Academy"
+            description="Базовые цены на курсы и сопровождение — точная стоимость программы под команду уточняется индивидуально."
+          />
+          <div className="mt-6">
+            <PricingTable categories={pricing.find((item) => item.id === "academy")!.categories} />
+          </div>
+          <Link
+            href="/pricing"
+            className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-primary transition-all hover:gap-2.5"
+          >
+            Весь прайс-лист Panda Bridge <ArrowRight className="h-4 w-4" />
+          </Link>
         </div>
       </section>
 

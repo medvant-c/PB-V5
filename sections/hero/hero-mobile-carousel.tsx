@@ -34,7 +34,7 @@ function MobileHeroCarousel({ children }: MobileHeroCarouselProps) {
   }, [items.length]);
 
   return (
-    <div className="mt-8 min-[768px]:hidden">
+    <div className="mt-8 min-[1400px]:hidden">
       <div
         ref={trackRef}
         className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 [&::-webkit-scrollbar]:hidden"

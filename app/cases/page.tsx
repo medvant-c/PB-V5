@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { Send } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
 import { StatsRow } from "@/components/common/stats-row";
 import { TrustLogos } from "@/components/common/trust-logos";
 import { PandaCtaBanner } from "@/components/panda/panda-cta-banner";
 import { CasesExplorer } from "@/sections/cases/cases-explorer";
 import { caseStats } from "@/data/stats";
+import { buttonVariants } from "@/components/ui/button";
 
 export const metadata: Metadata = {
   title: "Кейсы — Panda Bridge",
@@ -33,6 +36,11 @@ export default function CasesPage() {
           <PandaCtaBanner
             title="Ваш кейс может быть следующим"
             description="Расскажите о своей задаче — и мы предложим лучшее решение для вашего бизнеса с Китаем."
+            actions={
+              <Link href="/contacts" className={buttonVariants({ variant: "primary" })}>
+                Обсудить свою задачу <Send className="h-4 w-4" />
+              </Link>
+            }
           />
         </div>
       </section>

@@ -1,6 +1,9 @@
 const logos = ["Wildberries", "Ozon", "AliExpress", "Яндекс Маркет", "Joom", "СБЕР МЕГА МАРКЕТ", "KazanExpress", "lamoda"];
 
-function TrustLogos({ title = "Нам доверяют" }: { title?: string }) {
+// These are marketplaces Panda Bridge sells through, not clients or partners
+// endorsing the company — the label should say that plainly rather than
+// imply endorsement it doesn't have.
+function TrustLogos({ title = "Продаём на маркетплейсах" }: { title?: string }) {
   return (
     <section className="px-4 sm:px-6">
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 border-t border-border pt-8 sm:flex-row">

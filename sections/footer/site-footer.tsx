@@ -24,7 +24,12 @@ function SiteFooter() {
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 sm:flex-row sm:justify-between">
         <div className="flex flex-col items-center gap-3 sm:items-start">
           <Logo />
-          <p className="text-xs text-text-secondary">© 2024 Panda Bridge. Все права защищены.</p>
+          <p className="text-xs text-text-secondary">
+            © {new Date().getFullYear()} Panda Bridge. Все права защищены.{" "}
+            <Link href="/desk" className="text-[10px] text-text-secondary/40 hover:text-text-secondary">
+              Рабочий стол
+            </Link>
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center justify-center gap-4 text-xs text-text-secondary">

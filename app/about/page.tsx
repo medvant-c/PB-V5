@@ -16,7 +16,7 @@ import { AboutFinalCta } from "@/sections/about/about-final-cta";
 
 export const metadata: Metadata = {
   title: "О компании — Panda Bridge",
-  description: "Panda Bridge — операционная система для бизнеса с Китаем: один партнёр, все решения.",
+  description: "Panda Bridge — экосистема для бизнеса с Китаем: один партнёр, все решения.",
 };
 
 export default function AboutPage() {

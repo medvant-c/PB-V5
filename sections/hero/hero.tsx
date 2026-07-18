@@ -1,6 +1,3 @@
-"use client";
-
-import { useState } from "react";
 import { ChevronDown, ChevronRight, ShieldCheck } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -16,14 +13,13 @@ import {
 import { FloatingProductCard } from "@/components/panda/floating-product-card";
 import { HeroGlobe } from "@/components/panda/hero-globe";
 import { buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { MobileHeroCarousel } from "@/sections/hero/hero-mobile-carousel";
-import { MobileHeroComposition, MobileSocialProof } from "@/sections/hero/hero-mobile-composition";
+import { MobileSocialProof } from "@/sections/hero/hero-mobile-composition";
 
 const metrics = [
   { value: "6", label: "стран-партнёров" },
   { value: "5", label: "сервисов в одном хабе" },
-  { value: "24/7", label: "поддержка этапов " },
+  { value: "24/7", label: "Panda AI на связи" },
 ];
 
 const leftCards = [
@@ -123,7 +119,7 @@ const rightCards = [
       </>
     ),
     label: "OEM · ODM",
-    description: "Запуск производства по Вашим брендом",
+    description: "Свой бренд под ключ",
     iconClassName: undefined,
     dotClassName: "bg-gray-500",
     href: "/factory",
@@ -161,12 +157,6 @@ const ORBIT_ANGLES = [32, 76, 120, 146];
 // to restore clearance without undoing the horizontal fix.
 const ROW_Y_NUDGE = [0, 0, 0, 46];
 
-// Reference pixel size of the HeroVisual box (max-w-xl × h-155), used as the
-// coordinate space for the connector-line SVG overlay so lines line up with
-// the ellipse-positioned cards regardless of the container's actual render width.
-const STAGE_W = 576;
-const STAGE_H = 620;
-
 function ellipsePoint(angleDeg: number, side: 1 | -1, yNudge: number) {
   const rad = (angleDeg * Math.PI) / 180;
   const offsetX = side * ORBIT_RX * Math.sin(rad) - CARD_W / 2;
@@ -177,65 +167,22 @@ function ellipsePoint(angleDeg: number, side: 1 | -1, yNudge: number) {
   };
 }
 
-// The connector's start point is the card edge that faces the globe (its
-// right edge for left-column cards, left edge for right-column cards), so
-// each dashed line visibly originates from its own card rather than its center.
-function connectorAnchor(angleDeg: number, side: 1 | -1, yNudge: number) {
-  const rad = (angleDeg * Math.PI) / 180;
-  const offsetX = side * ORBIT_RX * Math.sin(rad) - CARD_W / 2;
-  const y = ORBIT_CY - ORBIT_RY * Math.cos(rad) - CARD_H / 2 + yNudge;
-  const innerX = side === -1 ? offsetX + CARD_W : offsetX;
-  return {
-    x: Math.round(STAGE_W / 2 + innerX),
-    y: Math.round(y + CARD_H / 2),
-  };
-}
-
 const productCards = [
   ...leftCards.map((card, i) => ({
     ...card,
     position: ellipsePoint(ORBIT_ANGLES[i], -1, ROW_Y_NUDGE[i]),
-    anchor: connectorAnchor(ORBIT_ANGLES[i], -1, ROW_Y_NUDGE[i]),
     tilt: CARD_TILT,
   })),
   ...rightCards.map((card, i) => ({
     ...card,
     position: ellipsePoint(ORBIT_ANGLES[i], 1, ROW_Y_NUDGE[i]),
-    anchor: connectorAnchor(ORBIT_ANGLES[i], 1, ROW_Y_NUDGE[i]),
     tilt: -CARD_TILT,
   })),
 ];
 
 function HeroVisual() {
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
-
   return (
     <div className="relative mx-auto hidden h-155 w-full max-w-xl min-[1400px]:-translate-x-10 min-[1400px]:block">
-      <svg
-        viewBox={`0 0 ${STAGE_W} ${STAGE_H}`}
-        preserveAspectRatio="none"
-        className="pointer-events-none absolute inset-0 z-10 h-full w-full"
-        aria-hidden="true"
-      >
-        {productCards.map((card) => {
-          const isActive = hoveredId === card.id;
-          return (
-            <line
-              key={card.id}
-              x1={card.anchor.x}
-              y1={card.anchor.y}
-              x2={STAGE_W / 2}
-              y2={ORBIT_CY}
-              stroke={isActive ? "var(--color-primary)" : "rgba(102, 112, 133, 0.3)"}
-              strokeWidth={isActive ? 1.75 : 1.25}
-              strokeDasharray={isActive ? "6 4" : "4 4"}
-              strokeLinecap="round"
-              className={cn("transition-[stroke,stroke-width] duration-200", isActive && "animate-connector-flow")}
-            />
-          );
-        })}
-      </svg>
-
       <div className="absolute left-1/2 -top-18 h-172.5 w-172.5 -translate-x-1/2">
         <HeroGlobe />
       </div>
@@ -274,8 +221,6 @@ function HeroVisual() {
           className="absolute z-20 h-27 w-52"
           style={card.position}
           data-service-id={card.id}
-          onMouseEnter={() => setHoveredId(card.id)}
-          onMouseLeave={() => setHoveredId((current) => (current === card.id ? null : current))}
         />
       ))}
     </div>
@@ -289,7 +234,7 @@ function Hero() {
         <div>
           <span className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-text-secondary">
             <span className="h-1.5 w-1.5 rounded-full bg-primary" />
-            Глобальная операционная система
+            Экосистема для бизнеса с Китаем
           </span>
 
           <h1 className="mt-5 text-4xl font-extrabold leading-tight text-text sm:text-5xl">
@@ -300,8 +245,8 @@ function Hero() {
           </h1>
 
           <p className="mt-5 max-w-lg text-base text-text-secondary">
-            Единая цифровая платформа для поиска поставщиков, производства, логистики и
-            масштабирования вашего бизнеса.
+            Вам не нужно искать поставщика, логиста, склад и маркетолога по отдельности.
+            Один партнёр закрывает весь путь — от поиска товара до продаж на маркетплейсах.
           </p>
 
           <div className="mt-8 flex flex-col items-stretch gap-3 md:flex-row md:items-center md:flex-wrap">
@@ -332,7 +277,6 @@ function Hero() {
         <HeroVisual />
       </div>
 
-      <MobileHeroComposition />
       <MobileHeroCarousel>
         {[...leftCards, ...rightCards].map((card) => (
           <FloatingProductCard
@@ -344,7 +288,7 @@ function Hero() {
             iconClassName={card.iconClassName}
             dotClassName={card.dotClassName}
             href={card.href}
-            className="h-36 w-[76%] shrink-0 snap-start"
+            className="h-36 w-[76%] shrink-0 snap-start tablet:w-72"
           />
         ))}
       </MobileHeroCarousel>

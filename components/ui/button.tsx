@@ -14,6 +14,7 @@ const buttonVariants = cva(
         ghost: "text-text hover:bg-black/3",
         dark: "bg-white text-text hover:bg-white/90",
         success: "bg-success text-white hover:bg-success/90",
+        danger: "bg-error text-white hover:bg-error/90",
       },
       size: {
         default: "h-11 px-6 py-2.5",

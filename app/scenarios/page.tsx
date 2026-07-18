@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { Send } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
 import { PandaCtaBanner } from "@/components/panda/panda-cta-banner";
 import { ScenarioCard } from "@/sections/choose-path/scenario-card";
 import { ResultsBanner } from "@/sections/choose-path/results-banner";
 import { scenarios } from "@/data/scenarios";
+import { buttonVariants } from "@/components/ui/button";
 
 export const metadata: Metadata = {
   title: "Сценарии сотрудничества — Panda Bridge",
@@ -34,6 +37,11 @@ export default function ScenariosPage() {
           <PandaCtaBanner
             title="Не знаете, с чего начать?"
             description="Расскажите о своей задаче — мы подберём лучший сценарий и предложим оптимальное решение."
+            actions={
+              <Link href="/contacts" className={buttonVariants({ variant: "primary" })}>
+                Подобрать сценарий <Send className="h-4 w-4" />
+              </Link>
+            }
           />
         </div>
       </section>

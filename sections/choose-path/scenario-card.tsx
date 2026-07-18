@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import type { Scenario } from "@/types";
 import { Card } from "@/components/ui/card";
+import { scenarios } from "@/data/scenarios";
+import { directionsNav } from "@/data/navigation";
 
 const accentClasses: Record<Scenario["accent"], string> = {
   green: "bg-success/10 text-success",
@@ -14,6 +16,9 @@ const accentClasses: Record<Scenario["accent"], string> = {
 
 function ScenarioCard({ scenario }: { scenario: Scenario }) {
   const Icon = scenario.icon;
+  const relatedScenarios = scenario.related
+    .map((number) => scenarios.find((item) => item.number === number))
+    .filter((item): item is Scenario => Boolean(item));
 
   return (
     <Card className="flex flex-col gap-4 p-6">
@@ -27,7 +32,8 @@ function ScenarioCard({ scenario }: { scenario: Scenario }) {
       </div>
 
       <div>
-        <h3 className="text-lg font-bold text-text">{scenario.title}</h3>
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary">{scenario.audience}</p>
+        <h3 className="mt-1 text-lg font-bold text-text">{scenario.title}</h3>
         <p className="mt-1 text-sm text-text-secondary">{scenario.description}</p>
       </div>
 
@@ -40,12 +46,34 @@ function ScenarioCard({ scenario }: { scenario: Scenario }) {
         ))}
       </ul>
 
-      <Link
-        href={scenario.href}
-        className="mt-auto inline-flex items-center gap-1.5 text-sm font-semibold text-primary transition-all hover:gap-2.5"
-      >
-        Это мой сценарий <ArrowRight className="h-4 w-4" />
-      </Link>
+      <div className="mt-auto space-y-3">
+        <Link
+          href={scenario.href}
+          className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary transition-all hover:gap-2.5"
+        >
+          Это мой сценарий <ArrowRight className="h-4 w-4" />
+        </Link>
+
+        {relatedScenarios.length > 0 && (
+          <p className="text-xs text-text-secondary">
+            Часто выбирают вместе:{" "}
+            {relatedScenarios.map((related, index) => {
+              const navLabel = directionsNav.find((item) => item.href === related.href)?.label ?? related.title;
+              return (
+                <span key={related.number}>
+                  <Link
+                    href={related.href}
+                    className="font-medium text-text underline decoration-border underline-offset-2 hover:text-primary"
+                  >
+                    {navLabel}
+                  </Link>
+                  {index < relatedScenarios.length - 1 ? ", " : ""}
+                </span>
+              );
+            })}
+          </p>
+        )}
+      </div>
     </Card>
   );
 }

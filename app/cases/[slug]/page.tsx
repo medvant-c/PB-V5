@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Send } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
 import { PandaCtaBanner } from "@/components/panda/panda-cta-banner";
 import { Card } from "@/components/ui/card";
+import { buttonVariants } from "@/components/ui/button";
 import { cases } from "@/data/cases";
 import { cn } from "@/lib/utils";
 
@@ -76,6 +77,11 @@ export default async function CaseDetailPage({ params }: PageProps) {
           <PandaCtaBanner
             title="Хотите похожий результат?"
             description="Расскажите о своей задаче — мы предложим решение под ваш бизнес и рассчитаем сроки."
+            actions={
+              <Link href="/contacts" className={buttonVariants({ variant: "primary" })}>
+                Хочу такой же результат <Send className="h-4 w-4" />
+              </Link>
+            }
           />
         </div>
       </section>

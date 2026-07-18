@@ -4,20 +4,36 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build --turbopack",
+    "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
+    "@prisma/adapter-better-sqlite3": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "better-sqlite3": "^12.11.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "docx": "^9.7.1",
     "framer-motion": "^12.42.2",
+    "jose": "^6.2.3",
+    "jszip": "^3.10.1",
     "lucide-react": "^1.23.0",
     "next": "15.5.20",
+    "openai": "^6.48.0",
+    "prisma": "^7.8.0",
+    "radix-ui": "^1.6.2",
     "react": "19.1.0",
     "react-dom": "19.1.0",
-    "tailwind-merge": "^3.6.0"
+    "react-markdown": "^10.1.0",
+    "resend": "^6.17.2",
+    "server-only": "^0.0.1",
+    "sharp": "^0.35.3",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.6.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
@@ -25,6 +41,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "15.5.20",
     "playwright": "^1.61.1",

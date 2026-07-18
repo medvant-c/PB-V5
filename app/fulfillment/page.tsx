@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Warehouse, Send } from "lucide-react";
+import { ArrowRight, Warehouse, Send } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
 import { PandaCtaBanner } from "@/components/panda/panda-cta-banner";
 import { SectionHeading } from "@/components/product/section-heading";
@@ -8,7 +8,9 @@ import { FeatureChecklist } from "@/components/product/feature-checklist";
 import { DetailList } from "@/components/product/detail-list";
 import { ComparisonBlock } from "@/components/product/comparison-block";
 import { EcosystemFlow } from "@/components/product/ecosystem-flow";
+import { PricingTable } from "@/components/product/pricing-table";
 import { buttonVariants } from "@/components/ui/button";
+import { pricing } from "@/data/pricing";
 
 export const metadata: Metadata = {
   title: "Panda Fulfillment — Panda Bridge",
@@ -202,9 +204,33 @@ export default function FulfillmentPage() {
 
       <section className="px-4 sm:px-6">
         <div className="mx-auto max-w-6xl">
+          <SectionHeading
+            eyebrow="Стоимость"
+            title="Сколько стоят услуги Panda Fulfillment"
+            description="Базовые цены на услуги — ориентир для расчёта бюджета. Точная стоимость зависит от объёма и сложности задачи."
+          />
+          <div className="mt-6">
+            <PricingTable categories={pricing.find((item) => item.id === "fulfillment")!.categories} />
+          </div>
+          <Link
+            href="/pricing"
+            className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-primary transition-all hover:gap-2.5"
+          >
+            Весь прайс-лист Panda Bridge <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </section>
+
+      <section className="px-4 sm:px-6">
+        <div className="mx-auto max-w-6xl">
           <PandaCtaBanner
             title="Хотите передать обработку товара нам?"
             description="Расскажите об объёме и поставщиках — мы предложим схему консолидации и рассчитаем сроки."
+            actions={
+              <Link href="/contacts" className={buttonVariants({ variant: "primary" })}>
+                Узнать сроки для моего товара <Send className="h-4 w-4" />
+              </Link>
+            }
           />
         </div>
       </section>

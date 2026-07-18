@@ -1,14 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Rocket, Send } from "lucide-react";
+import { ArrowRight, Rocket, Send } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
 import { PandaCtaBanner } from "@/components/panda/panda-cta-banner";
 import { SectionHeading } from "@/components/product/section-heading";
 import { FeatureChecklist } from "@/components/product/feature-checklist";
 import { TimelineSteps } from "@/components/product/timeline-steps";
 import { EcosystemFlow } from "@/components/product/ecosystem-flow";
+import { PricingTable } from "@/components/product/pricing-table";
 import { Card } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
+import { pricing } from "@/data/pricing";
 
 export const metadata: Metadata = {
   title: "Panda Start — Panda Bridge",
@@ -261,9 +263,33 @@ export default function StartPage() {
 
       <section className="px-4 sm:px-6">
         <div className="mx-auto max-w-6xl">
+          <SectionHeading
+            eyebrow="Стоимость"
+            title="Сколько стоит запуск бизнеса с Panda Start"
+            description="Базовые цены на услуги — ориентир для расчёта бюджета. Точная стоимость зависит от объёма и сложности задачи."
+          />
+          <div className="mt-6">
+            <PricingTable categories={pricing.find((item) => item.id === "start")!.categories} />
+          </div>
+          <Link
+            href="/pricing"
+            className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-primary transition-all hover:gap-2.5"
+          >
+            Весь прайс-лист Panda Bridge <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </section>
+
+      <section className="px-4 sm:px-6">
+        <div className="mx-auto max-w-6xl">
           <PandaCtaBanner
             title="Хотите обсудить Panda Start?"
             description="Расскажите о своей задаче — мы предложим оптимальное решение и рассчитаем сроки."
+            actions={
+              <Link href="/contacts" className={buttonVariants({ variant: "primary" })}>
+                Обсудить запуск бизнеса <Send className="h-4 w-4" />
+              </Link>
+            }
           />
         </div>
       </section>

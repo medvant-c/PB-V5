@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Truck, Send } from "lucide-react";
+import { ArrowRight, Truck, Send } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
 import { PandaCtaBanner } from "@/components/panda/panda-cta-banner";
 import { SectionHeading } from "@/components/product/section-heading";
@@ -8,8 +8,10 @@ import { FeatureChecklist } from "@/components/product/feature-checklist";
 import { EcosystemFlow } from "@/components/product/ecosystem-flow";
 import { ShipmentTracker } from "@/components/product/widgets/shipment-tracker";
 import { DeliveryCalculator } from "@/components/product/widgets/delivery-calculator";
+import { PricingTable } from "@/components/product/pricing-table";
 import { Card } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
+import { pricing } from "@/data/pricing";
 
 export const metadata: Metadata = {
   title: "Panda Logistics — Panda Bridge",
@@ -142,7 +144,7 @@ export default function LogisticsPage() {
 
       <section className="px-4 sm:px-6">
         <div className="mx-auto max-w-6xl">
-          <SectionHeading eyebrow="Калькулятор" title="Узнайте стоимость доставки за секунды" />
+          <SectionHeading eyebrow="Калькулятор" title="Ориентировочный расчёт доставки" />
           <div className="mt-6">
             <DeliveryCalculator />
           </div>
@@ -226,9 +228,33 @@ export default function LogisticsPage() {
 
       <section className="px-4 sm:px-6">
         <div className="mx-auto max-w-6xl">
+          <SectionHeading
+            eyebrow="Стоимость"
+            title="Сколько стоят услуги Panda Logistics"
+            description="Базовые цены на услуги — ориентир для расчёта бюджета. Стоимость самой перевозки — по расчёту (см. калькулятор выше), остальные услуги ниже — фиксированные ориентиры."
+          />
+          <div className="mt-6">
+            <PricingTable categories={pricing.find((item) => item.id === "logistics")!.categories} />
+          </div>
+          <Link
+            href="/pricing"
+            className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-primary transition-all hover:gap-2.5"
+          >
+            Весь прайс-лист Panda Bridge <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </section>
+
+      <section className="px-4 sm:px-6">
+        <div className="mx-auto max-w-6xl">
           <PandaCtaBanner
             title="Хотите обсудить доставку?"
             description="Расскажите о своём грузе — мы предложим оптимальный маршрут и рассчитаем стоимость."
+            actions={
+              <Link href="/contacts" className={buttonVariants({ variant: "primary" })}>
+                Рассчитать логистику <Send className="h-4 w-4" />
+              </Link>
+            }
           />
         </div>
       </section>

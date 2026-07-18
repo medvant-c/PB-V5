@@ -8,10 +8,10 @@ function Team() {
         <Eyebrow className="justify-center">Команда</Eyebrow>
         <h2 className="mt-3 text-3xl font-extrabold text-text sm:text-4xl">Команда</h2>
 
-        {/* TODO: заменить на реальное фото команды, когда пришлют */}
-        <div className="mx-auto mt-8 flex aspect-video w-full max-w-2xl items-center justify-center rounded-2xl border border-border bg-bg">
-          <span className="text-sm font-medium text-text-secondary">Фото команды</span>
-        </div>
+        {/* No team photo yet — a placeholder box invites more scrutiny than
+            it deflects (an "about us" section is exactly where visitors are
+            checking whether the company is real). Add a real <Image> here
+            once a photo exists, don't restore the placeholder in the meantime. */}
 
         <p className="mx-auto mt-6 max-w-xl text-base text-text-secondary">
           Panda Bridge — это команда специалистов, объединённых одной целью: сделать

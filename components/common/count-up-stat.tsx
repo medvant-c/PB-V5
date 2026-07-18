@@ -9,8 +9,8 @@ interface CountUpStatProps {
 }
 
 // Splits off a leading integer (e.g. "100" from "100+") so it can be counted
-// up; anything without a leading number (e.g. "Поставки по всему миру") is
-// rendered as-is with no animation, since there's nothing to count toward.
+// up; a value with no leading number (e.g. "4.9 / 5") just renders as-is
+// with no count animation.
 function CountUpStat({ value, label }: CountUpStatProps) {
   const match = value.match(/^(\d+)(.*)$/);
   const target = match ? Number(match[1]) : null;
@@ -34,14 +34,6 @@ function CountUpStat({ value, label }: CountUpStatProps) {
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [inView, target]);
-
-  if (!value) {
-    return (
-      <div ref={ref} className="text-center text-base font-bold text-text">
-        {label}
-      </div>
-    );
-  }
 
   return (
     <div ref={ref} className="text-center">

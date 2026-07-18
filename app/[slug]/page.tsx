@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { CheckCircle2 } from "lucide-react";
+import Link from "next/link";
+import { CheckCircle2, Send } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
 import { PandaCtaBanner } from "@/components/panda/panda-cta-banner";
 import { Card } from "@/components/ui/card";
+import { buttonVariants } from "@/components/ui/button";
 import { accentIconClasses, directions, hubOs } from "@/data/directions";
 
 const allDirections = [...directions, hubOs];
@@ -86,8 +88,17 @@ export default async function DirectionPage({ params }: PageProps) {
       <section className="px-4 sm:px-6">
         <div className="mx-auto max-w-6xl">
           <PandaCtaBanner
-            title={`Хотите обсудить ${direction.title}?`}
-            description="Расскажите о своей задаче — мы предложим оптимальное решение и рассчитаем сроки."
+            title={direction.comingSoon ? `Хотите узнать о запуске ${direction.title}?` : `Хотите обсудить ${direction.title}?`}
+            description={
+              direction.comingSoon
+                ? "Оставьте заявку — сообщим первыми, как только направление откроется."
+                : "Расскажите о своей задаче — мы предложим оптимальное решение и рассчитаем сроки."
+            }
+            actions={
+              <Link href="/contacts" className={buttonVariants({ variant: "primary" })}>
+                {direction.comingSoon ? "Узнать о запуске первым" : `Обсудить ${direction.title}`} <Send className="h-4 w-4" />
+              </Link>
+            }
           />
         </div>
       </section>

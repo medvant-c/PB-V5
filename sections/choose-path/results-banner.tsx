@@ -4,7 +4,7 @@ const points = [
   { icon: ShieldCheck, value: "100%", label: "контроль качества на каждом этапе" },
   { icon: Clock, value: "до 70%", label: "экономия времени и ресурсов" },
   { icon: TrendingUp, value: "Рост", label: "продаж и прибыли вашего бизнеса" },
-  { icon: Headset, value: "24/7", label: "поддержка на вашем языке" },
+  { icon: Headset, value: "24/7", label: "Panda AI на связи" },
 ];
 
 function ResultsBanner() {
