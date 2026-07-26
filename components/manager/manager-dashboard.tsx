@@ -17,19 +17,9 @@ import {
   ImageOff,
   Download,
 } from "lucide-react";
-import {
-  QUOTE_STATUSES,
-  QUOTE_STATUS_LABEL,
-  QUOTE_STATUS_BADGE_CLASSES,
-  QUOTE_STATUS_DOT_COLOR,
-} from "@/lib/quote-statuses";
+import { QUOTE_STATUSES, QUOTE_STATUS_LABEL, QUOTE_STATUS_BADGE_CLASSES, QUOTE_STATUS_DOT_COLOR } from "@/lib/quote-statuses";
 import { cn } from "@/lib/utils";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface StatSummary {
   statusCounts: Record<string, number>;
@@ -40,46 +30,37 @@ interface StatSummary {
   pipelineGoodsRub: number;
   pipelineChinaDeliveryRub: number;
   pipelineCargoRub: number;
-  pipelineProfitRub: number;
-  premiumRub: number;
-  premiumRatePercent: number;
+  potentialServicesProfitRub: number;
+  factualServicesProfitRub: number;
+  potentialCargoProfitRub: number;
+  factualCargoProfitRub: number;
+  potentialCargoBonusRub: number;
+  factualCargoBonusRub: number;
+  estimatedPremiumRub: number;
+  factualPremiumRub: number;
   conversionPercent: number;
 }
 
-// Mirrors CONVERSION_PREMIUM_THRESHOLD_PERCENT in app/api/manager-dashboard/
-// route.ts — the premium tier itself is computed server-side, this just has
-// to agree on where the color flips.
-const CONVERSION_PREMIUM_THRESHOLD_PERCENT = 60;
+// Purely informational now — conversion no longer decides the premium rate
+// (flat 10%, or 35% for a confirmed self-sourced client; see
+// app/api/manager-dashboard/route.ts) — kept only as a "is this a healthy
+// close rate" color threshold for the ring below.
+const CONVERSION_HEALTHY_THRESHOLD_PERCENT = 60;
 
-// Small SVG donut — conversion is the one number that decides whether a
-// manager's premium is 10% or 7%, so it gets a glanceable visual instead of
-// just another number in a row of numbers.
-function ConversionRing({
-  percent,
-  size = 56,
-}: {
-  percent: number;
-  size?: number;
-}) {
-  const isHigh = percent >= CONVERSION_PREMIUM_THRESHOLD_PERCENT;
+// Small SVG donut — a glanceable visual for the manager's all-time close
+// rate instead of just another number in a row of numbers.
+function ConversionRing({ percent, size = 56 }: { percent: number; size?: number }) {
+  const isHigh = percent >= CONVERSION_HEALTHY_THRESHOLD_PERCENT;
   const strokeWidth = size / 8;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const offset =
-    circumference - (Math.min(Math.max(percent, 0), 100) / 100) * circumference;
+  const offset = circumference - (Math.min(Math.max(percent, 0), 100) / 100) * circumference;
   const colorClass = isHigh ? "text-success" : "text-error";
 
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          strokeWidth={strokeWidth}
-          className="stroke-border"
-        />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" strokeWidth={strokeWidth} className="stroke-border" />
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -90,17 +71,11 @@ function ConversionRing({
           strokeDashoffset={offset}
           strokeLinecap="round"
           stroke="currentColor"
-          className={cn(
-            "transition-[stroke-dashoffset] duration-500",
-            colorClass,
-          )}
+          className={cn("transition-[stroke-dashoffset] duration-500", colorClass)}
         />
       </svg>
       <span
-        className={cn(
-          "absolute inset-0 flex items-center justify-center font-bold",
-          colorClass,
-        )}
+        className={cn("absolute inset-0 flex items-center justify-center font-bold", colorClass)}
         style={{ fontSize: Math.max(8, size / 4.2) }}
       >
         {percent}%
@@ -130,16 +105,19 @@ interface QuoteListItem {
 interface DashboardData {
   overall: StatSummary;
   perManager: PerManagerRow[] | null;
-  // Only set for the owner — company-wide pipeline profit minus every
-  // manager's own premium. null for everyone else.
+  // Owner-only company-wide income — potential (if everything open gets
+  // bought/actualized/handed over as currently estimated) and factual (only
+  // what's actually been confirmed), each already net of every manager's
+  // own premium for that same scope. null for everyone else.
   expectedIncomeRub: number | null;
-  // Owner-only split of the pipeline's profit into its two sources — cargo
-  // margin vs everything else (search fee, buyout commission, services).
-  // Both null for everyone else.
-  cargoProfitRub: number | null;
-  otherProfitRub: number | null;
-  // Owner-only companions to cargoProfitRub/expectedIncomeRub — physical
-  // totals and the two revenue lines behind "Ожидаемый доход компании".
+  actualIncomeRub: number | null;
+  // Owner-only source breakdown behind those two totals.
+  potentialServicesProfitRub: number | null;
+  factualServicesProfitRub: number | null;
+  potentialCargoProfitRub: number | null;
+  factualCargoProfitRub: number | null;
+  // Owner-only companions — physical totals and the two revenue lines
+  // behind "Доход компании".
   cargoVolumeM3: number | null;
   cargoWeightKg: number | null;
   searchFeeRub: number | null;
@@ -153,30 +131,17 @@ function fmt(value: number): string {
 // One row inside a hover breakdown — label left, ₽ value right, an
 // optional bold+border-top styling for the final "Итого" line. Same visual
 // idiom as quoteBreakdown()'s tooltip rows in clients-tab.tsx.
-function BreakdownRow({
-  label,
-  value,
-  isTotal,
-}: {
-  label: string;
-  value: string;
-  isTotal?: boolean;
-}) {
+function BreakdownRow({ label, value, isTotal }: { label: string; value: string; isTotal?: boolean }) {
   return (
-    <div
-      className={cn(
-        "flex justify-between gap-4",
-        isTotal && "border-t border-surface/25 pt-1 font-bold",
-      )}
-    >
+    <div className={cn("flex justify-between gap-4", isTotal && "border-t border-surface/25 pt-1 font-bold")}>
       <span>{label}</span>
       <span>{value}</span>
     </div>
   );
 }
 
-// One card in the hero row — the gradient "featured" card and the three
-// plain white ones all share this shape, just with different tone props.
+// One card in the hero row — the gradient "featured" card and the plain
+// white ones all share this shape, just with different tone props.
 // `tooltip`, when given, wraps the whole card so hovering anywhere on it
 // (not just the number) reveals what the figure is made of.
 function StatCard({
@@ -208,12 +173,7 @@ function StatCard({
         tooltip && "cursor-help",
       )}
     >
-      <div
-        className={cn(
-          "flex items-center gap-2 text-sm font-medium",
-          featured ? "text-white/85" : "text-text-secondary",
-        )}
-      >
+      <div className={cn("flex items-center gap-2 text-sm font-medium", featured ? "text-white/85" : "text-text-secondary")}>
         <span
           className={cn(
             "flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
@@ -225,26 +185,12 @@ function StatCard({
         {label}
       </div>
       <div className="mt-4 flex items-end justify-between gap-2">
-        <div
-          className={cn(
-            "text-[26px] font-extrabold leading-none",
-            valueClassName ?? (featured ? "text-white" : "text-text"),
-          )}
-        >
+        <div className={cn("text-[26px] font-extrabold leading-none", valueClassName ?? (featured ? "text-white" : "text-text"))}>
           {value}
         </div>
         {trailing}
       </div>
-      {subtitle && (
-        <div
-          className={cn(
-            "mt-2 text-xs",
-            featured ? "text-white/70" : "text-text-secondary",
-          )}
-        >
-          {subtitle}
-        </div>
-      )}
+      {subtitle && <div className={cn("mt-2 text-xs", featured ? "text-white/70" : "text-text-secondary")}>{subtitle}</div>}
     </div>
   );
 
@@ -262,38 +208,20 @@ function StatCard({
 function StatCardsRow({
   stats,
   expectedIncomeRub,
-  otherProfitRub,
-  cargoProfitRub,
+  actualIncomeRub,
 }: {
   stats: StatSummary;
   expectedIncomeRub: number | null;
-  otherProfitRub: number | null;
-  cargoProfitRub: number | null;
+  actualIncomeRub: number | null;
 }) {
-  const isHighConversion =
-    stats.conversionPercent >= CONVERSION_PREMIUM_THRESHOLD_PERCENT;
+  const isHighConversion = stats.conversionPercent >= CONVERSION_HEALTHY_THRESHOLD_PERCENT;
 
   // Residual, not a tracked field — guarantees the four rows always sum to
   // exactly pipelineRub instead of drifting from a separately-summed value.
-  const pipelineServicesRub =
-    stats.pipelineRub -
-    stats.pipelineGoodsRub -
-    stats.pipelineChinaDeliveryRub -
-    stats.pipelineCargoRub;
-
-  // Same trick for "Доход компании": expectedIncomeRub is gross profit
-  // (otherProfitRub + cargoProfitRub) minus every manager's own premium —
-  // the premiums total isn't returned separately, so it's derived here
-  // rather than re-summed and risking the two numbers drifting apart.
-  const managerPremiumsRub =
-    otherProfitRub != null &&
-    cargoProfitRub != null &&
-    expectedIncomeRub != null
-      ? otherProfitRub + cargoProfitRub - expectedIncomeRub
-      : null;
+  const pipelineServicesRub = stats.pipelineRub - stats.pipelineGoodsRub - stats.pipelineChinaDeliveryRub - stats.pipelineCargoRub;
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <StatCard
         featured
         icon={TrendingUp}
@@ -302,89 +230,11 @@ function StatCardsRow({
         subtitle={`${stats.totalQuotes} просчётов`}
         tooltip={
           <>
-            <BreakdownRow
-              label="Товар"
-              value={`${fmt(stats.pipelineGoodsRub)} ₽`}
-            />
-            <BreakdownRow
-              label="Доставка по Китаю"
-              value={`${fmt(stats.pipelineChinaDeliveryRub)} ₽`}
-            />
-            <BreakdownRow
-              label="Доставка карго"
-              value={`${fmt(stats.pipelineCargoRub)} ₽`}
-            />
-            <BreakdownRow
-              label="Услуги и комиссии"
-              value={`${fmt(pipelineServicesRub)} ₽`}
-            />
-            <BreakdownRow
-              label="Итого в работе"
-              value={`${fmt(stats.pipelineRub)} ₽`}
-              isTotal
-            />
-          </>
-        }
-      />
-      <StatCard
-        icon={Wallet}
-        label="Доход компании (потенциал)"
-        value={expectedIncomeRub != null ? `${fmt(expectedIncomeRub)} ₽` : "—"}
-        valueClassName={
-          expectedIncomeRub != null ? "text-success" : "text-text-secondary"
-        }
-        subtitle={
-          expectedIncomeRub != null
-            ? "Если всё в работе будет куплено"
-            : "Видно только руководителю"
-        }
-        tooltip={
-          expectedIncomeRub != null &&
-          otherProfitRub != null &&
-          cargoProfitRub != null &&
-          managerPremiumsRub != null ? (
-            <>
-              <BreakdownRow
-                label="Доход по выкупу и услугам"
-                value={`${fmt(otherProfitRub)} ₽`}
-              />
-              <BreakdownRow
-                label="Доход за карго"
-                value={`${fmt(cargoProfitRub)} ₽`}
-              />
-              <BreakdownRow
-                label="Премии менеджерам"
-                value={`− ${fmt(managerPremiumsRub)} ₽`}
-              />
-              <BreakdownRow
-                label="Итого доход компании"
-                value={`${fmt(expectedIncomeRub)} ₽`}
-                isTotal
-              />
-            </>
-          ) : undefined
-        }
-      />
-      <StatCard
-        icon={Gift}
-        label="Ожидаемая премия"
-        value={`${fmt(stats.premiumRub)} ₽`}
-        subtitle={`${stats.premiumRatePercent}% от прибыли`}
-        tooltip={
-          <>
-            <BreakdownRow
-              label="Прибыль в работе"
-              value={`${fmt(Math.max(0, stats.pipelineProfitRub))} ₽`}
-            />
-            <BreakdownRow
-              label="Ставка премии"
-              value={`× ${stats.premiumRatePercent}%`}
-            />
-            <BreakdownRow
-              label="Итого премия"
-              value={`${fmt(stats.premiumRub)} ₽`}
-              isTotal
-            />
+            <BreakdownRow label="Товар" value={`${fmt(stats.pipelineGoodsRub)} ₽`} />
+            <BreakdownRow label="Доставка по Китаю" value={`${fmt(stats.pipelineChinaDeliveryRub)} ₽`} />
+            <BreakdownRow label="Доставка карго" value={`${fmt(stats.pipelineCargoRub)} ₽`} />
+            <BreakdownRow label="Услуги и комиссии" value={`${fmt(pipelineServicesRub)} ₽`} />
+            <BreakdownRow label="Итого в работе" value={`${fmt(stats.pipelineRub)} ₽`} isTotal />
           </>
         }
       />
@@ -393,19 +243,48 @@ function StatCardsRow({
         label="Конверсия"
         value={`${stats.conversionPercent}%`}
         valueClassName={isHighConversion ? "text-success" : "text-error"}
-        subtitle={`премия ${stats.premiumRatePercent}%`}
+        subtitle="справочно — на премию больше не влияет"
         tooltip={
           <p>
-            Общая конверсия по всем сотрудникам вместе: выкупленные просчёты ÷
-            просчёты без учёта отказов. Не среднее арифметическое процентов по
-            сотрудникам — просчёты считаются все вместе, в одном пуле. От{" "}
-            {CONVERSION_PREMIUM_THRESHOLD_PERCENT}% премия менеджерам — 10% от
-            прибыли, ниже — 7%.
+            Общая конверсия по всем сотрудникам вместе: выкупленные просчёты ÷ просчёты без учёта отказов. Не среднее
+            арифметическое процентов по сотрудникам — просчёты считаются все вместе, в одном пуле. Ставка премии
+            теперь не зависит от неё — 10% от прибыли всегда, 35% для подтверждённых личных клиентов.
           </p>
         }
-        trailing={
-          <ConversionRing percent={stats.conversionPercent} size={48} />
+        trailing={<ConversionRing percent={stats.conversionPercent} size={48} />}
+      />
+      <StatCard
+        icon={Gift}
+        label="Премия менеджерам"
+        value={`${fmt(stats.factualPremiumRub)} ₽`}
+        valueClassName="text-success"
+        subtitle={`ожидается ещё ${fmt(stats.estimatedPremiumRub)} ₽`}
+        tooltip={
+          <>
+            <BreakdownRow label="Факт — за услуги" value={`${fmt(stats.factualServicesProfitRub >= 0 ? stats.factualServicesProfitRub : 0)} ₽ прибыли`} />
+            <BreakdownRow label="Факт — премия" value={`${fmt(stats.factualPremiumRub - stats.factualCargoBonusRub)} ₽`} />
+            <BreakdownRow label="Факт — бонус за карго" value={`${fmt(stats.factualCargoBonusRub)} ₽`} />
+            <BreakdownRow label="Итого фактическая премия" value={`${fmt(stats.factualPremiumRub)} ₽`} isTotal />
+            <div className="pt-2 text-[11px] text-white/60">Ниже — то, что ещё не подтверждено (потенциал):</div>
+            <BreakdownRow label="Потенциал — премия за услуги" value={`${fmt(stats.estimatedPremiumRub - stats.potentialCargoBonusRub)} ₽`} />
+            <BreakdownRow label="Потенциал — бонус за карго" value={`${fmt(stats.potentialCargoBonusRub)} ₽`} />
+            <BreakdownRow label="Итого ожидаемая премия" value={`${fmt(stats.estimatedPremiumRub)} ₽`} isTotal />
+          </>
         }
+      />
+      <StatCard
+        icon={Wallet}
+        label="Доход компании (факт)"
+        value={actualIncomeRub != null ? `${fmt(actualIncomeRub)} ₽` : "—"}
+        valueClassName={actualIncomeRub != null ? "text-success" : "text-text-secondary"}
+        subtitle={actualIncomeRub != null ? "Уже подтверждено" : "Видно только руководителю"}
+      />
+      <StatCard
+        icon={Wallet}
+        label="Доход компании (потенциал)"
+        value={expectedIncomeRub != null ? `${fmt(expectedIncomeRub)} ₽` : "—"}
+        valueClassName={expectedIncomeRub != null ? "text-success" : "text-text-secondary"}
+        subtitle={expectedIncomeRub != null ? "Если всё в работе будет куплено" : "Видно только руководителю"}
       />
     </div>
   );
@@ -413,13 +292,8 @@ function StatCardsRow({
 
 // Mirrors BOUGHT_STATUSES in app/api/manager-dashboard/route.ts — "выкуплено"
 // is a multi-status aggregate (client paid, cargo not yet handed over),
-// duplicated here the same way CONVERSION_PREMIUM_THRESHOLD_PERCENT already is.
-const BOUGHT_STATUSES = [
-  "in_transit_to_warehouse",
-  "delivered_to_warehouse",
-  "sent_to_client",
-  "handed_to_client",
-];
+// duplicated here the same way CONVERSION_HEALTHY_THRESHOLD_PERCENT already is.
+const BOUGHT_STATUSES = ["in_transit_to_warehouse", "delivered_to_warehouse", "sent_to_client", "handed_to_client"];
 
 interface PillFilter {
   key: string;
@@ -446,52 +320,31 @@ function StatusPillsRow({
 
   return (
     <div className="mt-4 flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        onClick={() => onSelect({ key: "all", statuses: null })}
-        className={pillClass("all", "bg-primary font-semibold text-white")}
-      >
+      <button type="button" onClick={() => onSelect({ key: "all", statuses: null })} className={pillClass("all", "bg-primary font-semibold text-white")}>
         Все · {stats.totalQuotes}
       </button>
 
       <button
         type="button"
         onClick={() => onSelect({ key: "bought", statuses: BOUGHT_STATUSES })}
-        className={pillClass(
-          "bought",
-          "border border-border bg-surface text-text-secondary",
-        )}
+        className={pillClass("bought", "border border-border bg-surface text-text-secondary")}
       >
         <Wallet className="h-3.5 w-3.5" /> Выкуплено · {fmt(stats.boughtRub)} ₽
       </button>
       <button
         type="button"
-        onClick={() =>
-          onSelect({ key: "handed_to_client", statuses: ["handed_to_client"] })
-        }
-        className={pillClass(
-          "handed_to_client",
-          "border border-border bg-surface text-text-secondary",
-        )}
+        onClick={() => onSelect({ key: "handed_to_client", statuses: ["handed_to_client"] })}
+        className={pillClass("handed_to_client", "border border-border bg-surface text-text-secondary")}
       >
-        <PackageCheck className="h-3.5 w-3.5" /> Выдано · {fmt(stats.handedRub)}{" "}
-        ₽
+        <PackageCheck className="h-3.5 w-3.5" /> Выдано · {fmt(stats.handedRub)} ₽
       </button>
 
       {QUOTE_STATUSES.map((status) => {
         const count = stats.statusCounts[status] ?? 0;
         if (count === 0) return null;
         return (
-          <button
-            key={status}
-            type="button"
-            onClick={() => onSelect({ key: status, statuses: [status] })}
-            className={pillClass(status, QUOTE_STATUS_BADGE_CLASSES[status])}
-          >
-            <span
-              className="h-1.5 w-1.5 shrink-0 rounded-full"
-              style={{ backgroundColor: QUOTE_STATUS_DOT_COLOR[status] }}
-            />
+          <button key={status} type="button" onClick={() => onSelect({ key: status, statuses: [status] })} className={pillClass(status, QUOTE_STATUS_BADGE_CLASSES[status])}>
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: QUOTE_STATUS_DOT_COLOR[status] }} />
             {QUOTE_STATUS_LABEL[status]} · {count}
           </button>
         );
@@ -500,13 +353,7 @@ function StatusPillsRow({
   );
 }
 
-function QuoteListPanel({
-  quotes,
-  loading,
-}: {
-  quotes: QuoteListItem[] | null;
-  loading: boolean;
-}) {
+function QuoteListPanel({ quotes, loading }: { quotes: QuoteListItem[] | null; loading: boolean }) {
   if (loading) {
     return (
       <div className="mt-3 flex items-center gap-2 rounded-2xl border border-border bg-surface p-4 text-sm text-text-secondary">
@@ -525,18 +372,10 @@ function QuoteListPanel({
   return (
     <div className="mt-3 divide-y divide-border rounded-2xl border border-border bg-surface">
       {quotes.map((quote) => (
-        <a
-          key={quote.id}
-          href={`/api/manager-quotes/${quote.id}/pdf`}
-          className="flex items-center gap-3 p-3 text-sm transition-colors hover:bg-bg"
-        >
+        <a key={quote.id} href={`/api/manager-quotes/${quote.id}/pdf`} className="flex items-center gap-3 p-3 text-sm transition-colors hover:bg-bg">
           {quote.firstPhotoId ? (
             // eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset
-            <img
-              src={`/api/manager-quotes/photos/${quote.firstPhotoId}`}
-              alt=""
-              className="h-9 w-9 shrink-0 rounded-md border border-border object-cover"
-            />
+            <img src={`/api/manager-quotes/photos/${quote.firstPhotoId}`} alt="" className="h-9 w-9 shrink-0 rounded-md border border-border object-cover" />
           ) : (
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-dashed border-border text-text-secondary">
               <ImageOff className="h-4 w-4" />
@@ -552,21 +391,10 @@ function QuoteListPanel({
               {quote.client.company ? ` · ${quote.client.company}` : ""}
             </div>
           </div>
-          <span
-            className={cn(
-              "shrink-0 rounded-full px-2.5 py-1 text-xs font-medium",
-              QUOTE_STATUS_BADGE_CLASSES[
-                quote.status as keyof typeof QUOTE_STATUS_BADGE_CLASSES
-              ],
-            )}
-          >
-            {QUOTE_STATUS_LABEL[
-              quote.status as keyof typeof QUOTE_STATUS_LABEL
-            ] ?? quote.status}
+          <span className={cn("shrink-0 rounded-full px-2.5 py-1 text-xs font-medium", QUOTE_STATUS_BADGE_CLASSES[quote.status as keyof typeof QUOTE_STATUS_BADGE_CLASSES])}>
+            {QUOTE_STATUS_LABEL[quote.status as keyof typeof QUOTE_STATUS_LABEL] ?? quote.status}
           </span>
-          <span className="w-28 shrink-0 text-right font-bold text-text">
-            {fmt(Number(quote.totalRub))} ₽
-          </span>
+          <span className="w-28 shrink-0 text-right font-bold text-text">{fmt(Number(quote.totalRub))} ₽</span>
         </a>
       ))}
     </div>
@@ -579,13 +407,7 @@ function TodayPill() {
   // client's render and trigger a hydration warning for a value that isn't
   // even meaningful until the browser paints it anyway.
   useEffect(() => {
-    setToday(
-      new Date().toLocaleDateString("ru-RU", {
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      }),
-    );
+    setToday(new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }));
   }, []);
   return (
     <div className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-text-secondary">
@@ -645,163 +467,116 @@ function ManagerDashboard() {
     <TooltipProvider>
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-2xl font-extrabold tracking-tight text-text">
-            Дашборд
-          </h2>
+          <h2 className="text-2xl font-extrabold tracking-tight text-text">Дашборд</h2>
           <TodayPill />
         </div>
 
-        <StatCardsRow
-          stats={data.overall}
-          expectedIncomeRub={data.expectedIncomeRub}
-          otherProfitRub={data.otherProfitRub}
-          cargoProfitRub={data.cargoProfitRub}
-        />
-        <StatusPillsRow
-          stats={data.overall}
-          activeFilter={activeFilter?.key ?? null}
-          onSelect={handlePillSelect}
-        />
-        {activeFilter && (
-          <QuoteListPanel quotes={filteredQuotes} loading={loadingQuotes} />
-        )}
+        <StatCardsRow stats={data.overall} expectedIncomeRub={data.expectedIncomeRub} actualIncomeRub={data.actualIncomeRub} />
+        <StatusPillsRow stats={data.overall} activeFilter={activeFilter?.key ?? null} onSelect={handlePillSelect} />
+        {activeFilter && <QuoteListPanel quotes={filteredQuotes} loading={loadingQuotes} />}
 
         <div className="rounded-2xl border border-border bg-bg p-4 sm:p-5">
           <div className="flex items-center gap-1.5 text-sm font-bold text-text">
-            <Info className="h-4 w-4 text-text-secondary" /> KPI и премия
+            <Info className="h-4 w-4 text-text-secondary" /> Как считается премия
           </div>
           <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
-            Из суммы просчётов в работе вычтены закупка товара, доставка по
-            Китаю и доставка карго; доход компании дополнительно учитывает
-            премии менеджеров. Ставка премии зависит от конверсии за всю
-            историю: от {CONVERSION_PREMIUM_THRESHOLD_PERCENT}% — 10% от прибыли
-            (выкуп, услуги и карго вместе), ниже — 7%.
+            <span className="font-semibold text-text">Услуги</span> (услуга поиска + комиссия за выкуп + доп. услуги +
+            выгода от выкупа дешевле плана) — 10% от прибыли для обычного клиента, 35% для подтверждённого личного
+            клиента менеджера. Считается по факту, как только старший менеджер или руководитель подтвердит сумму
+            реального выкупа.
           </p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border border-border bg-surface p-3.5">
-              <div className="text-xs text-text-secondary">
-                Ожидаемая премия менеджерам ({data.overall.premiumRatePercent}%
-                от прибыли)
-              </div>
-              <div className="mt-1 text-lg font-bold text-text">
-                {fmt(data.overall.premiumRub)} ₽
-              </div>
-            </div>
-            <div className="rounded-xl border border-border bg-surface p-3.5">
-              <div className="text-xs text-text-secondary">
-                Ожидаемый доход компании
-              </div>
-              <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                <span
-                  className={cn(
-                    "text-lg font-bold",
-                    data.expectedIncomeRub != null ? "text-success" : "text-text",
-                  )}
-                >
-                  {data.expectedIncomeRub != null
-                    ? `${fmt(data.expectedIncomeRub)} ₽`
-                    : "— (только у руководителя)"}
-                </span>
-                {data.searchFeeRub != null && data.buyoutCommissionRub != null && (
-                  <span className="text-xs text-text-secondary">
-                    услуги поиска {fmt(data.searchFeeRub)} ₽ · комиссия за выкуп{" "}
-                    {fmt(data.buyoutCommissionRub)} ₽
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
+          <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
+            <span className="font-semibold text-text">Карго</span> — только для личных клиентов, 10% от суммы, которую
+            клиент платит за карго (не от прибыли и не от себестоимости). Начисляется автоматически при статусе «Выдан
+            клиенту».
+          </p>
         </div>
 
-        {data.cargoProfitRub != null && data.otherProfitRub != null && (
-          <div className="rounded-2xl border border-border bg-bg p-4 sm:p-5">
-            <div className="flex items-center gap-1.5 text-sm font-bold text-text">
-              <Lock className="h-4 w-4 text-text-secondary" /> Разбивка дохода —
-              видно только руководителю
-            </div>
-            <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
-              «В работе» выше — это оборот (всё, что заплатит клиент). Здесь —
-              сколько из него реальная прибыль, и из чего она складывается.
-            </p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl border border-border bg-surface p-3.5">
-                <div className="flex items-center gap-1.5 text-xs text-text-secondary">
-                  <Handshake className="h-3.5 w-3.5" /> Доход по выкупу и
-                  услугам
+        {data.potentialServicesProfitRub != null &&
+          data.factualServicesProfitRub != null &&
+          data.potentialCargoProfitRub != null &&
+          data.factualCargoProfitRub != null && (
+            <div className="rounded-2xl border border-border bg-bg p-4 sm:p-5">
+              <div className="flex items-center gap-1.5 text-sm font-bold text-text">
+                <Lock className="h-4 w-4 text-text-secondary" /> Разбивка дохода — видно только руководителю
+              </div>
+              <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
+                «В работе» выше — это оборот (всё, что заплатит клиент). Здесь — сколько из него реальная прибыль
+                компании, отдельно по услугам и по карго, и отдельно — что уже подтверждено (факт), а что ещё оценка
+                (потенциал).
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-border bg-surface p-3.5">
+                  <div className="flex items-center gap-1.5 text-xs text-text-secondary">
+                    <Handshake className="h-3.5 w-3.5" /> Услуги — потенциал
+                  </div>
+                  <div className="mt-1 text-lg font-bold text-text">{fmt(data.potentialServicesProfitRub)} ₽</div>
                 </div>
-                <div className="mt-1 text-lg font-bold text-success">
-                  {fmt(data.otherProfitRub)} ₽
+                <div className="rounded-xl border border-border bg-surface p-3.5">
+                  <div className="flex items-center gap-1.5 text-xs text-text-secondary">
+                    <Handshake className="h-3.5 w-3.5" /> Услуги — факт
+                  </div>
+                  <div className="mt-1 text-lg font-bold text-success">{fmt(data.factualServicesProfitRub)} ₽</div>
+                </div>
+                <div className="rounded-xl border border-border bg-surface p-3.5">
+                  <div className="flex items-center gap-1.5 text-xs text-text-secondary">
+                    <Ship className="h-3.5 w-3.5" /> Карго — потенциал
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className="text-lg font-bold text-text">{fmt(data.potentialCargoProfitRub)} ₽</span>
+                    {data.cargoVolumeM3 != null && data.cargoWeightKg != null && (
+                      <span className="text-xs text-text-secondary">
+                        {data.cargoVolumeM3.toFixed(1)} м³ · {fmt(data.cargoWeightKg)} кг
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border bg-surface p-3.5">
+                  <div className="flex items-center gap-1.5 text-xs text-text-secondary">
+                    <Ship className="h-3.5 w-3.5" /> Карго — факт
+                  </div>
+                  <div className="mt-1 text-lg font-bold text-success">{fmt(data.factualCargoProfitRub)} ₽</div>
                 </div>
               </div>
-              <div className="rounded-xl border border-border bg-surface p-3.5">
-                <div className="flex items-center gap-1.5 text-xs text-text-secondary">
-                  <Ship className="h-3.5 w-3.5" /> Доход за карго
-                </div>
-                <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                  <span className="text-lg font-bold text-success">
-                    {fmt(data.cargoProfitRub)} ₽
-                  </span>
-                  {data.cargoVolumeM3 != null && data.cargoWeightKg != null && (
-                    <span className="text-xs text-text-secondary">
-                      {data.cargoVolumeM3.toFixed(1)} м³ · {fmt(data.cargoWeightKg)} кг
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
 
-            {incomeExplainerOpen && (
-              <div className="mt-3 space-y-2 rounded-xl border border-border bg-surface p-3.5 text-xs leading-relaxed text-text-secondary">
-                <div>
-                  <span className="font-semibold text-text">
-                    Доход по выкупу и услугам
-                  </span>{" "}
-                  = услуга поиска (Standart/ Expert/Pro) + комиссия за
-                  организацию выкупа + доп. услуги из прайс-листа. Это на 100%
-                  ваш доход — тут нет отдельной себестоимости, которую нужно
-                  вычитать.
+              {incomeExplainerOpen && (
+                <div className="mt-3 space-y-2 rounded-xl border border-border bg-surface p-3.5 text-xs leading-relaxed text-text-secondary">
+                  <div>
+                    <span className="font-semibold text-text">Услуги</span> = услуга поиска (Standart/Expert/Pro) +
+                    комиссия за организацию выкупа + доп. услуги из прайс-листа + разница между плановой ценой товара
+                    и тем, что реально потрачено на выкуп (скидка от фабрики или курсовая разница). Потенциал считает
+                    эту разницу как 0 (план = факт), пока старший менеджер или руководитель не подтвердит реальную
+                    сумму выкупа — тогда просчёт переходит в факт.
+                  </div>
+                  <div>
+                    <span className="font-semibold text-text">Карго</span> = то, что заплатил клиент за
+                    карго-доставку, минус её реальная себестоимость (задаётся во вкладке «Тарифы»). В факт попадает
+                    только при статусе «Выдан клиенту» — до этого, даже если реальные габариты уже внесены, доход
+                    числится в потенциале.
+                  </div>
+                  <div className="border-t border-border pt-2">
+                    <span className="font-semibold text-text">Не считается доходом (100% расход, без наценки):</span>{" "}
+                    стоимость самого товара по плану и доставка по Китаю до склада.
+                  </div>
                 </div>
-                <div>
-                  <span className="font-semibold text-text">
-                    Доход за карго
-                  </span>{" "}
-                  = то, что заплатил клиент за карго-доставку, минус её реальная
-                  себестоимость (себестоимость задаётся во вкладке «Тарифы» —
-                  общая для «по объёму» и отдельно по каждой категории для «по
-                  плотности»). Если клиенту дана скидка на карго — она
-                  вычитается из этого дохода, а не из себестоимости.
-                </div>
-                <div className="border-t border-border pt-2">
-                  <span className="font-semibold text-text">
-                    Не считается доходом (100% расход, без наценки):
-                  </span>{" "}
-                  стоимость самого товара и доставка по Китаю до склада — здесь
-                  наценки нет, только то, что вы платите за клиента.
-                </div>
-              </div>
-            )}
+              )}
 
-            <button
-              type="button"
-              onClick={() => setIncomeExplainerOpen((v) => !v)}
-              className="mt-2 flex w-full items-center justify-end gap-1 text-xs font-medium text-text-secondary transition-colors hover:text-primary"
-            >
-              <Info className="h-3.5 w-3.5" /> Как считается доход
-              <ChevronDown
-                className={cn(
-                  "h-3.5 w-3.5 transition-transform",
-                  incomeExplainerOpen && "rotate-180",
-                )}
-              />
-            </button>
-          </div>
-        )}
+              <button
+                type="button"
+                onClick={() => setIncomeExplainerOpen((v) => !v)}
+                className="mt-2 flex w-full items-center justify-end gap-1 text-xs font-medium text-text-secondary transition-colors hover:text-primary"
+              >
+                <Info className="h-3.5 w-3.5" /> Как считается доход
+                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", incomeExplainerOpen && "rotate-180")} />
+              </button>
+            </div>
+          )}
 
         {data.perManager && data.perManager.length > 0 && (
           <div className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
             <h3 className="text-sm font-bold text-text">KPI по сотрудникам</h3>
             <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-125 border-collapse text-sm">
+              <table className="w-full min-w-150 border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-text-secondary">
                     <th className="py-1.5 font-medium">Менеджер</th>
@@ -809,42 +584,23 @@ function ManagerDashboard() {
                     <th className="py-1.5 font-medium">Выкуплено, ₽</th>
                     <th className="py-1.5 font-medium">Выдано, ₽</th>
                     <th className="py-1.5 font-medium">В работе, ₽</th>
-                    <th className="py-1.5 font-medium">Премия, ₽</th>
+                    <th className="py-1.5 font-medium">Премия факт, ₽</th>
+                    <th className="py-1.5 font-medium">Премия потенциал, ₽</th>
                     <th className="py-1.5 font-medium">Конверсия</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.perManager.map((row) => (
-                    <tr
-                      key={row.managerId}
-                      className="border-b border-border last:border-0"
-                    >
-                      <td className="py-1.5 font-medium text-text">
-                        {row.managerName}
-                      </td>
-                      <td className="py-1.5 text-text-secondary">
-                        {row.totalQuotes}
-                      </td>
-                      <td className="py-1.5 text-text-secondary">
-                        {fmt(row.boughtRub)}
-                      </td>
-                      <td className="py-1.5 text-text-secondary">
-                        {fmt(row.handedRub)}
-                      </td>
-                      <td className="py-1.5 text-text-secondary">
-                        {fmt(row.pipelineRub)}
-                      </td>
-                      <td className="py-1.5 text-text-secondary">
-                        {fmt(row.premiumRub)}{" "}
-                        <span className="text-[10px]">
-                          ({row.premiumRatePercent}%)
-                        </span>
-                      </td>
+                    <tr key={row.managerId} className="border-b border-border last:border-0">
+                      <td className="py-1.5 font-medium text-text">{row.managerName}</td>
+                      <td className="py-1.5 text-text-secondary">{row.totalQuotes}</td>
+                      <td className="py-1.5 text-text-secondary">{fmt(row.boughtRub)}</td>
+                      <td className="py-1.5 text-text-secondary">{fmt(row.handedRub)}</td>
+                      <td className="py-1.5 text-text-secondary">{fmt(row.pipelineRub)}</td>
+                      <td className="py-1.5 font-semibold text-success">{fmt(row.factualPremiumRub)}</td>
+                      <td className="py-1.5 text-text-secondary">{fmt(row.estimatedPremiumRub)}</td>
                       <td className="py-1.5">
-                        <ConversionRing
-                          percent={row.conversionPercent}
-                          size={32}
-                        />
+                        <ConversionRing percent={row.conversionPercent} size={32} />
                       </td>
                     </tr>
                   ))}

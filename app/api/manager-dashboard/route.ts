@@ -18,18 +18,17 @@ const BOUGHT_STATUSES: QuoteStatus[] = [
 ];
 // Still-open pipeline — everything except a dead end (rejected) or an
 // already-completed deal (handed_to_client) — used for the "if everything
-// in progress gets bought" revenue projection.
-const OPEN_STATUSES: QuoteStatus[] = QUOTE_STATUSES.filter(
-  (s) => s !== "rejected" && s !== "handed_to_client",
-);
-// Premium rate depends on the manager's all-time conversion rate (handed
-// to client / non-rejected, across every quote they've ever made — not
-// just the current pipeline): 10% of profit at 60%+ conversion, 7% below
-// it. Mirrored by the ConversionRing threshold in manager-dashboard.tsx —
-// keep both in sync if this ever changes.
+// in progress gets bought" revenue projection ("В работе").
+const OPEN_STATUSES: QuoteStatus[] = QUOTE_STATUSES.filter((s) => s !== "rejected" && s !== "handed_to_client");
+// Conversion is shown for information only now (see manager-dashboard.tsx)
+// — it used to also decide the premium rate (7%/10%); the partner changed
+// terms (2026-07) to a flat 10%, or 35% for a confirmed self-sourced
+// client. Kept as a constant here only so the ring's color threshold has
+// something to reference.
 const CONVERSION_PREMIUM_THRESHOLD_PERCENT = 60;
-const HIGH_CONVERSION_PREMIUM_RATE = 0.1;
-const LOW_CONVERSION_PREMIUM_RATE = 0.07;
+const NORMAL_PREMIUM_RATE_PERCENT = 10;
+const SELF_SOURCED_PREMIUM_RATE_PERCENT = 35;
+const SELF_SOURCED_CARGO_BONUS_RATE_PERCENT = 10;
 
 interface QuoteForStats {
   managerId: string;
@@ -42,36 +41,56 @@ interface QuoteForStats {
   // NOT the same as cargoDeliveryRub, which is what the client pays and
   // already has the owner's cargo margin baked in. Using cargoDeliveryRub
   // here would count 100% of cargo revenue as a pass-through cost and
-  // silently hide that margin from "profit."
+  // silently hide that margin from "profit." Reflects the actualized real
+  // figure once cargo has been actualized, the original estimate before
+  // that — same field, just overwritten in place by actualize-cargo.
   cargoCostRub: unknown;
   totalVolumeM3: unknown;
   totalWeightKg: unknown;
   searchServiceFeeRub: unknown;
   buyoutCommissionRub: unknown;
+  // Real buyout economics — see actualize-cargo/confirm-buyout routes.
+  buyoutFactConfirmed: boolean;
+  actualBuyoutCny: unknown;
+  actualBuyoutRateUsed: unknown;
+  buyoutPremiumRatePercent: unknown;
+  cargoBonusRatePercent: unknown;
+  client: { selfSourcedConfirmed: boolean; createdByManagerId: string | null };
 }
 
-// Company profit on a quote — the client's full payment minus the real
-// pass-through costs the company itself pays out (goods purchase, China
-// delivery, and the *cost* portion of cargo delivery — not the full charge,
-// see cargoCostRub above). What's left is Panda Bridge's own margin: the
-// search fee, buyout commission, attached services, AND the cargo margin —
-// the only thing a turnover-based premium should ever be a percentage of.
-function profitRub(q: QuoteForStats): number {
-  return (
-    Number(q.totalRub) -
-    Number(q.totalPriceRub) -
-    Number(q.chinaDeliveryRub) -
-    Number(q.cargoCostRub)
-  );
+// Services-only profit assuming zero goods margin (goods cost == quoted
+// price) — cargo fully excluded (revenue AND margin), unlike the old
+// profitRub which folded cargo margin in. This is what the ESTIMATE
+// treats as "услуги" profit before any buyout fact is confirmed: search
+// fee + buyout commission + attached services, algebraically the residual
+// once totalPriceRub/chinaDeliveryRub/cargoDeliveryRub are subtracted from
+// totalRub (same trick quoteBreakdown() in clients-tab.tsx uses).
+function computeEstimatedServicesProfitRub(q: QuoteForStats): number {
+  return Number(q.totalRub) - Number(q.totalPriceRub) - Number(q.chinaDeliveryRub) - Number(q.cargoDeliveryRub);
 }
 
-// Cargo-specific slice of profitRub — cargoDeliveryRub (what the client
-// paid for cargo, possibly discounted) minus cargoCostRub (what it really
-// cost) — kept separate from the rest (search fee, buyout commission,
-// services) so the owner can see the two income sources apart instead of
-// one blended "profit" number.
-function cargoProfitRub(q: QuoteForStats): number {
+// Once buyoutFactConfirmed, the real goods cost (actualBuyoutCny ×
+// actualBuyoutRateUsed) replaces totalPriceRub in the same formula above —
+// a factory discount or favorable FX at the real purchase moment becomes
+// real, countable profit instead of vanishing into "100% pass-through
+// cost" the way the estimate always assumed.
+function computeFactualServicesProfitRub(q: QuoteForStats): number {
+  const realBuyoutRub = Number(q.actualBuyoutCny) * Number(q.actualBuyoutRateUsed);
+  return Number(q.totalRub) - Number(q.chinaDeliveryRub) - Number(q.cargoDeliveryRub) - realBuyoutRub;
+}
+
+// Cargo margin — cargoDeliveryRub (what the client pays, possibly
+// discounted, and the actualized real figure once cargo's been
+// actualized) minus cargoCostRub (real or estimated cost, same rule).
+// Owner-only visibility, same as it's always been — this is NOT what a
+// manager's cargo bonus is based on (that's a flat % of revenue, see
+// cargoBonusRub below), just the owner's own accounting.
+function computeCargoProfitRub(q: QuoteForStats): number {
   return Number(q.cargoDeliveryRub) - Number(q.cargoCostRub);
+}
+
+function isSelfSourcedFor(q: QuoteForStats, managerId: string): boolean {
+  return q.client.selfSourcedConfirmed && q.client.createdByManagerId === managerId;
 }
 
 function summarize(quotes: QuoteForStats[]) {
@@ -80,8 +99,6 @@ function summarize(quotes: QuoteForStats[]) {
   let boughtRub = 0;
   let handedRub = 0;
   let pipelineRub = 0;
-  let pipelineProfitRub = 0;
-  let pipelineCargoProfitRub = 0;
   // Gross components of pipelineRub — not owner-confidential (unlike cost/
   // margin figures), so returned to every role. Lets the "В работе" card's
   // hover breakdown show what it's actually made of instead of one opaque
@@ -91,16 +108,25 @@ function summarize(quotes: QuoteForStats[]) {
   let pipelineGoodsRub = 0;
   let pipelineChinaDeliveryRub = 0;
   let pipelineCargoRub = 0;
-  // Physical totals (not ₽) behind the cargo income figure — "какой объём
-  // в расчётах общий и вес" next to "Доход за карго" — and the two revenue
-  // lines behind "Ожидаемый доход компании" ("сколько за услуги поиска и
-  // сколько комиссия за выкуп"). None of these four are confidential on
-  // their own (a manager already sees them per-quote); only the sections
-  // that render them company-wide are owner-gated, client-side.
   let pipelineVolumeM3 = 0;
   let pipelineWeightKg = 0;
   let pipelineSearchFeeRub = 0;
   let pipelineBuyoutCommissionRub = 0;
+
+  // The four buckets — see PB-V5 chat 2026-07-27: manager premium now
+  // comes ONLY from services (10%, or 35% self-sourced), never from cargo
+  // margin. Cargo's own potential/factual split still matters for the
+  // OWNER's accurate profit tracking (cargoProfitRub below), separate from
+  // the flat cargo-revenue bonus a self-sourced manager earns.
+  let potentialServicesProfitRub = 0;
+  let potentialServicesPremiumRub = 0;
+  let factualServicesProfitRub = 0;
+  let factualServicesPremiumRub = 0;
+  let potentialCargoProfitRub = 0;
+  let factualCargoProfitRub = 0;
+  let potentialCargoBonusRub = 0;
+  let factualCargoBonusRub = 0;
+
   for (const q of quotes) {
     statusCounts[q.status] = (statusCounts[q.status] ?? 0) + 1;
     // "Выкуплено": everything except cargo delivery, which hasn't happened
@@ -108,13 +134,10 @@ function summarize(quotes: QuoteForStats[]) {
     // (that quote also counts fully in handedRub below — the two metrics
     // overlap for handed_to_client by design, they answer different
     // questions: "money secured for the buyout" vs "fully delivered").
-    if (BOUGHT_STATUSES.includes(q.status))
-      boughtRub += Number(q.totalRub) - Number(q.cargoDeliveryRub);
+    if (BOUGHT_STATUSES.includes(q.status)) boughtRub += Number(q.totalRub) - Number(q.cargoDeliveryRub);
     if (q.status === "handed_to_client") handedRub += Number(q.totalRub);
     if (OPEN_STATUSES.includes(q.status)) {
       pipelineRub += Number(q.totalRub);
-      pipelineProfitRub += profitRub(q);
-      pipelineCargoProfitRub += cargoProfitRub(q);
       pipelineGoodsRub += Number(q.totalPriceRub);
       pipelineChinaDeliveryRub += Number(q.chinaDeliveryRub);
       pipelineCargoRub += Number(q.cargoDeliveryRub);
@@ -123,29 +146,46 @@ function summarize(quotes: QuoteForStats[]) {
       pipelineSearchFeeRub += Number(q.searchServiceFeeRub);
       pipelineBuyoutCommissionRub += Number(q.buyoutCommissionRub);
     }
+
+    if (q.status === "rejected") continue; // dead deal — counts toward neither bucket, either side
+
+    // Услуги — gated on buyoutFactConfirmed (a flag, independent of
+    // Quote.status; see status/route.ts), not on any particular status.
+    if (q.buyoutFactConfirmed) {
+      const profit = computeFactualServicesProfitRub(q);
+      const rate = Number(q.buyoutPremiumRatePercent ?? NORMAL_PREMIUM_RATE_PERCENT) / 100;
+      factualServicesProfitRub += profit;
+      factualServicesPremiumRub += Math.max(0, profit) * rate;
+    } else {
+      const profit = computeEstimatedServicesProfitRub(q);
+      const rate = (isSelfSourcedFor(q, q.managerId) ? SELF_SOURCED_PREMIUM_RATE_PERCENT : NORMAL_PREMIUM_RATE_PERCENT) / 100;
+      potentialServicesProfitRub += profit;
+      potentialServicesPremiumRub += Math.max(0, profit) * rate;
+    }
+
+    // Карго — gated on cargoBonusRatePercent being locked in, which only
+    // happens at the handed_to_client transition (see status/route.ts).
+    if (q.cargoBonusRatePercent !== null && q.cargoBonusRatePercent !== undefined) {
+      factualCargoProfitRub += computeCargoProfitRub(q);
+      factualCargoBonusRub += Number(q.cargoDeliveryRub) * (Number(q.cargoBonusRatePercent) / 100);
+    } else {
+      potentialCargoProfitRub += computeCargoProfitRub(q);
+      const bonusRate = isSelfSourcedFor(q, q.managerId) ? SELF_SOURCED_CARGO_BONUS_RATE_PERCENT : 0;
+      potentialCargoBonusRub += Number(q.cargoDeliveryRub) * (bonusRate / 100);
+    }
   }
+
   // All-time, not just the open pipeline above — this is every quote this
-  // manager (or scope) has ever made, which is exactly the "средняя
-  // конверсия за всю историю работы" the premium tier is supposed to track.
-  // Counts at "выкуплено" (BOUGHT_STATUSES — client paid, we bought the
-  // goods), not "выдан клиенту" — the sale itself converts at buyout;
-  // everything after that is logistics, not a sales-funnel outcome. A quote
-  // sitting in "В доставке на склад" is already a converted sale.
+  // manager (or scope) has ever made. Purely informational now (see
+  // NORMAL_PREMIUM_RATE_PERCENT above) — kept because it's still a
+  // meaningful "how good is this manager's close rate" number, just no
+  // longer wired to the premium rate itself.
   const nonRejected = quotes.filter((q) => q.status !== "rejected").length;
-  const convertedCount = quotes.filter((q) =>
-    BOUGHT_STATUSES.includes(q.status),
-  ).length;
-  const conversionPercent =
-    nonRejected > 0 ? Math.round((convertedCount / nonRejected) * 100) : 0;
-  const premiumRatePercent =
-    conversionPercent >= CONVERSION_PREMIUM_THRESHOLD_PERCENT ? 10 : 7;
-  // Floored at 0 — a manager whose pipeline is currently net-negative (heavy
-  // discounting, etc.) doesn't owe the company a negative premium.
-  const premiumRate =
-    premiumRatePercent === 10
-      ? HIGH_CONVERSION_PREMIUM_RATE
-      : LOW_CONVERSION_PREMIUM_RATE;
-  const premiumRub = Math.max(0, pipelineProfitRub) * premiumRate;
+  const convertedCount = quotes.filter((q) => BOUGHT_STATUSES.includes(q.status)).length;
+  const conversionPercent = nonRejected > 0 ? Math.round((convertedCount / nonRejected) * 100) : 0;
+
+  const estimatedPremiumRub = potentialServicesPremiumRub + potentialCargoBonusRub;
+  const factualPremiumRub = factualServicesPremiumRub + factualCargoBonusRub;
 
   return {
     statusCounts,
@@ -160,10 +200,14 @@ function summarize(quotes: QuoteForStats[]) {
     pipelineWeightKg,
     pipelineSearchFeeRub,
     pipelineBuyoutCommissionRub,
-    pipelineProfitRub,
-    pipelineCargoProfitRub,
-    premiumRub,
-    premiumRatePercent,
+    potentialServicesProfitRub,
+    factualServicesProfitRub,
+    potentialCargoProfitRub,
+    factualCargoProfitRub,
+    potentialCargoBonusRub,
+    factualCargoBonusRub,
+    estimatedPremiumRub,
+    factualPremiumRub,
     conversionPercent,
   };
 }
@@ -176,10 +220,7 @@ export async function GET(req: NextRequest) {
 
   const visibleManagerIds = await getVisibleManagerIds(session);
   const quotes = await prisma.quote.findMany({
-    where:
-      visibleManagerIds === "all"
-        ? undefined
-        : { managerId: { in: visibleManagerIds } },
+    where: visibleManagerIds === "all" ? undefined : { managerId: { in: visibleManagerIds } },
     select: {
       managerId: true,
       status: true,
@@ -192,6 +233,12 @@ export async function GET(req: NextRequest) {
       totalWeightKg: true,
       searchServiceFeeRub: true,
       buyoutCommissionRub: true,
+      buyoutFactConfirmed: true,
+      actualBuyoutCny: true,
+      actualBuyoutRateUsed: true,
+      buyoutPremiumRatePercent: true,
+      cargoBonusRatePercent: true,
+      client: { select: { selfSourcedConfirmed: true, createdByManagerId: true } },
     },
   });
 
@@ -200,21 +247,13 @@ export async function GET(req: NextRequest) {
   // Per-manager breakdown — meaningful for owner (sees everyone) and senior
   // (sees their team); a plain manager only ever sees themself here, so
   // it's omitted for them (the overall numbers above already are theirs).
-  let perManager:
-    | (ReturnType<typeof summarize> & {
-        managerId: string;
-        managerName: string;
-      })[]
-    | null = null;
+  let perManager: (ReturnType<typeof summarize> & { managerId: string; managerName: string })[] | null = null;
   if (session.role === "owner" || session.role === "senior") {
     // Every manager in scope, including ones with zero quotes so far —
     // that's exactly what a "who isn't pulling their weight" view needs to
     // show, not just whoever happens to have a quote already.
     const managers = await prisma.manager.findMany({
-      where:
-        visibleManagerIds === "all"
-          ? { role: { not: "owner" } }
-          : { id: { in: visibleManagerIds } },
+      where: visibleManagerIds === "all" ? { role: { not: "owner" } } : { id: { in: visibleManagerIds } },
       select: { id: true, name: true },
     });
     const byManager = new Map<string, QuoteForStats[]>();
@@ -230,69 +269,72 @@ export async function GET(req: NextRequest) {
     }));
   }
 
-  // Company-wide expected income, owner-only: what's left of the pipeline's
-  // profit (goods purchase, China delivery, and cargo delivery already
-  // subtracted inside pipelineProfitRub) after every manager's own premium
-  // is paid out too. Summed per-manager (not 10% of the company-wide total)
-  // so a manager who's currently net-negative doesn't drag down — via a
-  // floored-at-0 premium — what gets deducted for managers who are profitable.
+  // Company-wide income, owner-only. Potential = if every open quote gets
+  // bought/actualized/handed over as currently estimated, minus every
+  // manager's own potential premium (summed per-manager, not "10% of the
+  // company-wide total", so a manager who's currently net-negative doesn't
+  // drag down what gets deducted for managers who are profitable).
+  // Factual = the same, but only counting what's actually been confirmed —
+  // no longer a projection.
   let expectedIncomeRub: number | null = null;
-  // Owner-only breakdown of overall.pipelineProfitRub into its two sources —
-  // "сколько доход за карго" (the margin baked into cargo rates) vs
-  // everything else (search fee, buyout commission, attached services).
-  // Not meaningful/shown to anyone but the owner: the cargo figure directly
-  // implies the cargo margin config in Тарифы, which is owner-confidential.
-  let cargoProfitRub: number | null = null;
-  let otherProfitRub: number | null = null;
-  // Alongside cargoProfitRub — "сколько объём в расчётах общий и вес" next
-  // to the "Доход за карго" figure.
+  let actualIncomeRub: number | null = null;
+  // Owner-only: the four profit buckets themselves, plus the physical
+  // cargo totals and the two always-certain services-revenue lines (both
+  // already shown per-quote to any manager, so not confidential on their
+  // own — only the company-wide aggregate view is owner-gated).
+  let potentialServicesProfitRub: number | null = null;
+  let factualServicesProfitRub: number | null = null;
+  let potentialCargoProfitRub: number | null = null;
+  let factualCargoProfitRub: number | null = null;
   let cargoVolumeM3: number | null = null;
   let cargoWeightKg: number | null = null;
-  // Alongside expectedIncomeRub — "сколько за услуги поиска и сколько
-  // комиссия за выкуп" next to "Ожидаемый доход компании".
   let searchFeeRub: number | null = null;
   let buyoutCommissionRub: number | null = null;
   if (session.role === "owner" && perManager) {
-    const totalManagerPremiumsRub = perManager.reduce(
-      (sum, m) => sum + m.premiumRub,
-      0,
-    );
-    expectedIncomeRub = overall.pipelineProfitRub - totalManagerPremiumsRub;
-    cargoProfitRub = overall.pipelineCargoProfitRub;
-    otherProfitRub = overall.pipelineProfitRub - overall.pipelineCargoProfitRub;
+    const totalManagerPotentialPremiumsRub = perManager.reduce((sum, m) => sum + m.estimatedPremiumRub, 0);
+    const totalManagerFactualPremiumsRub = perManager.reduce((sum, m) => sum + m.factualPremiumRub, 0);
+    expectedIncomeRub =
+      overall.potentialServicesProfitRub + overall.potentialCargoProfitRub - totalManagerPotentialPremiumsRub;
+    actualIncomeRub = overall.factualServicesProfitRub + overall.factualCargoProfitRub - totalManagerFactualPremiumsRub;
+    potentialServicesProfitRub = overall.potentialServicesProfitRub;
+    factualServicesProfitRub = overall.factualServicesProfitRub;
+    potentialCargoProfitRub = overall.potentialCargoProfitRub;
+    factualCargoProfitRub = overall.factualCargoProfitRub;
     cargoVolumeM3 = overall.pipelineVolumeM3;
     cargoWeightKg = overall.pipelineWeightKg;
     searchFeeRub = overall.pipelineSearchFeeRub;
     buyoutCommissionRub = overall.pipelineBuyoutCommissionRub;
   }
 
-  // pipelineCargoProfitRub itself never leaves the server for anyone but
-  // the owner either — even as a raw field on `overall`/`perManager`, it's
-  // the same owner-confidential cargo-margin signal as cargoProfitRub above,
-  // just not yet subtracted out.
-  const stripCargoProfit = <T extends { pipelineCargoProfitRub: number }>(
+  // potentialCargoProfitRub/factualCargoProfitRub never leave the server
+  // for anyone but the owner — even as raw fields on `overall`/
+  // `perManager`, they're the same owner-confidential cargo-margin signal
+  // (implies the cargo margin config in Тарифы) as the top-level fields
+  // above, just not yet subtracted out.
+  const stripCargoProfit = <T extends { potentialCargoProfitRub: number; factualCargoProfitRub: number }>(
     row: T,
-  ): Omit<T, "pipelineCargoProfitRub"> => {
+  ): Omit<T, "potentialCargoProfitRub" | "factualCargoProfitRub"> => {
     const copy = { ...row };
-    delete (copy as Partial<T>).pipelineCargoProfitRub;
+    delete (copy as Partial<T>).potentialCargoProfitRub;
+    delete (copy as Partial<T>).factualCargoProfitRub;
     return copy;
   };
-  const responseOverall =
-    session.role === "owner" ? overall : stripCargoProfit(overall);
-  const responsePerManager =
-    perManager && session.role !== "owner"
-      ? perManager.map(stripCargoProfit)
-      : perManager;
+  const responseOverall = session.role === "owner" ? overall : stripCargoProfit(overall);
+  const responsePerManager = perManager && session.role !== "owner" ? perManager.map(stripCargoProfit) : perManager;
 
   return Response.json({
     overall: responseOverall,
     perManager: responsePerManager,
     expectedIncomeRub,
-    cargoProfitRub,
-    otherProfitRub,
+    actualIncomeRub,
+    potentialServicesProfitRub,
+    factualServicesProfitRub,
+    potentialCargoProfitRub,
+    factualCargoProfitRub,
     cargoVolumeM3,
     cargoWeightKg,
     searchFeeRub,
     buyoutCommissionRub,
+    conversionPremiumThresholdPercent: CONVERSION_PREMIUM_THRESHOLD_PERCENT,
   });
 }
