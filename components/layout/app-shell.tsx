@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 import { Menu, Send, UserRound, X } from "lucide-react";
 import { MotionConfig } from "framer-motion";
 import Link from "next/link";
@@ -14,6 +15,16 @@ import { cn } from "@/lib/utils";
 
 function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const pathname = usePathname();
+
+  // /desk (shared tool) and /desk/manager (per-manager cabinet) are
+  // self-contained internal apps with their own header/nav — the public
+  // site's sidebar/header/footer (Главная, Экосистема, etc.) has no reason
+  // to wrap around them and would just be confusing chrome around a
+  // workspace.
+  if (pathname?.startsWith("/desk")) {
+    return <>{children}</>;
+  }
 
   return (
     <>

@@ -11,6 +11,19 @@ async function nextClientDisplayId(): Promise<number> {
   return (last?.displayId ?? 0) + 1;
 }
 
+// Same max+1 pattern as nextClientDisplayId, for the manager cabinet
+// ("Менеджер №N").
+async function nextManagerDisplayId(): Promise<number> {
+  const last = await prisma.manager.findFirst({ orderBy: { displayId: "desc" } });
+  return (last?.displayId ?? 0) + 1;
+}
+
+// Same max+1 pattern, for the quote calculator ("Просчёт №N").
+async function nextQuoteDisplayId(): Promise<number> {
+  const last = await prisma.quote.findFirst({ orderBy: { displayId: "desc" } });
+  return (last?.displayId ?? 0) + 1;
+}
+
 // Two-letter prefix per direction for service SKUs, e.g. "ST-014".
 const DIRECTION_CODE_PREFIX: Record<OrderDirection, string> = {
   start: "ST",
@@ -32,4 +45,4 @@ async function nextServiceCode(direction: OrderDirection): Promise<string> {
   return `${prefix}-${String(lastSequence + 1).padStart(3, "0")}`;
 }
 
-export { nextClientDisplayId, nextServiceCode, DIRECTION_CODE_PREFIX };
+export { nextClientDisplayId, nextManagerDisplayId, nextQuoteDisplayId, nextServiceCode, DIRECTION_CODE_PREFIX };

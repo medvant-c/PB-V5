@@ -26,8 +26,8 @@ function SiteFooter() {
           <Logo />
           <p className="text-xs text-text-secondary">
             © {new Date().getFullYear()} Panda Bridge. Все права защищены.{" "}
-            <Link href="/desk" className="text-[10px] text-text-secondary/40 hover:text-text-secondary">
-              Рабочий стол
+            <Link href="/desk/manager" className="text-[10px] text-text-secondary/40 hover:text-text-secondary">
+              Вход для сотрудников
             </Link>
           </p>
         </div>

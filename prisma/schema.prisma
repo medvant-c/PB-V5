@@ -23,6 +23,14 @@ enum DeskFileTab {
   templates
   calculators
   orders
+  quotes
+  // Manager cabinet's "База данных" tab — general work files/documents
+  // shared across the whole team, not attached to any specific quote/client
+  // (relatedId stays null here, same as templates).
+  manager_database
+  // Manager cabinet's per-client document store — contracts, invoice scans,
+  // client-provided specs, etc. relatedId is the Client id.
+  manager_client_files
 }
 
 model DeskFile {
@@ -38,6 +46,12 @@ model DeskFile {
   mimeType     String
   size         Int
   uploadedAt   DateTime    @default(now())
+  // Who uploaded it — only ever set for tab: manager_database (the old
+  // shared-password /desk tool has no concept of a manager identity).
+  // SetNull on delete: removing a manager shouldn't delete or orphan the
+  // files they uploaded, just anonymize the attribution.
+  uploadedByManagerId String?
+  uploadedByManager   Manager?    @relation(fields: [uploadedByManagerId], references: [id], onDelete: SetNull)
 
   @@index([tab, relatedId])
 }
@@ -65,6 +79,18 @@ enum OrderStatus {
   cancelled
 }
 
+// Where a client first came from — collected once, on creation, in the
+// manager cabinet's "Новый клиент" form (Раздел 1). Nullable because every
+// Client created before this field existed (and any created via the older
+// /desk "Клиенты" tab) has none.
+enum ClientSource {
+  instagram
+  telegram
+  website
+  referral
+  other
+}
+
 model Client {
   id           String   @id @default(cuid())
   // Short human-friendly number shown in the desk UI ("Клиент №N") — the
@@ -72,11 +98,24 @@ model Client {
   // Assigned in app code (lib/display-ids.ts) as max(displayId)+1, since
   // SQLite only supports autoincrement on the table's own primary key.
   displayId    Int      @unique
-  email        String   @unique
+  // Optional at creation (manager cabinet form) — a client without an email
+  // simply never gets /account portal access (that login is keyed by
+  // email), same as an unactivated manager/client account today.
+  email        String?  @unique
   name         String
+  company      String?
+  // Telegram/WeChat handle — a distinct contact channel from phone/email,
+  // collected in the manager cabinet's "Новый клиент" form.
+  messenger    String?
   phone        String?
   country      String?
   city         String?
+  source       ClientSource?
+  // Which manager brought in this client — null for clients created before
+  // this field existed or via the older shared-password /desk "Клиенты" tab.
+  // Needed for KPI attribution ("новых клиентов за месяц" per manager).
+  createdByManagerId String?
+  createdByManager   Manager? @relation(fields: [createdByManagerId], references: [id])
   // Null until the client opens their activation link and sets a password —
   // an account can exist (created by staff) before it's ever activated.
   passwordHash String?
@@ -84,8 +123,326 @@ model Client {
   // app/api/account-login/route.ts) — a soft block, not a delete, so their
   // orders/history stay intact.
   active       Boolean  @default(true)
+  // Manager-cabinet archive (distinct from `active` above, which gates
+  // /account portal login) — archived clients drop out of the default
+  // "Клиенты" list but stay fully intact, toggle-able back via the
+  // "Показывать архивные" switch. Null = not archived.
+  archivedAt   DateTime?
   createdAt    DateTime @default(now())
   orders       Order[]
+  quotes       Quote[]
+
+  @@index([createdByManagerId])
+}
+
+// Personal login for procurement/sourcing managers at /desk/manager — unlike
+// /desk's single shared password, this is a real per-person account, needed
+// so KPI/bonus data can be attributed to a specific manager. Anton (the
+// owner) is himself a Manager row with role "owner", not a separate system —
+// the only difference is which pages his role unlocks.
+enum ManagerRole {
+  manager
+  // Старший менеджер — sees/can act on their own clients plus every
+  // client created by managers attached to them via supervisorId below.
+  // Same tariff-edit rights as a plain manager (gated by canEditTariffs,
+  // not automatically granted by this role).
+  senior
+  owner
+}
+
+model Manager {
+  id                 String      @id @default(cuid())
+  displayId          Int         @unique
+  email              String      @unique
+  name               String
+  role               ManagerRole @default(manager)
+  // Null until the manager opens their activation link and sets a password —
+  // same activate-before-first-login shape as Client.passwordHash.
+  passwordHash       String?
+  active             Boolean     @default(true)
+  // Owner-controlled permission gate for POST /api/manager-tariffs — owner
+  // can always edit regardless of this flag; everyone else (manager or
+  // senior) needs it explicitly turned on. Default false: a newly created
+  // manager can read tariffs (needed to build quotes) but not change them
+  // until the owner opts them in.
+  canEditTariffs     Boolean     @default(false)
+  // Self-relation for the "старший менеджер" hierarchy: a manager attached
+  // to a senior manager via supervisorId shows up in that senior's scope
+  // (lib/manager-scope.ts) without changing who created their own clients.
+  supervisorId       String?
+  supervisor         Manager?    @relation("ManagerSupervisor", fields: [supervisorId], references: [id])
+  subordinates       Manager[]   @relation("ManagerSupervisor")
+  // Drives the 2-month probation window from the KPI spec (month 1 =
+  // training/adaptation, no real KPI; month 2+ = full KPI) — stored per
+  // manager rather than hardcoded so it survives someone starting mid-month
+  // and so the probation length itself can differ per hire if ever needed.
+  probationStartedAt DateTime    @default(now())
+  probationMonths    Int         @default(2)
+  createdAt          DateTime    @default(now())
+
+  clients        Client[]
+  quotes         Quote[]
+  tariffUpdates  TariffSettings[]
+  uploadedFiles  DeskFile[]
+}
+
+// Which tier of the "Поиск товара" service a quote is billed under — the
+// three fixed prices from the approved price list (Standard/Expert/Pro).
+// The actual ₽ amount lives on TariffSettings (owner-editable, not a
+// hardcoded constant) — this enum only names which tier was picked.
+enum QuoteType {
+  standard
+  expert
+  pro
+}
+
+// How the manager told the calculator to work out the cargo volume — three
+// input paths the spec explicitly asks for, all converging on the same
+// stored totalVolumeM3 field so the rest of the formula chain doesn't care
+// which path was used.
+enum VolumeInputMode {
+  per_unit_dims
+  total_dims
+  manual_total
+}
+
+// Cargo pricing can be worked out two ways — matches the calculators-tab.tsx
+// "по плотности" (density-tiered $/kg, looked up from DensityTariff) vs
+// "по объёму" (flat $/cbm from TariffSettings.volumeRateUsdPerCbm) split the
+// manager already uses in the old cargo calculator, now reused here.
+enum DeliveryPricingMode {
+  density
+  volume
+}
+
+// Daily manager input ("Тарифы" tab): FX rates, the flat volume-based cargo
+// rate, the buyout-commission percentage, and the three fixed service
+// prices. Append-only (a new row per save, not an overwritten singleton) so
+// a Quote can snapshot exactly which rates were in effect when it was
+// created — the "current" settings are just the newest row by createdAt,
+// same snapshot-over-silent-recompute philosophy as Order.price.
+model TariffSettings {
+  id                       String   @id @default(cuid())
+  cnyRateRub               Decimal
+  usdRateRub               Decimal
+  // Flat rate used when a quote's delivery is priced "по объёму" instead of
+  // by density — spec explicitly calls this a temporary placeholder value
+  // the manager will tune ("пока ставим временно 340$").
+  volumeRateUsdPerCbm      Decimal
+  // % of (total goods cost + China domestic delivery) charged as the
+  // buyout/purchasing-organization commission — not specified in the
+  // original spec, so this starts as an editable placeholder rather than a
+  // hardcoded guess (flagged to the owner separately).
+  buyoutCommissionPercent  Decimal
+  standardPriceRub         Decimal
+  expertPriceRub           Decimal
+  proPriceRub              Decimal
+  // Owner-confidential cargo margin baked into every rate above: every
+  // density-tier ratePerKgUsd already has this much profit added on top of
+  // the real cost, and volumeRateUsdPerCbm has cargoVolumeMarginUsdPerCbm
+  // added. GET /api/manager-tariffs strips both fields for non-owner
+  // sessions — a manager needs the sell rate to price a quote, never the
+  // margin baked into it. Rates change; the owner's convention is that the
+  // margin itself stays put, which is exactly why it's a separate editable
+  // field instead of derived from a "cost" field that would drift with
+  // every rate update.
+  cargoDensityMarginUsdPerKg Decimal @default(1.2)
+  cargoVolumeMarginUsdPerCbm Decimal @default(50)
+  createdAt                DateTime @default(now())
+  createdByManagerId       String
+  createdByManager         Manager  @relation(fields: [createdByManagerId], references: [id])
+}
+
+// One row per density tier per cargo category — e.g. "Одежда, 150-160
+// kg/m³, $4.1/kg". A quote looks up the single matching row for its
+// category + computed density and snapshots the rate it found onto
+// Quote.cargoRateUsd, so a later edit to this table never changes an
+// already-issued quote's numbers. categoryKey/categoryLabel are plain
+// strings (not an enum) so the manager can add a new cargo category from
+// the Тарифы tab without a schema migration.
+model DensityTariff {
+  id            String   @id @default(cuid())
+  categoryKey   String
+  categoryLabel String
+  // Upper bound of this tier, exclusive — null means "no upper bound" (the
+  // top tier, e.g. 300-400 kg/m³ and above).
+  minDensity    Decimal
+  maxDensity    Decimal?
+  ratePerKgUsd  Decimal
+  // Owner-confidential real cost per kg for this specific category — unlike
+  // TariffSettings.cargoDensityMarginUsdPerKg (a single global default used
+  // only to pre-fill this field for a brand-new tier), cost genuinely
+  // varies by category, so it's tracked per-row and owner-editable here.
+  // margin for a given tier = ratePerKgUsd - costPerKgUsd. GET
+  // /api/manager-density-tariffs strips this for non-owner the same way
+  // /api/manager-tariffs strips the global margin fields.
+  costPerKgUsd  Decimal  @default(0)
+  createdAt     DateTime @default(now())
+
+  @@index([categoryKey])
+}
+
+// Per-category "по объёму" ($/m³) rate — e.g. "Мелкий хозяйственный товар"
+// ships cheaper per m³ than "Большой хозяйственный товар" even though both
+// are priced by volume, not weight. One row per category (not tiered like
+// DensityTariff — volume rate doesn't vary by density, only by category).
+// Used both when a quote is explicitly priced "по объёму" and as the
+// low-density (<100 kg/m³) fallback for a "по плотности" quote — see
+// LOW_DENSITY_VOLUME_THRESHOLD_KG_M3 in lib/quote-engine.ts. A quote
+// snapshots whichever rate it found onto Quote.cargoRateUsd, so editing
+// this table never changes an already-issued quote's numbers.
+model VolumeTariff {
+  id            String   @id @default(cuid())
+  categoryKey   String   @unique
+  categoryLabel String
+  rateUsdPerCbm Decimal
+  // Owner-confidential real cost per m³ — same reasoning as
+  // DensityTariff.costPerKgUsd.
+  costUsdPerCbm Decimal  @default(0)
+  createdAt     DateTime @default(now())
+}
+
+// Free-form status list, not a strict blocking workflow — same
+// pick-any-status philosophy as the older Order/OrderStatusEvent pipeline
+// in /desk, just without a separate history table (statusChangedAt below is
+// enough to drive the "stuck in progress" warning; nothing here needs a
+// full audit trail yet).
+enum QuoteStatus {
+  in_progress // взят в работу
+  pending_approval // на согласовании
+  rejected // отказ
+  awaiting_payment // ждём оплату
+  need_to_buyout // нужно выкупить — money's in, goods not bought yet
+  in_transit_to_warehouse // в доставке на склад
+  delivered_to_warehouse // доставлен на склад
+  sent_to_client // отправлен клиенту
+  handed_to_client // выдан клиенту
+}
+
+model Quote {
+  id       String  @id @default(cuid())
+  displayId Int    @unique
+  clientId String
+  client   Client  @relation(fields: [clientId], references: [id])
+  managerId String
+  manager  Manager @relation(fields: [managerId], references: [id])
+
+  status          QuoteStatus @default(in_progress)
+  // Bumped on every status change (not just createdAt) — lets the UI show
+  // "stuck in progress for >24h" without a separate history table.
+  statusChangedAt DateTime    @default(now())
+
+  quoteType           QuoteType
+  // Snapshot of the chosen tier's price at creation time (from
+  // TariffSettings), editable per quote afterwards if the manager wants to
+  // give a discount — same reasoning as Order.price's own snapshot comment.
+  searchServiceFeeRub Decimal
+  // True when this quote landed in the client's first-3-Standard-quotes
+  // promo (searchServiceFeeRub forced to 0 at creation) — kept as its own
+  // flag rather than inferred from searchServiceFeeRub==0 so the PDF can
+  // show "БЕСПЛАТНО" specifically for the promo case, not for an unrelated
+  // manual discount down to zero.
+  searchFeeWaived     Boolean   @default(false)
+
+  productName        String
+  // Never shown on the client-facing PDF export — internal only.
+  productLink        String?
+  productDescription String?
+  color              String?
+  dimensions         String?
+  quantity           Int
+
+  priceCnyPerUnit  Decimal
+  priceRubPerUnit  Decimal
+  totalPriceCny    Decimal
+  totalPriceRub    Decimal
+
+  chinaDeliveryCny Decimal @default(0)
+  chinaDeliveryRub Decimal @default(0)
+
+  weightPerUnitKg  Decimal
+  totalWeightKg    Decimal
+
+  volumeInputMode    VolumeInputMode
+  unitLengthCm       Decimal?
+  unitWidthCm        Decimal?
+  unitHeightCm       Decimal?
+  totalLengthCm      Decimal?
+  totalWidthCm       Decimal?
+  totalHeightCm      Decimal?
+  // Always populated regardless of volumeInputMode — the one number the
+  // rest of the formula chain (density, cargo rate) actually reads.
+  totalVolumeM3      Decimal
+
+  densityKgM3 Decimal
+
+  deliveryPricingMode DeliveryPricingMode
+  // Only meaningful when deliveryPricingMode is "density".
+  cargoCategoryKey    String?
+  // Snapshot of whichever rate was actually used (density-tier lookup or
+  // the flat volume rate) — auditable without re-deriving from tariff
+  // tables that may have since changed. This is the undiscounted per-unit
+  // sell rate; cargoDiscountUsd below is applied on top of it.
+  cargoRateUsd        Decimal
+  // Manager-entered discount off the computed cargo charge (e.g. for a big
+  // client) — already subtracted into cargoDeliveryUsd/cargoDeliveryRub
+  // below, kept here separately so the discount itself stays visible/
+  // auditable instead of disappearing into the final number.
+  cargoDiscountUsd    Decimal @default(0)
+  cargoDeliveryUsd    Decimal
+  cargoDeliveryRub    Decimal
+  // Owner-confidential: the real cargo cost this quote is snapshotted
+  // against (cargoRateUsd's tariff, minus TariffSettings' cargo margin at
+  // creation time, times the same weight/volume basis cargoRateUsd used) —
+  // independent of cargoDiscountUsd, so a discount correctly eats into
+  // margin instead of silently changing what the delivery "actually cost."
+  // Never shown to a non-owner; see app/api/manager-dashboard for the only
+  // place this is read (cargo profit = cargoDeliveryRub - cargoCostRub).
+  cargoCostUsd        Decimal @default(0)
+  cargoCostRub        Decimal @default(0)
+
+  buyoutCommissionPercent Decimal
+  buyoutCommissionRub     Decimal
+
+  // Grand total the client actually pays: goods + China delivery + search
+  // service + buyout commission + cargo delivery.
+  totalRub Decimal
+
+  // FX rates actually used for this quote — snapshotted from TariffSettings
+  // at creation time, independent of whatever the rate is by the time
+  // someone reopens this quote later.
+  cnyRateUsed Decimal
+  usdRateUsed Decimal
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attachedServices QuoteAttachedService[]
+
+  @@index([clientId])
+  @@index([managerId])
+}
+
+// Extra Panda Bridge services (from the price list, ServiceCatalogItem)
+// attached to a quote alongside the core "поиск товара" fee — e.g.
+// packaging, branding, photo shoot. Snapshotted (name/priceRub), not a live
+// reference, so deleting or re-pricing a catalog item never changes an
+// already-issued quote. serviceCatalogItemId is nullable for the same
+// reason (the source item may be deleted later; the snapshot still stands).
+// priceRub is entered/confirmed by the manager, not parsed from the
+// catalog's free-text price string (see ServiceCatalogItem.price below) —
+// that string isn't reliably a clean number ("от 10 000 ₽/ед.").
+model QuoteAttachedService {
+  id                  String              @id @default(cuid())
+  quoteId             String
+  quote               Quote               @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  serviceCatalogItemId String?
+  serviceCatalogItem   ServiceCatalogItem? @relation(fields: [serviceCatalogItemId], references: [id], onDelete: SetNull)
+  name                String
+  priceRub            Decimal
+  createdAt           DateTime            @default(now())
+
+  @@index([quoteId])
 }
 
 // Catalog of sellable services with prices, picked from a dropdown when a
@@ -104,6 +461,7 @@ model ServiceCatalogItem {
   price     String
   createdAt DateTime       @default(now())
   orders    Order[]
+  attachedToQuotes QuoteAttachedService[]
 
   @@index([direction])
 }
@@ -118,7 +476,7 @@ model Order {
   // catalog price may change later, but a client's own order shouldn't.
   price               String?
   serviceCatalogItemId String?
-  serviceCatalogItem   ServiceCatalogItem? @relation(fields: [serviceCatalogItemId], references: [id])
+  serviceCatalogItem   ServiceCatalogItem? @relation(fields: [serviceCatalogItemId], references: [id], onDelete: SetNull)
   status    OrderStatus        @default(new)
   // False only for orders a client placed themselves via the /account cart
   // checkout — lets the desk UI badge the client/order until a manager

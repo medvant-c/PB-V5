@@ -51,7 +51,11 @@ export async function POST(req: NextRequest) {
 
   const client = await prisma.client.findUnique({ where: { id: clientId } });
   if (client) {
-    await sendManagerOrderNotification(client.name, client.email, orders.map((order) => order.title));
+    // client.email is nullable in the schema now, though in practice this
+    // code path is only reachable by a client who's logged into /account —
+    // which itself requires an email — so this is just satisfying the type
+    // checker, not a real null case.
+    await sendManagerOrderNotification(client.name, client.email ?? "email не указан", orders.map((order) => order.title));
   }
 
   return Response.json({ orders }, { status: 201 });

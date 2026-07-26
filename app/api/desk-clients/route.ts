@@ -88,7 +88,10 @@ export async function POST(req: NextRequest) {
 
   const token = await createAccountToken(client.id, "activate");
   const origin = req.nextUrl.origin;
-  await sendActivationEmail(client.email, client.name, `${origin}/account/activate?token=${token}`);
+  // Email is required by this route's own validation above, so it's never
+  // null here even though Client.email is nullable in the schema now
+  // (optional only via the newer manager-cabinet client-creation flow).
+  await sendActivationEmail(normalizedEmail, client.name, `${origin}/account/activate?token=${token}`);
 
   return Response.json({ client: { ...client, passwordHash: undefined, activated: false } }, { status: 201 });
 }
