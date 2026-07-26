@@ -458,6 +458,43 @@ model Quote {
   // reassignment via /api/manager-quotes/[id]/reassign.
   buyoutPremiumRatePercent Decimal?
 
+  // Real cargo weight/volume from the warehouse's shipping note, entered
+  // (by anyone — no self-report/conflict-of-interest risk here, the price
+  // comes from the frozen cargoRateUsd, not something typed in) before the
+  // quote can advance to "отправлен клиенту" or later. Recomputing cargo
+  // off these — same frozen cargoRateUsd/cargoDiscountUsd, no fresh tariff
+  // lookup — overwrites the "live" totalWeightKg/totalVolumeM3/densityKgM3/
+  // cargoDeliveryUsd/cargoDeliveryRub/cargoCostUsd/cargoCostRub/totalRub
+  // fields above in place (so client portal/PDF pick it up automatically),
+  // while the ORIGINAL quoted numbers are preserved below for comparison —
+  // "не всегда просчёт равен факту" after the warehouse actually measures
+  // it. This exists for the owner's own accurate cargo profit, not manager
+  // premium (that's the flat cargoBonusRatePercent below, not a profit
+  // share) — see PB-V5 chat 2026-07-27 for why cargo profit-sharing was
+  // dropped for managers.
+  actualTotalWeightKg  Decimal?
+  actualTotalVolumeM3  Decimal?
+  // Snapshotted once, at the FIRST actualization only — never touched by a
+  // later correction, so "что обещали клиенту изначально" stays intact.
+  // Full set (not just the RUB total) so a status rollback can fully
+  // restore every field actualize-cargo overwrote, not just some of them.
+  estimatedTotalWeightKg    Decimal?
+  estimatedTotalVolumeM3    Decimal?
+  estimatedDensityKgM3      Decimal?
+  estimatedCargoDeliveryUsd Decimal?
+  estimatedCargoDeliveryRub Decimal?
+  estimatedCargoCostUsd     Decimal?
+  estimatedCargoCostRub     Decimal?
+  estimatedTotalRub         Decimal?
+  cargoActualizedAt         DateTime?
+  cargoActualizedByManagerId String?
+  // Locked in when status transitions to handed_to_client (0 or 10) — flat
+  // % of cargoDeliveryRub (what the client pays for cargo, by then already
+  // the actualized real figure), not a cargo profit/margin share. Only
+  // nonzero for a confirmed self-sourced client's own manager, mirroring
+  // buyoutPremiumRatePercent's snapshot-at-transition-time reasoning.
+  cargoBonusRatePercent Decimal?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -14,6 +14,7 @@ import {
   ImageOff,
   Loader2,
   MessageSquare,
+  Package,
   Pencil,
   Plus,
   RefreshCw,
@@ -35,6 +36,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/desk/empty-state";
 import { QuoteDialog } from "@/components/manager/quote-dialog";
@@ -104,6 +113,17 @@ interface QuoteRecord {
   buyoutFactConfirmed: boolean;
   buyoutConfirmedAt: string | null;
   buyoutPremiumRatePercent: string | null;
+  cargoRateUsd: string;
+  usdRateUsed: string;
+  totalWeightKg: string;
+  totalVolumeM3: string;
+  actualTotalWeightKg: string | null;
+  actualTotalVolumeM3: string | null;
+  estimatedTotalWeightKg: string | null;
+  estimatedTotalVolumeM3: string | null;
+  estimatedTotalRub: string | null;
+  cargoActualizedAt: string | null;
+  cargoBonusRatePercent: string | null;
 }
 
 // Below this density, cargo is always priced "по объёму" regardless of the
@@ -116,6 +136,10 @@ const LOW_DENSITY_VOLUME_THRESHOLD_KG_M3 = 100;
 // route.ts — only past this point does "факт по выкупу" make sense to ask
 // for (the manager hasn't actually bought anything before then).
 const POST_BUYOUT_STATUSES = ["in_transit_to_warehouse", "delivered_to_warehouse", "sent_to_client", "handed_to_client"];
+
+// Mirrors CARGO_ACTUALIZATION_REQUIRED_STATUSES in the same status route —
+// only from here on does actualizing cargo (or re-correcting it) make sense.
+const CARGO_RELEVANT_STATUSES = ["delivered_to_warehouse", "sent_to_client", "handed_to_client"];
 
 function fmtRub(value: number): string {
   return Math.round(value).toLocaleString("ru-RU");
@@ -191,6 +215,16 @@ function ClientQuotes({
   const [expandedBuyoutId, setExpandedBuyoutId] = useState<string | null>(null);
   const [buyoutDrafts, setBuyoutDrafts] = useState<Record<string, { cny: string; rate: string }>>({});
   const [savingBuyoutId, setSavingBuyoutId] = useState<string | null>(null);
+
+  // Cargo actualization modal — opened either because a status change got
+  // blocked (pendingStatus set, so we can retry it right after saving) or
+  // because the manager wants to correct already-entered data by hand
+  // (pendingStatus null).
+  const [cargoModalQuoteId, setCargoModalQuoteId] = useState<string | null>(null);
+  const [cargoModalPendingStatus, setCargoModalPendingStatus] = useState<string | null>(null);
+  const [cargoModalDraft, setCargoModalDraft] = useState<{ weight: string; volume: string }>({ weight: "", volume: "" });
+  const [cargoModalBusy, setCargoModalBusy] = useState(false);
+  const [cargoModalError, setCargoModalError] = useState<string | null>(null);
   const [recalculatingId, setRecalculatingId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState<"recalculate" | "duplicate" | "status" | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
@@ -215,9 +249,66 @@ function ClientQuotes({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
-      if (res.ok) await load();
+      if (res.ok) {
+        await load();
+        return;
+      }
+      const data = await res.json();
+      if (data.code === "CARGO_NOT_ACTUALIZED") {
+        openCargoModal(quoteId, status);
+      }
     } finally {
       setChangingStatusId(null);
+    }
+  }
+
+  function openCargoModal(quoteId: string, pendingStatus: string | null) {
+    const quote = quotes.find((q) => q.id === quoteId);
+    setCargoModalQuoteId(quoteId);
+    setCargoModalPendingStatus(pendingStatus);
+    setCargoModalError(null);
+    setCargoModalDraft({
+      weight: quote?.actualTotalWeightKg ?? quote?.totalWeightKg ?? "",
+      volume: quote?.actualTotalVolumeM3 ?? quote?.totalVolumeM3 ?? "",
+    });
+  }
+
+  async function handleActualizeCargo() {
+    if (!cargoModalQuoteId) return;
+    const weight = Number(cargoModalDraft.weight);
+    const volume = Number(cargoModalDraft.volume);
+    if (!Number.isFinite(weight) || weight <= 0 || !Number.isFinite(volume) || volume <= 0) {
+      setCargoModalError("Укажите реальный вес и объём.");
+      return;
+    }
+    setCargoModalBusy(true);
+    setCargoModalError(null);
+    try {
+      const res = await fetch(`/api/manager-quotes/${cargoModalQuoteId}/actualize-cargo`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actualTotalWeightKg: weight, actualTotalVolumeM3: volume }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setCargoModalError(data.error ?? "Не удалось сохранить реальные данные по карго.");
+        return;
+      }
+      // If this was triggered by a blocked status change, retry it now
+      // that cargo is actualized — the manager shouldn't have to reopen
+      // the status dropdown and pick the same status a second time.
+      if (cargoModalPendingStatus) {
+        await fetch(`/api/manager-quotes/${cargoModalQuoteId}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: cargoModalPendingStatus }),
+        });
+      }
+      setCargoModalQuoteId(null);
+      setCargoModalPendingStatus(null);
+      await load();
+    } finally {
+      setCargoModalBusy(false);
     }
   }
 
@@ -744,6 +835,24 @@ function ClientQuotes({
                 </button>
               )}
 
+              {CARGO_RELEVANT_STATUSES.includes(quote.status) && (
+                <button
+                  type="button"
+                  onClick={() => openCargoModal(quote.id, null)}
+                  className={cn(
+                    "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-primary/10 hover:text-primary",
+                    quote.cargoActualizedAt ? "text-success" : "text-text-secondary",
+                  )}
+                  aria-label="Реальные габариты карго"
+                  title={quote.cargoActualizedAt ? "Реальные габариты внесены" : "Реальные габариты не внесены"}
+                >
+                  <Package className="h-4 w-4" />
+                  {!quote.cargoActualizedAt && quote.status !== "delivered_to_warehouse" && (
+                    <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-warning" />
+                  )}
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => onEdit(quote.id)}
@@ -914,6 +1023,108 @@ function ClientQuotes({
           </li>
         ))}
       </ul>
+
+      <Dialog open={cargoModalQuoteId !== null} onOpenChange={(open) => !open && setCargoModalQuoteId(null)}>
+        <DialogContent>
+          {(() => {
+            const quote = quotes.find((q) => q.id === cargoModalQuoteId);
+            if (!quote) return null;
+
+            const weight = Number(cargoModalDraft.weight);
+            const volume = Number(cargoModalDraft.volume);
+            const draftValid = Number.isFinite(weight) && weight > 0 && Number.isFinite(volume) && volume > 0;
+
+            // Same baseline-picking logic as the server route — use the
+            // ORIGINAL quoted numbers (estimated* once they exist), not
+            // whatever a previous actualization already overwrote, so the
+            // preview matches exactly what the server will actually save.
+            const isFirstActualization = quote.estimatedTotalWeightKg === null;
+            const baselineWeightKg = isFirstActualization ? Number(quote.totalWeightKg) : Number(quote.estimatedTotalWeightKg);
+            const baselineVolumeM3 = isFirstActualization ? Number(quote.totalVolumeM3) : Number(quote.estimatedTotalVolumeM3);
+            const basisIsDensity = quote.deliveryPricingMode === "density" && Number(quote.densityKgM3) >= 100;
+            const newBasisQuantity = basisIsDensity ? weight : volume;
+            const newCargoDeliveryUsd = draftValid
+              ? Math.max(0, Number(quote.cargoRateUsd) * newBasisQuantity - Number(quote.cargoDiscountUsd))
+              : null;
+            const newCargoDeliveryRub = newCargoDeliveryUsd != null ? newCargoDeliveryUsd * Number(quote.usdRateUsed) : null;
+            const newTotalRub = newCargoDeliveryRub != null ? Number(quote.totalRub) - Number(quote.cargoDeliveryRub) + newCargoDeliveryRub : null;
+
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle>Реальные габариты карго</DialogTitle>
+                  <DialogDescription>
+                    №{quote.displayId} · {quote.productName} — внесите вес и объём с накладной кладовщика. Раньше
+                    оценка была {baselineWeightKg.toFixed(1)} кг, {baselineVolumeM3.toFixed(3)} м³.
+                  </DialogDescription>
+                </DialogHeader>
+
+                {quote.cargoActualizedAt && (
+                  <p className="rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
+                    Уже актуализировано {formatDate(quote.cargoActualizedAt)} — если клиенту уже озвучена сумма
+                    {quote.totalRub ? ` (${fmtRub(Number(quote.totalRub))} ₽)` : ""}, повторное изменение поменяет её
+                    ещё раз.
+                  </p>
+                )}
+
+                <div className="space-y-3">
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <Label htmlFor="cargo-actual-weight">Реальный вес, кг</Label>
+                      <Input
+                        id="cargo-actual-weight"
+                        type="number"
+                        step="0.01"
+                        value={cargoModalDraft.weight}
+                        onChange={(e) => setCargoModalDraft((current) => ({ ...current, weight: e.target.value }))}
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <Label htmlFor="cargo-actual-volume">Реальный объём, м³</Label>
+                      <Input
+                        id="cargo-actual-volume"
+                        type="number"
+                        step="0.001"
+                        value={cargoModalDraft.volume}
+                        onChange={(e) => setCargoModalDraft((current) => ({ ...current, volume: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  {draftValid && newCargoDeliveryRub != null && newTotalRub != null && (
+                    <div className="rounded-lg bg-bg p-3 text-sm">
+                      <div className="flex justify-between text-text-secondary">
+                        <span>Было (карго)</span>
+                        <span>{fmtRub(Number(quote.cargoDeliveryRub))} ₽</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-text">
+                        <span>Станет (карго)</span>
+                        <span>{fmtRub(newCargoDeliveryRub)} ₽</span>
+                      </div>
+                      <div className="mt-1.5 flex justify-between border-t border-border pt-1.5 font-bold text-primary">
+                        <span>Новый итог просчёта</span>
+                        <span>{fmtRub(newTotalRub)} ₽</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {cargoModalError && <p className="text-xs text-error">{cargoModalError}</p>}
+                </div>
+
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setCargoModalQuoteId(null)}>
+                    Отмена
+                  </Button>
+                  <Button type="button" onClick={handleActualizeCargo} disabled={!draftValid || cargoModalBusy}>
+                    {cargoModalBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    Сохранить и продолжить
+                  </Button>
+                </DialogFooter>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
     </TooltipProvider>
   );
