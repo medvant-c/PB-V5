@@ -146,7 +146,13 @@ function AccountDashboard({
       </div>
 
       <div className="mt-8 grid gap-8 lg:grid-cols-[300px_1fr] lg:items-start">
-        <aside className="lg:sticky lg:top-6">
+        {/* max-h + overflow-y-auto turns this into its own scroll container
+            (not just a visually-pinned block) — without it, hovering the
+            price panel and scrolling still scrolled the page/quotes list
+            behind it, since there was nothing here for the wheel event to
+            scroll. With its own overflow, the browser routes wheel input to
+            whichever region the cursor is actually over. */}
+        <aside className="lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto">
           <ServicePriceList />
         </aside>
 
