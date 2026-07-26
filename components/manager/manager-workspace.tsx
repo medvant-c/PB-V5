@@ -82,7 +82,7 @@ function ManagerWorkspace({ name, role }: ManagerWorkspaceProps) {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
-      <div className="rounded-2xl border border-primary/15 bg-gradient-to-r from-primary/8 via-secondary/6 to-primary/8 p-3 shadow-sm">
+      <div className="sticky top-0 z-30 rounded-2xl border border-primary/15 bg-gradient-to-r from-primary/8 via-secondary/6 to-primary/8 p-3 shadow-sm backdrop-blur-md">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-secondary text-white">
