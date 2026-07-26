@@ -3,6 +3,7 @@ import { isRateLimited } from "@/lib/rate-limit";
 import { createAccountToken } from "@/lib/account-tokens";
 import { sendPasswordResetEmail } from "@/lib/account-email";
 import { getClientIp } from "@/lib/request-utils";
+import { getAppOrigin } from "@/lib/app-url";
 import { prisma } from "@/lib/prisma";
 
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
   const client = await prisma.client.findUnique({ where: { email: normalizedEmail } });
   if (client) {
     const token = await createAccountToken(client.id, "reset");
-    const origin = req.nextUrl.origin;
+    const origin = getAppOrigin(req);
     // client.email is now nullable in the schema (email is optional at
     // creation), but this row was found BY that exact email, so it can't
     // be null here — using the already-validated local string satisfies

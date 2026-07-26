@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { createManagerToken } from "@/lib/manager-tokens";
 import { sendManagerActivationEmail } from "@/lib/manager-email";
+import { getAppOrigin } from "@/lib/app-url";
 import { prisma } from "@/lib/prisma";
 import { nextManagerDisplayId } from "@/lib/display-ids";
 
@@ -85,7 +86,7 @@ export async function POST(req: NextRequest) {
   });
 
   const token = await createManagerToken(manager.id, "activate");
-  const origin = req.nextUrl.origin;
+  const origin = getAppOrigin(req);
   await sendManagerActivationEmail(manager.email, manager.name, `${origin}/desk/manager/activate?token=${token}`);
 
   return Response.json({ manager }, { status: 201 });

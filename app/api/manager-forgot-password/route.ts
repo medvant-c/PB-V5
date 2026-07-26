@@ -3,6 +3,7 @@ import { isRateLimited } from "@/lib/rate-limit";
 import { createManagerToken } from "@/lib/manager-tokens";
 import { sendManagerPasswordResetEmail } from "@/lib/manager-email";
 import { getClientIp } from "@/lib/request-utils";
+import { getAppOrigin } from "@/lib/app-url";
 import { prisma } from "@/lib/prisma";
 
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
   const manager = await prisma.manager.findUnique({ where: { email: email.trim().toLowerCase() } });
   if (manager) {
     const token = await createManagerToken(manager.id, "reset");
-    const origin = req.nextUrl.origin;
+    const origin = getAppOrigin(req);
     await sendManagerPasswordResetEmail(manager.email, `${origin}/desk/manager/activate?token=${token}`);
   }
 

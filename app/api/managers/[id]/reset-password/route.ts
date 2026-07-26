@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { createManagerToken } from "@/lib/manager-tokens";
 import { sendManagerPasswordResetEmail } from "@/lib/manager-email";
+import { getAppOrigin } from "@/lib/app-url";
 import { prisma } from "@/lib/prisma";
 
 interface RouteParams {
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (!manager) return Response.json({ error: "Менеджер не найден." }, { status: 404 });
 
   const token = await createManagerToken(manager.id, "reset");
-  const origin = req.nextUrl.origin;
+  const origin = getAppOrigin(req);
   await sendManagerPasswordResetEmail(manager.email, `${origin}/desk/manager/activate?token=${token}`);
 
   return Response.json({ ok: true });

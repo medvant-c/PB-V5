@@ -3,6 +3,7 @@ import { hasDeskSession } from "@/lib/desk-auth";
 import { prisma } from "@/lib/prisma";
 import { createAccountToken } from "@/lib/account-tokens";
 import { sendActivationEmail } from "@/lib/account-email";
+import { getAppOrigin } from "@/lib/app-url";
 import { nextClientDisplayId } from "@/lib/display-ids";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -87,7 +88,7 @@ export async function POST(req: NextRequest) {
   });
 
   const token = await createAccountToken(client.id, "activate");
-  const origin = req.nextUrl.origin;
+  const origin = getAppOrigin(req);
   // Email is required by this route's own validation above, so it's never
   // null here even though Client.email is nullable in the schema now
   // (optional only via the newer manager-cabinet client-creation flow).
