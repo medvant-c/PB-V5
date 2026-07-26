@@ -19,7 +19,9 @@ const BOUGHT_STATUSES: QuoteStatus[] = [
 // Still-open pipeline — everything except a dead end (rejected) or an
 // already-completed deal (handed_to_client) — used for the "if everything
 // in progress gets bought" revenue projection.
-const OPEN_STATUSES: QuoteStatus[] = QUOTE_STATUSES.filter((s) => s !== "rejected" && s !== "handed_to_client");
+const OPEN_STATUSES: QuoteStatus[] = QUOTE_STATUSES.filter(
+  (s) => s !== "rejected" && s !== "handed_to_client",
+);
 // Premium rate depends on the manager's all-time conversion rate (handed
 // to client / non-rejected, across every quote they've ever made — not
 // just the current pipeline): 10% of profit at 60%+ conversion, 7% below
@@ -51,7 +53,12 @@ interface QuoteForStats {
 // search fee, buyout commission, attached services, AND the cargo margin —
 // the only thing a turnover-based premium should ever be a percentage of.
 function profitRub(q: QuoteForStats): number {
-  return Number(q.totalRub) - Number(q.totalPriceRub) - Number(q.chinaDeliveryRub) - Number(q.cargoCostRub);
+  return (
+    Number(q.totalRub) -
+    Number(q.totalPriceRub) -
+    Number(q.chinaDeliveryRub) -
+    Number(q.cargoCostRub)
+  );
 }
 
 // Cargo-specific slice of profitRub — cargoDeliveryRub (what the client
@@ -71,6 +78,15 @@ function summarize(quotes: QuoteForStats[]) {
   let pipelineRub = 0;
   let pipelineProfitRub = 0;
   let pipelineCargoProfitRub = 0;
+  // Gross components of pipelineRub — not owner-confidential (unlike cost/
+  // margin figures), so returned to every role. Lets the "В работе" card's
+  // hover breakdown show what it's actually made of instead of one opaque
+  // sum. "Услуги и комиссии" isn't tracked separately here; it's the
+  // residual (pipelineRub minus these three) so it always reconciles
+  // exactly, same trick quoteBreakdown() in clients-tab.tsx already uses.
+  let pipelineGoodsRub = 0;
+  let pipelineChinaDeliveryRub = 0;
+  let pipelineCargoRub = 0;
   for (const q of quotes) {
     statusCounts[q.status] = (statusCounts[q.status] ?? 0) + 1;
     // "Выкуплено": everything except cargo delivery, which hasn't happened
@@ -78,12 +94,16 @@ function summarize(quotes: QuoteForStats[]) {
     // (that quote also counts fully in handedRub below — the two metrics
     // overlap for handed_to_client by design, they answer different
     // questions: "money secured for the buyout" vs "fully delivered").
-    if (BOUGHT_STATUSES.includes(q.status)) boughtRub += Number(q.totalRub) - Number(q.cargoDeliveryRub);
+    if (BOUGHT_STATUSES.includes(q.status))
+      boughtRub += Number(q.totalRub) - Number(q.cargoDeliveryRub);
     if (q.status === "handed_to_client") handedRub += Number(q.totalRub);
     if (OPEN_STATUSES.includes(q.status)) {
       pipelineRub += Number(q.totalRub);
       pipelineProfitRub += profitRub(q);
       pipelineCargoProfitRub += cargoProfitRub(q);
+      pipelineGoodsRub += Number(q.totalPriceRub);
+      pipelineChinaDeliveryRub += Number(q.chinaDeliveryRub);
+      pipelineCargoRub += Number(q.cargoDeliveryRub);
     }
   }
   // All-time, not just the open pipeline above — this is every quote this
@@ -94,12 +114,19 @@ function summarize(quotes: QuoteForStats[]) {
   // everything after that is logistics, not a sales-funnel outcome. A quote
   // sitting in "В доставке на склад" is already a converted sale.
   const nonRejected = quotes.filter((q) => q.status !== "rejected").length;
-  const convertedCount = quotes.filter((q) => BOUGHT_STATUSES.includes(q.status)).length;
-  const conversionPercent = nonRejected > 0 ? Math.round((convertedCount / nonRejected) * 100) : 0;
-  const premiumRatePercent = conversionPercent >= CONVERSION_PREMIUM_THRESHOLD_PERCENT ? 10 : 7;
+  const convertedCount = quotes.filter((q) =>
+    BOUGHT_STATUSES.includes(q.status),
+  ).length;
+  const conversionPercent =
+    nonRejected > 0 ? Math.round((convertedCount / nonRejected) * 100) : 0;
+  const premiumRatePercent =
+    conversionPercent >= CONVERSION_PREMIUM_THRESHOLD_PERCENT ? 10 : 7;
   // Floored at 0 — a manager whose pipeline is currently net-negative (heavy
   // discounting, etc.) doesn't owe the company a negative premium.
-  const premiumRate = premiumRatePercent === 10 ? HIGH_CONVERSION_PREMIUM_RATE : LOW_CONVERSION_PREMIUM_RATE;
+  const premiumRate =
+    premiumRatePercent === 10
+      ? HIGH_CONVERSION_PREMIUM_RATE
+      : LOW_CONVERSION_PREMIUM_RATE;
   const premiumRub = Math.max(0, pipelineProfitRub) * premiumRate;
 
   return {
@@ -108,6 +135,9 @@ function summarize(quotes: QuoteForStats[]) {
     boughtRub,
     handedRub,
     pipelineRub,
+    pipelineGoodsRub,
+    pipelineChinaDeliveryRub,
+    pipelineCargoRub,
     pipelineProfitRub,
     pipelineCargoProfitRub,
     premiumRub,
@@ -124,7 +154,10 @@ export async function GET(req: NextRequest) {
 
   const visibleManagerIds = await getVisibleManagerIds(session);
   const quotes = await prisma.quote.findMany({
-    where: visibleManagerIds === "all" ? undefined : { managerId: { in: visibleManagerIds } },
+    where:
+      visibleManagerIds === "all"
+        ? undefined
+        : { managerId: { in: visibleManagerIds } },
     select: {
       managerId: true,
       status: true,
@@ -141,13 +174,21 @@ export async function GET(req: NextRequest) {
   // Per-manager breakdown — meaningful for owner (sees everyone) and senior
   // (sees their team); a plain manager only ever sees themself here, so
   // it's omitted for them (the overall numbers above already are theirs).
-  let perManager: (ReturnType<typeof summarize> & { managerId: string; managerName: string })[] | null = null;
+  let perManager:
+    | (ReturnType<typeof summarize> & {
+        managerId: string;
+        managerName: string;
+      })[]
+    | null = null;
   if (session.role === "owner" || session.role === "senior") {
     // Every manager in scope, including ones with zero quotes so far —
     // that's exactly what a "who isn't pulling their weight" view needs to
     // show, not just whoever happens to have a quote already.
     const managers = await prisma.manager.findMany({
-      where: visibleManagerIds === "all" ? { role: { not: "owner" } } : { id: { in: visibleManagerIds } },
+      where:
+        visibleManagerIds === "all"
+          ? { role: { not: "owner" } }
+          : { id: { in: visibleManagerIds } },
       select: { id: true, name: true },
     });
     const byManager = new Map<string, QuoteForStats[]>();
@@ -156,7 +197,11 @@ export async function GET(req: NextRequest) {
       list.push(q);
       byManager.set(q.managerId, list);
     }
-    perManager = managers.map((m) => ({ managerId: m.id, managerName: m.name, ...summarize(byManager.get(m.id) ?? []) }));
+    perManager = managers.map((m) => ({
+      managerId: m.id,
+      managerName: m.name,
+      ...summarize(byManager.get(m.id) ?? []),
+    }));
   }
 
   // Company-wide expected income, owner-only: what's left of the pipeline's
@@ -174,7 +219,10 @@ export async function GET(req: NextRequest) {
   let cargoProfitRub: number | null = null;
   let otherProfitRub: number | null = null;
   if (session.role === "owner" && perManager) {
-    const totalManagerPremiumsRub = perManager.reduce((sum, m) => sum + m.premiumRub, 0);
+    const totalManagerPremiumsRub = perManager.reduce(
+      (sum, m) => sum + m.premiumRub,
+      0,
+    );
     expectedIncomeRub = overall.pipelineProfitRub - totalManagerPremiumsRub;
     cargoProfitRub = overall.pipelineCargoProfitRub;
     otherProfitRub = overall.pipelineProfitRub - overall.pipelineCargoProfitRub;
@@ -184,13 +232,19 @@ export async function GET(req: NextRequest) {
   // the owner either — even as a raw field on `overall`/`perManager`, it's
   // the same owner-confidential cargo-margin signal as cargoProfitRub above,
   // just not yet subtracted out.
-  const stripCargoProfit = <T extends { pipelineCargoProfitRub: number }>(row: T): Omit<T, "pipelineCargoProfitRub"> => {
+  const stripCargoProfit = <T extends { pipelineCargoProfitRub: number }>(
+    row: T,
+  ): Omit<T, "pipelineCargoProfitRub"> => {
     const copy = { ...row };
     delete (copy as Partial<T>).pipelineCargoProfitRub;
     return copy;
   };
-  const responseOverall = session.role === "owner" ? overall : stripCargoProfit(overall);
-  const responsePerManager = perManager && session.role !== "owner" ? perManager.map(stripCargoProfit) : perManager;
+  const responseOverall =
+    session.role === "owner" ? overall : stripCargoProfit(overall);
+  const responsePerManager =
+    perManager && session.role !== "owner"
+      ? perManager.map(stripCargoProfit)
+      : perManager;
 
   return Response.json({
     overall: responseOverall,
