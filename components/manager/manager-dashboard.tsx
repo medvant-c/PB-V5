@@ -1,9 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { TrendingUp, Wallet, PackageCheck, Percent, Sparkles, Lock, Ship, Handshake } from "lucide-react";
-import { Card } from "@/components/ui/card";
-import { QUOTE_STATUSES, QUOTE_STATUS_LABEL, QUOTE_STATUS_BADGE_CLASSES } from "@/lib/quote-statuses";
+import {
+  TrendingUp,
+  Wallet,
+  PackageCheck,
+  Percent,
+  Gift,
+  Info,
+  Lock,
+  Ship,
+  Handshake,
+  Calendar,
+  ChevronDown,
+} from "lucide-react";
+import { QUOTE_STATUSES, QUOTE_STATUS_LABEL, QUOTE_STATUS_BADGE_CLASSES, QUOTE_STATUS_DOT_COLOR } from "@/lib/quote-statuses";
 import { cn } from "@/lib/utils";
 
 interface StatSummary {
@@ -37,14 +48,7 @@ function ConversionRing({ percent, size = 56 }: { percent: number; size?: number
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          strokeWidth={strokeWidth}
-          className="stroke-border"
-        />
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" strokeWidth={strokeWidth} className="stroke-border" />
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -90,63 +94,141 @@ function fmt(value: number): string {
   return Math.round(value).toLocaleString("ru-RU");
 }
 
-function StatSummaryRow({ stats }: { stats: StatSummary }) {
+// One card in the hero row — the gradient "featured" card and the three
+// plain white ones all share this shape, just with different tone props.
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  valueClassName,
+  subtitle,
+  featured,
+  trailing,
+}: {
+  icon: typeof TrendingUp;
+  label: string;
+  value: React.ReactNode;
+  valueClassName?: string;
+  subtitle?: React.ReactNode;
+  featured?: boolean;
+  trailing?: React.ReactNode;
+}) {
   return (
-    <>
-      <div className="grid gap-3 sm:grid-cols-4">
-        <div className="rounded-xl bg-bg p-3">
-          <div className="flex items-center gap-1.5 text-xs text-text-secondary">
-            <Wallet className="h-3.5 w-3.5" /> Уже выкуплено
-          </div>
-          <div className="mt-1 text-lg font-bold text-text">{fmt(stats.boughtRub)} ₽</div>
-        </div>
-        <div className="rounded-xl bg-bg p-3">
-          <div className="flex items-center gap-1.5 text-xs text-text-secondary">
-            <PackageCheck className="h-3.5 w-3.5" /> Выдано клиенту
-          </div>
-          <div className="mt-1 text-lg font-bold text-text">{fmt(stats.handedRub)} ₽</div>
-        </div>
-        <div className="rounded-xl bg-bg p-3">
-          <div className="flex items-center gap-1.5 text-xs text-text-secondary">
-            <TrendingUp className="h-3.5 w-3.5" /> В работе (потенциал)
-          </div>
-          <div className="mt-1 text-lg font-bold text-text">{fmt(stats.pipelineRub)} ₽</div>
-        </div>
-        <div className="flex items-center gap-3 rounded-xl bg-bg p-3">
-          <ConversionRing percent={stats.conversionPercent} size={44} />
-          <div>
-            <div className="flex items-center gap-1.5 text-xs text-text-secondary">
-              <Percent className="h-3.5 w-3.5" /> Конверсия
-            </div>
-            <div className="mt-1 text-[11px] text-text-secondary">
-              {stats.conversionPercent >= CONVERSION_PREMIUM_THRESHOLD_PERCENT ? "премия 10%" : "премия 7%"}
-            </div>
-          </div>
-        </div>
+    <div
+      className={cn(
+        "rounded-3xl p-5",
+        featured
+          ? "bg-gradient-to-br from-primary to-secondary text-white shadow-lg shadow-primary/25"
+          : "border border-border bg-surface shadow-sm",
+      )}
+    >
+      <div className={cn("flex items-center gap-2 text-sm font-medium", featured ? "text-white/85" : "text-text-secondary")}>
+        <span
+          className={cn(
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
+            featured ? "bg-white/15" : "bg-primary/10 text-primary",
+          )}
+        >
+          <Icon className="h-4 w-4" />
+        </span>
+        {label}
       </div>
+      <div className="mt-4 flex items-end justify-between gap-2">
+        <div className={cn("text-[26px] font-extrabold leading-none", valueClassName ?? (featured ? "text-white" : "text-text"))}>
+          {value}
+        </div>
+        {trailing}
+      </div>
+      {subtitle && <div className={cn("mt-2 text-xs", featured ? "text-white/70" : "text-text-secondary")}>{subtitle}</div>}
+    </div>
+  );
+}
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {QUOTE_STATUSES.map((status) => {
-          const count = stats.statusCounts[status] ?? 0;
-          if (count === 0) return null;
-          return (
-            <span
-              key={status}
-              className={cn("rounded-full px-2.5 py-1 text-xs font-medium", QUOTE_STATUS_BADGE_CLASSES[status])}
-            >
-              {QUOTE_STATUS_LABEL[status]} · {count}
-            </span>
-          );
-        })}
-        {stats.totalQuotes === 0 && <span className="text-xs text-text-secondary">Просчётов пока нет.</span>}
-      </div>
-    </>
+function StatCardsRow({ stats, expectedIncomeRub }: { stats: StatSummary; expectedIncomeRub: number | null }) {
+  const isHighConversion = stats.conversionPercent >= CONVERSION_PREMIUM_THRESHOLD_PERCENT;
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <StatCard
+        featured
+        icon={TrendingUp}
+        label="В работе (потенциал)"
+        value={`${fmt(stats.pipelineRub)} ₽`}
+        subtitle={`${stats.totalQuotes} просчётов`}
+      />
+      <StatCard
+        icon={Wallet}
+        label="Доход компании"
+        value={expectedIncomeRub != null ? `${fmt(expectedIncomeRub)} ₽` : "—"}
+        valueClassName={expectedIncomeRub != null ? "text-success" : "text-text-secondary"}
+        subtitle={expectedIncomeRub != null ? "Прибыль минус премии" : "Видно только руководителю"}
+      />
+      <StatCard
+        icon={Gift}
+        label="Ожидаемая премия"
+        value={`${fmt(stats.premiumRub)} ₽`}
+        subtitle={`${stats.premiumRatePercent}% от прибыли`}
+      />
+      <StatCard
+        icon={Percent}
+        label="Конверсия"
+        value={`${stats.conversionPercent}%`}
+        valueClassName={isHighConversion ? "text-success" : "text-error"}
+        subtitle={`премия ${stats.premiumRatePercent}%`}
+        trailing={<ConversionRing percent={stats.conversionPercent} size={48} />}
+      />
+    </div>
+  );
+}
+
+function StatusPillsRow({ stats }: { stats: StatSummary }) {
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-2">
+      <span className="flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-white">
+        Все · {stats.totalQuotes}
+      </span>
+
+      <span className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-medium text-text-secondary">
+        <Wallet className="h-3.5 w-3.5" /> Выкуплено · {fmt(stats.boughtRub)} ₽
+      </span>
+      <span className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-medium text-text-secondary">
+        <PackageCheck className="h-3.5 w-3.5" /> Выдано · {fmt(stats.handedRub)} ₽
+      </span>
+
+      {QUOTE_STATUSES.map((status) => {
+        const count = stats.statusCounts[status] ?? 0;
+        if (count === 0) return null;
+        return (
+          <span key={status} className={cn("flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium", QUOTE_STATUS_BADGE_CLASSES[status])}>
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: QUOTE_STATUS_DOT_COLOR[status] }} />
+            {QUOTE_STATUS_LABEL[status]} · {count}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function TodayPill() {
+  const [today, setToday] = useState<string | null>(null);
+  // Computed client-side only — Date.now() during SSR would mismatch the
+  // client's render and trigger a hydration warning for a value that isn't
+  // even meaningful until the browser paints it anyway.
+  useEffect(() => {
+    setToday(new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }));
+  }, []);
+  return (
+    <div className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-text-secondary">
+      <Calendar className="h-4 w-4" />
+      {today ?? "—"}
+    </div>
   );
 }
 
 function ManagerDashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [incomeExplainerOpen, setIncomeExplainerOpen] = useState(true);
 
   useEffect(() => {
     fetch("/api/manager-dashboard")
@@ -157,37 +239,40 @@ function ManagerDashboard() {
 
   if (loading) {
     return (
-      <Card className="mb-4 p-4">
+      <div className="rounded-3xl border border-border bg-surface p-5">
         <p className="text-sm text-text-secondary">Загрузка дашборда…</p>
-      </Card>
+      </div>
     );
   }
   if (!data) return null;
 
   return (
-    <Card className="mb-4 p-4 sm:p-5">
-      <h2 className="text-sm font-bold text-text">Дашборд</h2>
-      <div className="mt-3">
-        <StatSummaryRow stats={data.overall} />
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-2xl font-extrabold tracking-tight text-text">Дашборд</h2>
+        <TodayPill />
       </div>
 
-      <div className="mt-4 rounded-xl border border-dashed border-border p-3">
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
-          <Sparkles className="h-3.5 w-3.5" /> KPI и премия
+      <StatCardsRow stats={data.overall} expectedIncomeRub={data.expectedIncomeRub} />
+      <StatusPillsRow stats={data.overall} />
+
+      <div className="rounded-2xl border border-border bg-bg p-4 sm:p-5">
+        <div className="flex items-center gap-1.5 text-sm font-bold text-text">
+          <Info className="h-4 w-4 text-text-secondary" /> KPI и премия
         </div>
-        <p className="mt-1 text-xs text-text-secondary">
+        <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
           Из суммы просчётов в работе вычтены закупка товара, доставка по Китаю и доставка карго; доход компании
           дополнительно учитывает премии менеджеров. Ставка премии зависит от конверсии за всю историю: от{" "}
           {CONVERSION_PREMIUM_THRESHOLD_PERCENT}% — 10% от прибыли (выкуп, услуги и карго вместе), ниже — 7%.
         </p>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          <div className="rounded-lg bg-bg p-2.5">
-            <div className="text-[11px] text-text-secondary">Ожидаемая премия менеджерам ({data.overall.premiumRatePercent}% от прибыли)</div>
-            <div className="text-sm font-bold text-text">{fmt(data.overall.premiumRub)} ₽</div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-xl border border-border bg-surface p-3.5">
+            <div className="text-xs text-text-secondary">Ожидаемая премия менеджерам ({data.overall.premiumRatePercent}% от прибыли)</div>
+            <div className="mt-1 text-lg font-bold text-text">{fmt(data.overall.premiumRub)} ₽</div>
           </div>
-          <div className="rounded-lg bg-bg p-2.5">
-            <div className="text-[11px] text-text-secondary">Ожидаемый доход компании</div>
-            <div className={cn("text-sm font-bold", data.expectedIncomeRub != null ? "text-success" : "text-text")}>
+          <div className="rounded-xl border border-border bg-surface p-3.5">
+            <div className="text-xs text-text-secondary">Ожидаемый доход компании</div>
+            <div className={cn("mt-1 text-lg font-bold", data.expectedIncomeRub != null ? "text-success" : "text-text")}>
               {data.expectedIncomeRub != null ? `${fmt(data.expectedIncomeRub)} ₽` : "— (только у руководителя)"}
             </div>
           </div>
@@ -195,53 +280,65 @@ function ManagerDashboard() {
       </div>
 
       {data.cargoProfitRub != null && data.otherProfitRub != null && (
-        <div className="mt-4 rounded-xl border border-dashed border-border p-3">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
-            <Lock className="h-3.5 w-3.5" /> Разбивка дохода — видно только руководителю
+        <div className="rounded-2xl border border-border bg-bg p-4 sm:p-5">
+          <div className="flex items-center gap-1.5 text-sm font-bold text-text">
+            <Lock className="h-4 w-4 text-text-secondary" /> Разбивка дохода — видно только руководителю
           </div>
-          <p className="mt-1 text-xs text-text-secondary">
+          <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
             «В работе» выше — это оборот (всё, что заплатит клиент). Здесь — сколько из него реальная прибыль, и из
             чего она складывается.
           </p>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            <div className="rounded-lg bg-bg p-2.5">
-              <div className="flex items-center gap-1.5 text-[11px] text-text-secondary">
-                <Handshake className="h-3 w-3" /> Доход по выкупу и услугам
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-border bg-surface p-3.5">
+              <div className="flex items-center gap-1.5 text-xs text-text-secondary">
+                <Handshake className="h-3.5 w-3.5" /> Доход по выкупу и услугам
               </div>
-              <div className="text-sm font-bold text-success">{fmt(data.otherProfitRub)} ₽</div>
+              <div className="mt-1 text-lg font-bold text-success">{fmt(data.otherProfitRub)} ₽</div>
             </div>
-            <div className="rounded-lg bg-bg p-2.5">
-              <div className="flex items-center gap-1.5 text-[11px] text-text-secondary">
-                <Ship className="h-3 w-3" /> Доход за карго
+            <div className="rounded-xl border border-border bg-surface p-3.5">
+              <div className="flex items-center gap-1.5 text-xs text-text-secondary">
+                <Ship className="h-3.5 w-3.5" /> Доход за карго
               </div>
-              <div className="text-sm font-bold text-success">{fmt(data.cargoProfitRub)} ₽</div>
+              <div className="mt-1 text-lg font-bold text-success">{fmt(data.cargoProfitRub)} ₽</div>
             </div>
           </div>
-          <div className="mt-3 space-y-2 rounded-lg bg-bg p-2.5 text-[11px] text-text-secondary">
-            <div>
-              <span className="font-semibold text-text">Доход по выкупу и услугам</span> = услуга поиска (Standart/
-              Expert/Pro) + комиссия за организацию выкупа + доп. услуги из прайс-листа. Это на 100% ваш доход — тут
-              нет отдельной себестоимости, которую нужно вычитать.
+
+          {incomeExplainerOpen && (
+            <div className="mt-3 space-y-2 rounded-xl border border-border bg-surface p-3.5 text-xs leading-relaxed text-text-secondary">
+              <div>
+                <span className="font-semibold text-text">Доход по выкупу и услугам</span> = услуга поиска (Standart/
+                Expert/Pro) + комиссия за организацию выкупа + доп. услуги из прайс-листа. Это на 100% ваш доход — тут
+                нет отдельной себестоимости, которую нужно вычитать.
+              </div>
+              <div>
+                <span className="font-semibold text-text">Доход за карго</span> = то, что заплатил клиент за
+                карго-доставку, минус её реальная себестоимость (себестоимость задаётся во вкладке «Тарифы» — общая
+                для «по объёму» и отдельно по каждой категории для «по плотности»). Если клиенту дана скидка на
+                карго — она вычитается из этого дохода, а не из себестоимости.
+              </div>
+              <div className="border-t border-border pt-2">
+                <span className="font-semibold text-text">Не считается доходом (100% расход, без наценки):</span>{" "}
+                стоимость самого товара и доставка по Китаю до склада — здесь наценки нет, только то, что вы платите
+                за клиента.
+              </div>
             </div>
-            <div>
-              <span className="font-semibold text-text">Доход за карго</span> = то, что заплатил клиент за
-              карго-доставку, минус её реальная себестоимость (себестоимость задаётся во вкладке «Тарифы» — общая
-              для «по объёму» и отдельно по каждой категории для «по плотности»). Если клиенту дана скидка на карго —
-              она вычитается из этого дохода, а не из себестоимости.
-            </div>
-            <div className="border-t border-border pt-2">
-              <span className="font-semibold text-text">Не считается доходом (100% расход, без наценки):</span>{" "}
-              стоимость самого товара и доставка по Китаю до склада — здесь наценки нет, только то, что вы платите
-              за клиента.
-            </div>
-          </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setIncomeExplainerOpen((v) => !v)}
+            className="mt-2 flex w-full items-center justify-end gap-1 text-xs font-medium text-text-secondary transition-colors hover:text-primary"
+          >
+            <Info className="h-3.5 w-3.5" /> Как считается доход
+            <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", incomeExplainerOpen && "rotate-180")} />
+          </button>
         </div>
       )}
 
       {data.perManager && data.perManager.length > 0 && (
-        <div className="mt-4">
-          <h3 className="text-xs font-semibold text-text-secondary">KPI по сотрудникам</h3>
-          <div className="mt-2 overflow-x-auto">
+        <div className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
+          <h3 className="text-sm font-bold text-text">KPI по сотрудникам</h3>
+          <div className="mt-3 overflow-x-auto">
             <table className="w-full min-w-125 border-collapse text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-text-secondary">
@@ -275,7 +372,7 @@ function ManagerDashboard() {
           </div>
         </div>
       )}
-    </Card>
+    </div>
   );
 }
 
