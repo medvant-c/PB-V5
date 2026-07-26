@@ -13,6 +13,9 @@ import {
   Handshake,
   Calendar,
   ChevronDown,
+  Loader2,
+  ImageOff,
+  Download,
 } from "lucide-react";
 import { QUOTE_STATUSES, QUOTE_STATUS_LABEL, QUOTE_STATUS_BADGE_CLASSES, QUOTE_STATUS_DOT_COLOR } from "@/lib/quote-statuses";
 import { cn } from "@/lib/utils";
@@ -75,6 +78,19 @@ function ConversionRing({ percent, size = 56 }: { percent: number; size?: number
 interface PerManagerRow extends StatSummary {
   managerId: string;
   managerName: string;
+}
+
+// Enough fields to render one row of the click-to-filter quote list below
+// the status pills — a subset of what GET /api/manager-quotes returns.
+interface QuoteListItem {
+  id: string;
+  displayId: number;
+  productName: string;
+  status: string;
+  totalRub: string;
+  createdAt: string;
+  firstPhotoId: string | null;
+  client: { name: string; company: string | null };
 }
 
 interface DashboardData {
@@ -181,30 +197,135 @@ function StatCardsRow({ stats, expectedIncomeRub }: { stats: StatSummary; expect
   );
 }
 
-function StatusPillsRow({ stats }: { stats: StatSummary }) {
+// Mirrors BOUGHT_STATUSES in app/api/manager-dashboard/route.ts — "выкуплено"
+// is a multi-status aggregate (client paid, cargo not yet handed over),
+// duplicated here the same way CONVERSION_PREMIUM_THRESHOLD_PERCENT already is.
+const BOUGHT_STATUSES = ["in_transit_to_warehouse", "delivered_to_warehouse", "sent_to_client", "handed_to_client"];
+
+interface PillFilter {
+  key: string;
+  statuses: string[] | null; // null = every status ("Все")
+}
+
+function StatusPillsRow({
+  stats,
+  activeFilter,
+  onSelect,
+}: {
+  stats: StatSummary;
+  activeFilter: string | null;
+  onSelect: (filter: PillFilter) => void;
+}) {
+  function pillClass(key: string, colored?: string) {
+    const isActive = activeFilter === key;
+    return cn(
+      "flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium transition-shadow",
+      isActive && "ring-2 ring-offset-1 ring-primary",
+      colored,
+    );
+  }
+
   return (
     <div className="mt-4 flex flex-wrap items-center gap-2">
-      <span className="flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-white">
+      <button
+        type="button"
+        onClick={() => onSelect({ key: "all", statuses: null })}
+        className={pillClass("all", "bg-primary font-semibold text-white")}
+      >
         Все · {stats.totalQuotes}
-      </span>
+      </button>
 
-      <span className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-medium text-text-secondary">
+      <button
+        type="button"
+        onClick={() => onSelect({ key: "bought", statuses: BOUGHT_STATUSES })}
+        className={pillClass("bought", "border border-border bg-surface text-text-secondary")}
+      >
         <Wallet className="h-3.5 w-3.5" /> Выкуплено · {fmt(stats.boughtRub)} ₽
-      </span>
-      <span className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-medium text-text-secondary">
+      </button>
+      <button
+        type="button"
+        onClick={() => onSelect({ key: "handed_to_client", statuses: ["handed_to_client"] })}
+        className={pillClass("handed_to_client", "border border-border bg-surface text-text-secondary")}
+      >
         <PackageCheck className="h-3.5 w-3.5" /> Выдано · {fmt(stats.handedRub)} ₽
-      </span>
+      </button>
 
       {QUOTE_STATUSES.map((status) => {
         const count = stats.statusCounts[status] ?? 0;
         if (count === 0) return null;
         return (
-          <span key={status} className={cn("flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium", QUOTE_STATUS_BADGE_CLASSES[status])}>
+          <button
+            key={status}
+            type="button"
+            onClick={() => onSelect({ key: status, statuses: [status] })}
+            className={pillClass(status, QUOTE_STATUS_BADGE_CLASSES[status])}
+          >
             <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: QUOTE_STATUS_DOT_COLOR[status] }} />
             {QUOTE_STATUS_LABEL[status]} · {count}
-          </span>
+          </button>
         );
       })}
+    </div>
+  );
+}
+
+function QuoteListPanel({ quotes, loading }: { quotes: QuoteListItem[] | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="mt-3 flex items-center gap-2 rounded-2xl border border-border bg-surface p-4 text-sm text-text-secondary">
+        <Loader2 className="h-4 w-4 animate-spin" /> Загрузка просчётов…
+      </div>
+    );
+  }
+  if (!quotes || quotes.length === 0) {
+    return (
+      <div className="mt-3 rounded-2xl border border-border bg-surface p-4 text-sm text-text-secondary">
+        Нет просчётов с этим статусом.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 divide-y divide-border rounded-2xl border border-border bg-surface">
+      {quotes.map((quote) => (
+        <a
+          key={quote.id}
+          href={`/api/manager-quotes/${quote.id}/pdf`}
+          className="flex items-center gap-3 p-3 text-sm transition-colors hover:bg-bg"
+        >
+          {quote.firstPhotoId ? (
+            // eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset
+            <img
+              src={`/api/manager-quotes/photos/${quote.firstPhotoId}`}
+              alt=""
+              className="h-9 w-9 shrink-0 rounded-md border border-border object-cover"
+            />
+          ) : (
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-dashed border-border text-text-secondary">
+              <ImageOff className="h-4 w-4" />
+            </div>
+          )}
+          <Download className="h-4 w-4 shrink-0 text-text-secondary" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-medium text-text">
+              №{quote.displayId} · {quote.productName}
+            </div>
+            <div className="truncate text-xs text-text-secondary">
+              {quote.client.name}
+              {quote.client.company ? ` · ${quote.client.company}` : ""}
+            </div>
+          </div>
+          <span
+            className={cn(
+              "shrink-0 rounded-full px-2.5 py-1 text-xs font-medium",
+              QUOTE_STATUS_BADGE_CLASSES[quote.status as keyof typeof QUOTE_STATUS_BADGE_CLASSES],
+            )}
+          >
+            {QUOTE_STATUS_LABEL[quote.status as keyof typeof QUOTE_STATUS_LABEL] ?? quote.status}
+          </span>
+          <span className="w-28 shrink-0 text-right font-bold text-text">{fmt(Number(quote.totalRub))} ₽</span>
+        </a>
+      ))}
     </div>
   );
 }
@@ -230,12 +351,37 @@ function ManagerDashboard() {
   const [loading, setLoading] = useState(true);
   const [incomeExplainerOpen, setIncomeExplainerOpen] = useState(true);
 
+  // The pill row's own list panel — quotes are fetched once (all statuses,
+  // across every client this manager can see) and filtered client-side per
+  // click, rather than re-fetching per pill.
+  const [activeFilter, setActiveFilter] = useState<PillFilter | null>(null);
+  const [allQuotes, setAllQuotes] = useState<QuoteListItem[] | null>(null);
+  const [loadingQuotes, setLoadingQuotes] = useState(false);
+
   useEffect(() => {
     fetch("/api/manager-dashboard")
       .then((res) => res.json())
       .then((d) => setData(d))
       .finally(() => setLoading(false));
   }, []);
+
+  function handlePillSelect(filter: PillFilter) {
+    setActiveFilter((current) => (current?.key === filter.key ? null : filter));
+    if (allQuotes === null) {
+      setLoadingQuotes(true);
+      fetch("/api/manager-quotes")
+        .then((res) => res.json())
+        .then((d) => setAllQuotes(d.quotes ?? []))
+        .finally(() => setLoadingQuotes(false));
+    }
+  }
+
+  const filteredQuotes =
+    activeFilter && allQuotes
+      ? activeFilter.statuses
+        ? allQuotes.filter((q) => activeFilter.statuses!.includes(q.status))
+        : allQuotes
+      : null;
 
   if (loading) {
     return (
@@ -254,7 +400,8 @@ function ManagerDashboard() {
       </div>
 
       <StatCardsRow stats={data.overall} expectedIncomeRub={data.expectedIncomeRub} />
-      <StatusPillsRow stats={data.overall} />
+      <StatusPillsRow stats={data.overall} activeFilter={activeFilter?.key ?? null} onSelect={handlePillSelect} />
+      {activeFilter && <QuoteListPanel quotes={filteredQuotes} loading={loadingQuotes} />}
 
       <div className="rounded-2xl border border-border bg-bg p-4 sm:p-5">
         <div className="flex items-center gap-1.5 text-sm font-bold text-text">
