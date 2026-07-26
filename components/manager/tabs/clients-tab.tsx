@@ -8,6 +8,7 @@ import {
   Download,
   FileSpreadsheet,
   FileStack,
+  FileText,
   ImageOff,
   Loader2,
   Pencil,
@@ -157,6 +158,8 @@ function ClientQuotes({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportingPdfBundle, setExportingPdfBundle] = useState(false);
+  const [pdfBundleError, setPdfBundleError] = useState<string | null>(null);
   const [recalculatingId, setRecalculatingId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState<"recalculate" | "duplicate" | "status" | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
@@ -312,6 +315,42 @@ function ClientQuotes({
     }
   }
 
+  // Merges each selected quote's full detail page (photo, breakdown,
+  // disclaimer — same layout as one quote's own PDF) into a single file, in
+  // creation order — "по порядку" — instead of downloading N separate PDFs.
+  async function handleExportPdfBundle() {
+    if (exportingPdfBundle || selectedIds.length === 0) return;
+    setExportingPdfBundle(true);
+    setPdfBundleError(null);
+    try {
+      const res = await fetch(`/api/manager-clients/${clientId}/quotes-pdf-bundle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quoteIds: selectedIds }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setPdfBundleError(data.error ?? "Не удалось выгрузить PDF.");
+        return;
+      }
+      const disposition = res.headers.get("content-disposition") ?? "";
+      const fileNameMatch = disposition.match(/filename\*=UTF-8''([^;]+)/);
+      const fileName = fileNameMatch ? decodeURIComponent(fileNameMatch[1]) : "Просчёты.pdf";
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setPdfBundleError("Не удалось связаться с сервером.");
+    } finally {
+      setExportingPdfBundle(false);
+    }
+  }
+
   if (loading) return <p className="text-xs text-text-secondary">Загрузка просчётов…</p>;
   if (quotes.length === 0) return <p className="text-xs text-text-secondary">Просчётов пока нет.</p>;
 
@@ -344,6 +383,15 @@ function ClientQuotes({
         >
           {exportingExcel ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
           Выгрузить в Excel {selectedIds.length > 0 && `(${selectedIds.length})`}
+        </button>
+        <button
+          type="button"
+          onClick={handleExportPdfBundle}
+          disabled={selectedIds.length === 0 || exportingPdfBundle}
+          className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {exportingPdfBundle ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+          Скачать PDF {selectedIds.length > 0 && `(${selectedIds.length})`}
         </button>
 
         <AlertDialog>
@@ -399,6 +447,7 @@ function ClientQuotes({
       </div>
       {bulkError && <p className="text-xs text-error">{bulkError}</p>}
       {exportError && <p className="text-xs text-error">{exportError}</p>}
+      {pdfBundleError && <p className="text-xs text-error">{pdfBundleError}</p>}
       <ul className="space-y-1.5">
         {quotes.map((quote) => (
           <li key={quote.id} className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">

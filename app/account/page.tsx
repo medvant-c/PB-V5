@@ -46,6 +46,36 @@ export default async function AccountPage() {
           orderBy: { uploadedAt: "desc" },
         });
 
+  const quotes = await prisma.quote.findMany({ where: { clientId }, orderBy: { createdAt: "desc" } });
+  const [quotePhotos, quoteAttachedServices] = await Promise.all([
+    quotes.length === 0
+      ? []
+      : prisma.deskFile.findMany({
+          where: { tab: "quotes", relatedId: { in: quotes.map((q) => q.id) } },
+          orderBy: { uploadedAt: "asc" },
+          select: { id: true, relatedId: true },
+        }),
+    quotes.length === 0
+      ? []
+      : prisma.quoteAttachedService.findMany({
+          where: { quoteId: { in: quotes.map((q) => q.id) } },
+          orderBy: { createdAt: "asc" },
+        }),
+  ]);
+  const photoIdsByQuoteId = new Map<string, string[]>();
+  for (const photo of quotePhotos) {
+    if (!photo.relatedId) continue;
+    const list = photoIdsByQuoteId.get(photo.relatedId) ?? [];
+    list.push(photo.id);
+    photoIdsByQuoteId.set(photo.relatedId, list);
+  }
+  const servicesByQuoteId = new Map<string, { name: string; priceRub: number }[]>();
+  for (const service of quoteAttachedServices) {
+    const list = servicesByQuoteId.get(service.quoteId) ?? [];
+    list.push({ name: service.name, priceRub: Number(service.priceRub) });
+    servicesByQuoteId.set(service.quoteId, list);
+  }
+
   return (
     <AccountDashboard
       orders={orders.map((order) => ({
@@ -54,6 +84,37 @@ export default async function AccountPage() {
         events: order.events.map((event) => ({ ...event, createdAt: event.createdAt.toISOString() })),
       }))}
       documents={documents.map((doc) => ({ ...doc, uploadedAt: doc.uploadedAt.toISOString() }))}
+      quotes={quotes.map((q) => ({
+        id: q.id,
+        displayId: q.displayId,
+        status: q.status,
+        quoteType: q.quoteType,
+        productName: q.productName,
+        productDescription: q.productDescription,
+        color: q.color,
+        dimensions: q.dimensions,
+        quantity: q.quantity,
+        priceCnyPerUnit: Number(q.priceCnyPerUnit),
+        totalPriceCny: Number(q.totalPriceCny),
+        priceRubPerUnit: Number(q.priceRubPerUnit),
+        totalPriceRub: Number(q.totalPriceRub),
+        chinaDeliveryRub: Number(q.chinaDeliveryRub),
+        totalWeightKg: Number(q.totalWeightKg),
+        totalVolumeM3: Number(q.totalVolumeM3),
+        densityKgM3: Number(q.densityKgM3),
+        cargoDeliveryUsd: Number(q.cargoDeliveryUsd),
+        cargoDeliveryRub: Number(q.cargoDeliveryRub),
+        searchServiceFeeRub: Number(q.searchServiceFeeRub),
+        searchFeeWaived: q.searchFeeWaived,
+        buyoutCommissionPercent: Number(q.buyoutCommissionPercent),
+        buyoutCommissionRub: Number(q.buyoutCommissionRub),
+        totalRub: Number(q.totalRub),
+        cnyRateUsed: Number(q.cnyRateUsed),
+        usdRateUsed: Number(q.usdRateUsed),
+        createdAt: q.createdAt.toISOString(),
+        photoIds: photoIdsByQuoteId.get(q.id) ?? [],
+        attachedServices: servicesByQuoteId.get(q.id) ?? [],
+      }))}
     />
   );
 }

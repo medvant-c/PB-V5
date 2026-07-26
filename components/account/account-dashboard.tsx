@@ -10,6 +10,7 @@ import { STATUS_BADGE_CLASSES, STATUS_LABELS } from "@/lib/order-status";
 import { cn } from "@/lib/utils";
 import { PriceList, type ServiceCatalogItemRecord } from "@/components/account/price-list";
 import { CartSheet } from "@/components/account/cart-sheet";
+import { AccountQuotes, type AccountQuote } from "@/components/account/account-quotes";
 
 interface AccountOrderEvent {
   id: string;
@@ -46,7 +47,15 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
-function AccountDashboard({ orders, documents }: { orders: AccountOrder[]; documents: AccountDocument[] }) {
+function AccountDashboard({
+  orders,
+  documents,
+  quotes,
+}: {
+  orders: AccountOrder[];
+  documents: AccountDocument[];
+  quotes: AccountQuote[];
+}) {
   const router = useRouter();
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(orders[0]?.id ?? null);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -118,8 +127,18 @@ function AccountDashboard({ orders, documents }: { orders: AccountOrder[]; docum
         </button>
       </div>
 
+      <div className="mt-8">
+        <h2 className="text-base font-bold text-text">Мои просчёты</h2>
+        <p className="mb-3 text-sm text-text-secondary">Что и на каких условиях вам посчитал менеджер</p>
+        <AccountQuotes quotes={quotes} />
+      </div>
+
+      <div className="mt-10 border-t border-border pt-8">
+        <h2 className="text-base font-bold text-text">Заказы</h2>
+      </div>
+
       {orders.length === 0 ? (
-        <div className="mt-8 flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border py-16 text-center">
+        <div className="mt-3 flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border py-16 text-center">
           <PackageOpen className="h-8 w-8 text-text-secondary" />
           <p className="text-sm text-text-secondary">Заказов пока нет — они появятся здесь, как только менеджер их оформит.</p>
         </div>

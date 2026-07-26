@@ -138,13 +138,15 @@ const QUOTE_TYPE_LABEL: Record<string, string> = {
   pro: "Pro",
 };
 
-function QuotePdfDocument({ quote, client, photoBuffers, attachedServices }: QuotePdfProps) {
+// Just the <Page> — extracted so a multi-quote bundle can render several of
+// these as siblings under one <Document> (react-pdf's merge unit is the
+// Page, not the Document), while a single-quote PDF still wraps exactly one.
+function QuotePdfPage({ quote, client, photoBuffers, attachedServices }: QuotePdfProps) {
   const createdAt = new Date(quote.createdAt);
   const [heroPhoto, ...thumbPhotos] = photoBuffers;
   const tierInfo = SEARCH_TIER_INFO[quote.quoteType as keyof typeof SEARCH_TIER_INFO];
 
   return (
-    <Document>
       <Page size="A4" style={styles.page}>
         <View style={styles.metaRow}>
           <Text style={styles.meta}>Расчётный лист №{quote.displayId}</Text>
@@ -279,6 +281,27 @@ function QuotePdfDocument({ quote, client, photoBuffers, attachedServices }: Quo
           Panda Bridge — экосистема для бизнеса с Китаем.
         </Text>
       </Page>
+  );
+}
+
+function QuotePdfDocument(props: QuotePdfProps) {
+  return (
+    <Document>
+      <QuotePdfPage {...props} />
+    </Document>
+  );
+}
+
+// One Page per quote, in the given order — "выгрузить в один файл по
+// порядку" (manager bulk export) and the client portal's own "скачать
+// выбранные" both merge into a single PDF this way, instead of a zip of
+// separate files.
+function QuotesBundlePdfDocument({ quotes }: { quotes: QuotePdfProps[] }) {
+  return (
+    <Document>
+      {quotes.map((props, index) => (
+        <QuotePdfPage key={index} {...props} />
+      ))}
     </Document>
   );
 }
@@ -288,4 +311,10 @@ async function renderQuotePdf(props: QuotePdfProps): Promise<Buffer> {
   return renderToBuffer(<QuotePdfDocument {...props} />);
 }
 
-export { renderQuotePdf };
+async function renderQuotesBundlePdf(quotes: QuotePdfProps[]): Promise<Buffer> {
+  await ensureFontsRegistered();
+  return renderToBuffer(<QuotesBundlePdfDocument quotes={quotes} />);
+}
+
+export { renderQuotePdf, renderQuotesBundlePdf };
+export type { QuotePdfProps };
