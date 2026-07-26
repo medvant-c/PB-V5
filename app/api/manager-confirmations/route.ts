@@ -1,0 +1,61 @@
+import { NextRequest } from "next/server";
+import { getManagerSessionFromRequest } from "@/lib/manager-auth";
+import { getVisibleManagerIds } from "@/lib/manager-scope";
+import { prisma } from "@/lib/prisma";
+import type { QuoteStatus } from "@/lib/quote-statuses";
+
+// Same statuses as POST_BUYOUT_STATUSES in .../[id]/status/route.ts — kept
+// as a literal copy rather than a shared import since this is the only
+// other place that needs it and a shared lib file felt like overkill for
+// one array.
+const POST_BUYOUT_STATUSES: QuoteStatus[] = ["in_transit_to_warehouse", "delivered_to_warehouse", "sent_to_client", "handed_to_client"];
+
+// Owner/senior only — everything a manager did that now needs a second
+// person's sign-off before it counts toward real money (premium rate),
+// in one place instead of the senior having to hunt through every client.
+// Sorted oldest-first (longest waiting), same "don't let it go stale"
+// instinct as the in_progress banner elsewhere in the app.
+export async function GET(req: NextRequest) {
+  const session = await getManagerSessionFromRequest(req);
+  if (!session) {
+    return Response.json({ error: "Не авторизовано." }, { status: 401 });
+  }
+  if (session.role !== "owner" && session.role !== "senior") {
+    return Response.json({ error: "Доступно только старшему менеджеру и руководителю." }, { status: 403 });
+  }
+
+  const visibleManagerIds = await getVisibleManagerIds(session);
+  const managerFilter = visibleManagerIds === "all" ? {} : { managerId: { in: visibleManagerIds } };
+  const clientManagerFilter = visibleManagerIds === "all" ? {} : { createdByManagerId: { in: visibleManagerIds } };
+
+  const [pendingBuyouts, pendingClients] = await Promise.all([
+    prisma.quote.findMany({
+      where: { ...managerFilter, status: { in: POST_BUYOUT_STATUSES }, buyoutFactConfirmed: false },
+      orderBy: { statusChangedAt: "asc" },
+      select: {
+        id: true,
+        displayId: true,
+        productName: true,
+        status: true,
+        statusChangedAt: true,
+        totalPriceCny: true,
+        manager: { select: { id: true, name: true } },
+        client: { select: { name: true, company: true } },
+      },
+    }),
+    prisma.client.findMany({
+      where: { ...clientManagerFilter, selfSourcedClaimed: true, selfSourcedConfirmed: false },
+      orderBy: { selfSourcedClaimedAt: "asc" },
+      select: {
+        id: true,
+        displayId: true,
+        name: true,
+        company: true,
+        selfSourcedClaimedAt: true,
+        createdByManager: { select: { id: true, name: true } },
+      },
+    }),
+  ]);
+
+  return Response.json({ pendingBuyouts, pendingClients });
+}

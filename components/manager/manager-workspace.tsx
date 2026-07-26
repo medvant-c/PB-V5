@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, Calculator, Database, LogOut, Tag, Users, UsersRound } from "lucide-react";
+import { Briefcase, Calculator, CheckSquare, Database, LogOut, Tag, Users, UsersRound } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ManagerClientsTab } from "@/components/manager/tabs/clients-tab";
@@ -10,6 +10,7 @@ import { ManagerTariffsTab } from "@/components/manager/tabs/tariffs-tab";
 import { ManagerStaffTab } from "@/components/manager/tabs/staff-tab";
 import { ManagerPriceListTab } from "@/components/manager/tabs/price-list-tab";
 import { ManagerDatabaseTab } from "@/components/manager/tabs/database-tab";
+import { ManagerConfirmationsTab } from "@/components/manager/tabs/confirmations-tab";
 import { ManagerDashboard } from "@/components/manager/manager-dashboard";
 
 interface ManagerWorkspaceProps {
@@ -28,11 +29,12 @@ const ROLE_LABEL: Record<ManagerWorkspaceProps["role"], string> = {
 // owner-only — same array-of-{id,label,icon,Component} pattern as
 // components/desk/desk-workspace.tsx, filtered by role below.
 const ALL_SECTIONS = [
-  { id: "clients", label: "Клиенты", icon: Users, Component: ManagerClientsTab, ownerOnly: false },
-  { id: "tariffs", label: "Тарифы", icon: Calculator, Component: ManagerTariffsTab, ownerOnly: false },
-  { id: "price-list", label: "Прайс-лист", icon: Tag, Component: ManagerPriceListTab, ownerOnly: true },
-  { id: "database", label: "База данных", icon: Database, Component: ManagerDatabaseTab, ownerOnly: false },
-  { id: "staff", label: "Сотрудники", icon: UsersRound, Component: ManagerStaffTab, ownerOnly: true },
+  { id: "clients", label: "Клиенты", icon: Users, Component: ManagerClientsTab, ownerOnly: false, seniorOrOwnerOnly: false },
+  { id: "tariffs", label: "Тарифы", icon: Calculator, Component: ManagerTariffsTab, ownerOnly: false, seniorOrOwnerOnly: false },
+  { id: "confirmations", label: "Подтверждения", icon: CheckSquare, Component: ManagerConfirmationsTab, ownerOnly: false, seniorOrOwnerOnly: true },
+  { id: "price-list", label: "Прайс-лист", icon: Tag, Component: ManagerPriceListTab, ownerOnly: true, seniorOrOwnerOnly: false },
+  { id: "database", label: "База данных", icon: Database, Component: ManagerDatabaseTab, ownerOnly: false, seniorOrOwnerOnly: false },
+  { id: "staff", label: "Сотрудники", icon: UsersRound, Component: ManagerStaffTab, ownerOnly: true, seniorOrOwnerOnly: false },
 ] as const;
 
 const LAST_SECTION_STORAGE_KEY = "manager-last-section";
@@ -55,7 +57,9 @@ function ManagerWorkspace({ name, role }: ManagerWorkspaceProps) {
     contentRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  const SECTIONS = ALL_SECTIONS.filter((section) => !section.ownerOnly || role === "owner");
+  const SECTIONS = ALL_SECTIONS.filter(
+    (section) => (!section.ownerOnly || role === "owner") && (!section.seniorOrOwnerOnly || role === "owner" || role === "senior"),
+  );
 
   useEffect(() => {
     const saved = window.localStorage.getItem(LAST_SECTION_STORAGE_KEY);

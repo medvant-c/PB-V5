@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeftRight,
+  Banknote,
   ChevronDown,
   Copy,
   Download,
@@ -67,6 +68,9 @@ interface ClientRecord {
   source: string | null;
   createdByManagerId: string | null;
   createdByManager: { name: string } | null;
+  selfSourcedClaimed: boolean;
+  selfSourcedClaimedAt: string | null;
+  selfSourcedConfirmed: boolean;
   archivedAt: string | null;
   createdAt: string;
 }
@@ -93,6 +97,13 @@ interface QuoteRecord {
   firstPhotoId: string | null;
   clientComment: string;
   managerComment: string;
+  totalPriceCny: string;
+  cnyRateUsed: string;
+  actualBuyoutCny: string | null;
+  actualBuyoutRateUsed: string | null;
+  buyoutFactConfirmed: boolean;
+  buyoutConfirmedAt: string | null;
+  buyoutPremiumRatePercent: string | null;
 }
 
 // Below this density, cargo is always priced "по объёму" regardless of the
@@ -100,6 +111,11 @@ interface QuoteRecord {
 // lib/quote-engine.ts. Kept in sync manually since this is a display-only
 // label, not a pricing decision.
 const LOW_DENSITY_VOLUME_THRESHOLD_KG_M3 = 100;
+
+// Mirrors POST_BUYOUT_STATUSES in app/api/manager-quotes/[id]/status/
+// route.ts — only past this point does "факт по выкупу" make sense to ask
+// for (the manager hasn't actually bought anything before then).
+const POST_BUYOUT_STATUSES = ["in_transit_to_warehouse", "delivered_to_warehouse", "sent_to_client", "handed_to_client"];
 
 function fmtRub(value: number): string {
   return Math.round(value).toLocaleString("ru-RU");
@@ -150,12 +166,14 @@ function ClientQuotes({
   onEdit,
   onChanged,
   allManagers,
+  canConfirmBuyout,
 }: {
   clientId: string;
   refreshKey: number;
   onEdit: (quoteId: string) => void;
   onChanged: () => void;
   allManagers: { id: string; name: string }[] | null;
+  canConfirmBuyout: boolean;
 }) {
   const [quotes, setQuotes] = useState<QuoteRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -170,6 +188,9 @@ function ClientQuotes({
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
   const [reassigningId, setReassigningId] = useState<string | null>(null);
+  const [expandedBuyoutId, setExpandedBuyoutId] = useState<string | null>(null);
+  const [buyoutDrafts, setBuyoutDrafts] = useState<Record<string, { cny: string; rate: string }>>({});
+  const [savingBuyoutId, setSavingBuyoutId] = useState<string | null>(null);
   const [recalculatingId, setRecalculatingId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState<"recalculate" | "duplicate" | "status" | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
@@ -396,6 +417,35 @@ function ClientQuotes({
       if (res.ok) await load();
     } finally {
       setReassigningId(null);
+    }
+  }
+
+  function getBuyoutDraft(quote: QuoteRecord): { cny: string; rate: string } {
+    return (
+      buyoutDrafts[quote.id] ?? {
+        cny: quote.actualBuyoutCny ?? "",
+        rate: quote.actualBuyoutRateUsed ?? quote.cnyRateUsed,
+      }
+    );
+  }
+
+  async function handleConfirmBuyout(quoteId: string) {
+    const quote = quotes.find((q) => q.id === quoteId);
+    if (!quote) return;
+    const draft = getBuyoutDraft(quote);
+    const cny = Number(draft.cny);
+    const rate = Number(draft.rate);
+    if (!Number.isFinite(cny) || cny <= 0 || !Number.isFinite(rate) || rate <= 0) return;
+    setSavingBuyoutId(quoteId);
+    try {
+      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-buyout`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actualBuyoutCny: cny, actualBuyoutRateUsed: rate }),
+      });
+      if (res.ok) await load();
+    } finally {
+      setSavingBuyoutId(null);
     }
   }
 
@@ -676,6 +726,24 @@ function ClientQuotes({
                 </Select>
               )}
 
+              {POST_BUYOUT_STATUSES.includes(quote.status) && (
+                <button
+                  type="button"
+                  onClick={() => setExpandedBuyoutId(expandedBuyoutId === quote.id ? null : quote.id)}
+                  className={cn(
+                    "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-primary/10 hover:text-primary",
+                    quote.buyoutFactConfirmed ? "text-success" : "text-text-secondary",
+                  )}
+                  aria-label="Факт по выкупу"
+                  title={quote.buyoutFactConfirmed ? "Факт по выкупу подтверждён" : "Факт по выкупу не подтверждён"}
+                >
+                  <Banknote className="h-4 w-4" />
+                  {!quote.buyoutFactConfirmed && (
+                    <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-warning" />
+                  )}
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => onEdit(quote.id)}
@@ -764,6 +832,85 @@ function ClientQuotes({
                 </div>
               </div>
             )}
+
+            {expandedBuyoutId === quote.id &&
+              (() => {
+                const draft = getBuyoutDraft(quote);
+                const draftCny = Number(draft.cny);
+                const draftRate = Number(draft.rate);
+                const draftValid = Number.isFinite(draftCny) && draftCny > 0 && Number.isFinite(draftRate) && draftRate > 0;
+                const draftSpentRub = draftValid ? draftCny * draftRate : null;
+                const draftProfitRub = draftSpentRub != null ? Number(quote.totalPriceRub) - draftSpentRub : null;
+                const confirmedSpentRub = quote.buyoutFactConfirmed
+                  ? Number(quote.actualBuyoutCny) * Number(quote.actualBuyoutRateUsed)
+                  : null;
+                return (
+                  <div className="mt-2 space-y-2 rounded-lg border border-border bg-bg p-2.5">
+                    <p className="text-xs text-text-secondary">
+                      По плану: {quote.totalPriceCny}¥ ({fmtRub(Number(quote.totalPriceRub))}₽)
+                    </p>
+
+                    {quote.buyoutFactConfirmed ? (
+                      <div className="space-y-1 rounded-md bg-surface p-2.5 text-sm">
+                        <div className="text-text">
+                          Потрачено по факту: {quote.actualBuyoutCny}¥ × {quote.actualBuyoutRateUsed}₽ ={" "}
+                          {fmtRub(confirmedSpentRub!)}₽
+                        </div>
+                        <div className="font-bold text-success">
+                          Доход с выкупа: {fmtRub(Number(quote.totalPriceRub) - confirmedSpentRub!)}₽ (премия{" "}
+                          {quote.buyoutPremiumRatePercent}%)
+                        </div>
+                        <div className="text-xs text-text-secondary">
+                          Подтверждено {quote.buyoutConfirmedAt ? formatDate(quote.buyoutConfirmedAt) : ""}
+                        </div>
+                      </div>
+                    ) : canConfirmBuyout ? (
+                      <div className="space-y-1.5 rounded-md bg-surface p-2.5">
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="¥ потрачено"
+                            value={draft.cny}
+                            onChange={(e) =>
+                              setBuyoutDrafts((current) => ({ ...current, [quote.id]: { ...draft, cny: e.target.value } }))
+                            }
+                            className="w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="курс ¥→₽"
+                            value={draft.rate}
+                            onChange={(e) =>
+                              setBuyoutDrafts((current) => ({ ...current, [quote.id]: { ...draft, rate: e.target.value } }))
+                            }
+                            className="w-28 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                        {draftValid && (
+                          <p className={cn("text-xs font-medium", draftProfitRub! >= 0 ? "text-success" : "text-error")}>
+                            Потрачено: {fmtRub(draftSpentRub!)}₽ → Доход с выкупа: {fmtRub(draftProfitRub!)}₽
+                          </p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleConfirmBuyout(quote.id)}
+                          disabled={!draftValid || savingBuyoutId === quote.id}
+                          className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {savingBuyoutId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                          Подтвердить факт
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="rounded-md bg-surface p-2.5 text-xs text-text-secondary">
+                        Ожидает подтверждения старшим менеджером или руководителем.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
           </li>
         ))}
       </ul>
@@ -791,6 +938,15 @@ function ManagerClientsTab() {
       .then((data) => setAllManagers(data?.managers ?? null));
   }, []);
 
+  // /api/manager-confirmations is owner/senior-only — its success doubles
+  // as "can I confirm facts" the same way /api/managers above doubles as
+  // "am I the owner", without a dedicated whoami endpoint.
+  const [canConfirmBuyout, setCanConfirmBuyout] = useState(false);
+  useEffect(() => {
+    fetch("/api/manager-confirmations")
+      .then((res) => setCanConfirmBuyout(res.ok));
+  }, []);
+
   async function handleTransfer(clientId: string, managerId: string) {
     if (!managerId) return;
     setTransferringClientId(clientId);
@@ -806,6 +962,41 @@ function ManagerClientsTab() {
       }
     } finally {
       setTransferringClientId(null);
+    }
+  }
+
+  const [selfSourcedBusyId, setSelfSourcedBusyId] = useState<string | null>(null);
+  const [selfSourcedError, setSelfSourcedError] = useState<string | null>(null);
+
+  async function handleClaimSelfSourced(clientId: string) {
+    setSelfSourcedBusyId(clientId);
+    setSelfSourcedError(null);
+    try {
+      const res = await fetch(`/api/manager-clients/${clientId}/claim-self-sourced`, { method: "PATCH" });
+      if (res.ok) {
+        await loadClients();
+      } else {
+        const data = await res.json();
+        setSelfSourcedError(data.error ?? "Не удалось заявить клиента.");
+      }
+    } finally {
+      setSelfSourcedBusyId(null);
+    }
+  }
+
+  async function handleConfirmSelfSourced(clientId: string) {
+    setSelfSourcedBusyId(clientId);
+    setSelfSourcedError(null);
+    try {
+      const res = await fetch(`/api/manager-clients/${clientId}/confirm-self-sourced`, { method: "PATCH" });
+      if (res.ok) {
+        await loadClients();
+      } else {
+        const data = await res.json();
+        setSelfSourcedError(data.error ?? "Не удалось подтвердить клиента.");
+      }
+    } finally {
+      setSelfSourcedBusyId(null);
     }
   }
 
@@ -1022,6 +1213,35 @@ function ManagerClientsTab() {
                         Сейчас у менеджера: <span className="font-medium text-text">{client.createdByManager?.name ?? "—"}</span>
                       </p>
                     )}
+                    {client.selfSourcedConfirmed ? (
+                      <p className="text-xs font-medium text-success">✓ Личный клиент менеджера — премия 35% с даты подтверждения</p>
+                    ) : client.selfSourcedClaimed ? (
+                      <p className="flex flex-wrap items-center gap-2 text-xs text-warning">
+                        Заявлен как личный, ждёт подтверждения
+                        {canConfirmBuyout && (
+                          <button
+                            type="button"
+                            onClick={() => handleConfirmSelfSourced(client.id)}
+                            disabled={selfSourcedBusyId === client.id}
+                            className="rounded-lg border border-border bg-bg px-2 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
+                          >
+                            {selfSourcedBusyId === client.id && <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />}
+                            Подтвердить
+                          </button>
+                        )}
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleClaimSelfSourced(client.id)}
+                        disabled={selfSourcedBusyId === client.id}
+                        className="text-xs font-medium text-text-secondary underline decoration-dotted underline-offset-2 transition-colors hover:text-primary disabled:opacity-50"
+                      >
+                        {selfSourcedBusyId === client.id && <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />}
+                        Заявить как личного клиента (премия 35%)
+                      </button>
+                    )}
+                    {selfSourcedError && <p className="text-xs text-error">{selfSourcedError}</p>}
                     <div className="flex items-center justify-between">
                       <div className="flex gap-2">
                         <Button type="button" size="sm" variant="outline" onClick={() => startEditing(client)}>
@@ -1131,6 +1351,7 @@ function ManagerClientsTab() {
                       clientId={client.id}
                       refreshKey={quotesRefreshKey}
                       allManagers={allManagers}
+                      canConfirmBuyout={canConfirmBuyout}
                       onEdit={(quoteId) => {
                         setQuoteDialogClientId(client.id);
                         setEditingQuoteId(quoteId);

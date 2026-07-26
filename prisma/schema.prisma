@@ -116,6 +116,22 @@ model Client {
   // Needed for KPI attribution ("новых клиентов за месяц" per manager).
   createdByManagerId String?
   createdByManager   Manager? @relation(fields: [createdByManagerId], references: [id])
+  // Manager-initiated claim ("этот клиент — мой личный") — required before
+  // it shows up in the owner/senior confirmation queue, so ordinary
+  // inbound/marketing clients (the vast majority) never clutter that queue
+  // just because createdByManagerId happens to be set.
+  selfSourcedClaimed   Boolean   @default(false)
+  selfSourcedClaimedAt DateTime?
+  // Owner/senior-only confirmation that createdByManagerId genuinely
+  // self-sourced this client (not just whoever happened to click "Новый
+  // клиент" for an inbound lead) — drives the 35% (vs the usual 10%)
+  // premium rate on that manager's quotes for this client. The confirmer
+  // is tracked separately from createdByManagerId precisely because they
+  // must be a different person by design (conflict-of-interest control,
+  // same reasoning as buyout-fact confirmation on Quote below).
+  selfSourcedConfirmed           Boolean   @default(false)
+  selfSourcedConfirmedAt         DateTime?
+  selfSourcedConfirmedByManagerId String?
   // Null until the client opens their activation link and sets a password —
   // an account can exist (created by staff) before it's ever activated.
   passwordHash String?
@@ -419,6 +435,28 @@ model Quote {
   // only writable by its own owner (enforced in the API routes, not here).
   clientComment  String @default("")
   managerComment String @default("")
+
+  // Real buyout economics, entered once goods are actually purchased from
+  // the factory — separate from priceCnyPerUnit/totalPriceCny above (the
+  // QUOTED price the client agreed to, never touched by this). Owner/senior
+  // only, by design: the manager who'd benefit from a smaller reported
+  // spend must never be the one reporting it. Null/false until confirmed —
+  // status can advance freely regardless (see managerComment-style
+  // decoupling), only the dashboard's "факт" bucket and premium depend on
+  // this flag, not on Quote.status itself.
+  actualBuyoutCny          Decimal?
+  actualBuyoutRateUsed     Decimal?
+  buyoutFactConfirmed      Boolean   @default(false)
+  buyoutConfirmedByManagerId String?
+  buyoutConfirmedAt        DateTime?
+  // Locked in AT confirmation time (10 or 35) — not recomputed live off
+  // Client.selfSourcedConfirmed later, so a client being confirmed
+  // self-sourced today never silently changes the premium already earned
+  // on quotes confirmed before that date ("только по новым с даты
+  // подтверждения"). Also captures whichever manager this quote actually
+  // belonged to at the moment of confirmation, independent of any later
+  // reassignment via /api/manager-quotes/[id]/reassign.
+  buyoutPremiumRatePercent Decimal?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
