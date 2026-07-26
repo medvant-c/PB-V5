@@ -15,7 +15,7 @@ const HEADER_FONT_COLOR = "FFFFFFFF";
 const STRIPE_FILL = "FFDCE6F1"; // light blue, alternates with white
 
 const QUOTE_TYPE_LABEL: Record<string, string> = {
-  standard: "Standard",
+  standard: "Standart",
   expert: "Expert",
   pro: "Pro",
 };

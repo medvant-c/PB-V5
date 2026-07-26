@@ -10,6 +10,7 @@ import {
   FileText,
   ImageOff,
   Loader2,
+  MessageSquare,
   PackageSearch,
 } from "lucide-react";
 import { QUOTE_STATUS_BADGE_CLASSES, QUOTE_STATUS_LABEL, type QuoteStatus } from "@/lib/quote-statuses";
@@ -47,13 +48,15 @@ interface AccountQuote {
   totalRub: number;
   cnyRateUsed: number;
   usdRateUsed: number;
+  clientComment: string;
+  managerComment: string;
   createdAt: string;
   photoIds: string[];
   attachedServices: AccountQuoteService[];
 }
 
 const QUOTE_TYPE_LABEL: Record<string, string> = {
-  standard: "Standard",
+  standard: "Standart",
   expert: "Expert",
   pro: "Pro",
 };
@@ -84,6 +87,44 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
   const [expandedId, setExpandedId] = useState<string | null>(quotes[0]?.id ?? null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [busy, setBusy] = useState<"pdf" | "excel" | "all" | string | null>(null);
+
+  const [clientComments, setClientComments] = useState<Record<string, string>>(() =>
+    Object.fromEntries(quotes.map((q) => [q.id, q.clientComment])),
+  );
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
+
+  function getCommentDraft(quote: AccountQuote): string {
+    return commentDrafts[quote.id] ?? clientComments[quote.id] ?? quote.clientComment;
+  }
+
+  async function handleSaveComment(quoteId: string) {
+    const value = getCommentDraft(quotes.find((q) => q.id === quoteId)!);
+    setSavingCommentId(quoteId);
+    try {
+      const res = await fetch(`/api/account-quotes/${quoteId}/comment`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: value }),
+      });
+      if (!res.ok) {
+        toast.error("Не удалось сохранить комментарий.");
+        return;
+      }
+      const data = await res.json();
+      setClientComments((current) => ({ ...current, [quoteId]: data.clientComment }));
+      setCommentDrafts((current) => {
+        const next = { ...current };
+        delete next[quoteId];
+        return next;
+      });
+      toast.success("Комментарий сохранён.");
+    } catch {
+      toast.error("Не удалось связаться с сервером.");
+    } finally {
+      setSavingCommentId(null);
+    }
+  }
 
   function toggleSelected(id: string) {
     setSelectedIds((current) => (current.includes(id) ? current.filter((x) => x !== id) : [...current, id]));
@@ -368,6 +409,40 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
                     Расчёт произведён по курсу: 1¥ = {quote.cnyRateUsed.toFixed(2)}₽, 1$ = {quote.usdRateUsed.toFixed(2)}₽. При
                     оплате курс может отличаться — итоговая сумма пересчитывается по актуальному курсу на день оплаты.
                   </p>
+
+                  <div className="space-y-2 rounded-xl border border-border p-3">
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
+                      <MessageSquare className="h-3.5 w-3.5" />
+                      Комментарии
+                    </div>
+
+                    <div>
+                      <p className="mb-1 text-xs font-medium text-text-secondary">Комментарий менеджера</p>
+                      <p className="rounded-lg bg-bg px-3 py-2 text-sm text-text">
+                        {quote.managerComment || <span className="text-text-secondary">Пока нет комментария.</span>}
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="mb-1 text-xs font-medium text-text-secondary">Ваш комментарий</p>
+                      <textarea
+                        value={getCommentDraft(quote)}
+                        onChange={(e) => setCommentDrafts((current) => ({ ...current, [quote.id]: e.target.value }))}
+                        placeholder="Напишите менеджеру — например, пожелание по цвету или срокам"
+                        rows={2}
+                        className="w-full resize-none rounded-lg border border-border bg-bg px-3 py-2 text-sm text-text placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSaveComment(quote.id)}
+                        disabled={savingCommentId === quote.id || getCommentDraft(quote) === (clientComments[quote.id] ?? quote.clientComment)}
+                        className="mt-1.5 flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {savingCommentId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        Сохранить комментарий
+                      </button>
+                    </div>
+                  </div>
 
                   <button
                     type="button"

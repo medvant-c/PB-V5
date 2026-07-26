@@ -71,6 +71,8 @@ export async function GET(req: NextRequest) {
       totalRub: Number(q.totalRub),
       cnyRateUsed: Number(q.cnyRateUsed),
       usdRateUsed: Number(q.usdRateUsed),
+      clientComment: q.clientComment,
+      managerComment: q.managerComment,
       createdAt: q.createdAt.toISOString(),
       photoIds: photoIdsByQuoteId.get(q.id) ?? [],
       attachedServices: servicesByQuoteId.get(q.id) ?? [],

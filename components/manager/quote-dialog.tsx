@@ -126,7 +126,7 @@ interface QuoteDialogProps {
 }
 
 const QUOTE_TYPES = [
-  { value: "standard", label: "Standard" },
+  { value: "standard", label: "Standart" },
   { value: "expert", label: "Expert" },
   { value: "pro", label: "Pro" },
 ] as const;

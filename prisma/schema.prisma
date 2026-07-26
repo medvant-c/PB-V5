@@ -414,6 +414,12 @@ model Quote {
   cnyRateUsed Decimal
   usdRateUsed Decimal
 
+  // One line each, not a thread — the client and manager each have their
+  // own comment slot under a quote, both visible to both sides, but each
+  // only writable by its own owner (enforced in the API routes, not here).
+  clientComment  String @default("")
+  managerComment String @default("")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

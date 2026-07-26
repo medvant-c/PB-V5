@@ -219,7 +219,7 @@ function ManagerDashboard() {
           </div>
           <div className="mt-3 space-y-2 rounded-lg bg-bg p-2.5 text-[11px] text-text-secondary">
             <div>
-              <span className="font-semibold text-text">Доход по выкупу и услугам</span> = услуга поиска (Standard/
+              <span className="font-semibold text-text">Доход по выкупу и услугам</span> = услуга поиска (Standart/
               Expert/Pro) + комиссия за организацию выкупа + доп. услуги из прайс-листа. Это на 100% ваш доход — тут
               нет отдельной себестоимости, которую нужно вычитать.
             </div>

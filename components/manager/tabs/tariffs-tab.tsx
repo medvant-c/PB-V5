@@ -50,7 +50,7 @@ const FIELD_LABELS: Record<
   usdRateRub: "Курс доллара (USD → RUB)",
   volumeRateUsdPerCbm: "Резервная ставка за м³ (если для категории нет своего тарифа), $",
   buyoutCommissionPercent: "Комиссия за организацию выкупа, %",
-  standardPriceRub: "Поиск товара Standard, ₽",
+  standardPriceRub: "Поиск товара Standart, ₽",
   expertPriceRub: "Поиск товара Expert, ₽",
   proPriceRub: "Поиск товара Pro, ₽",
 };

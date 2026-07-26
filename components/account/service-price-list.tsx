@@ -30,7 +30,7 @@ const SERVICE_GROUPS: ServiceGroup[] = [
     items: [
       {
         id: "standard",
-        name: "Standard",
+        name: "Standart",
         price: "500 ₽",
         bullets: [
           "Поиск массового товара по фотографии на маркетплейсах Китая (1688, Taobao, Pinduoduo и др.)",

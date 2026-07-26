@@ -133,7 +133,7 @@ interface QuotePdfProps {
 }
 
 const QUOTE_TYPE_LABEL: Record<string, string> = {
-  standard: "Standard",
+  standard: "Standart",
   expert: "Expert",
   pro: "Pro",
 };

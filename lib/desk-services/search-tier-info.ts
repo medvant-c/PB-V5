@@ -10,7 +10,7 @@ interface SearchTierInfo {
 
 const SEARCH_TIER_INFO: Record<"standard" | "expert" | "pro", SearchTierInfo> = {
   standard: {
-    label: "Standard",
+    label: "Standart",
     intro: null,
     bullets: [
       "Товар массовый, есть у многих продавцов и фабрик",
@@ -20,7 +20,7 @@ const SEARCH_TIER_INFO: Record<"standard" | "expert" | "pro", SearchTierInfo> = 
   },
   expert: {
     label: "Expert",
-    intro: "Включает услуги тарифа Standard, а также:",
+    intro: "Включает услуги тарифа Standart, а также:",
     bullets: [
       "Проведение переговоров с поставщиком",
       "Уточнение характеристик товара",

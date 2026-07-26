@@ -11,6 +11,7 @@ import {
   FileText,
   ImageOff,
   Loader2,
+  MessageSquare,
   Pencil,
   Plus,
   RefreshCw,
@@ -89,6 +90,8 @@ interface QuoteRecord {
   createdAt: string;
   manager: { name: string };
   firstPhotoId: string | null;
+  clientComment: string;
+  managerComment: string;
 }
 
 // Below this density, cargo is always priced "по объёму" regardless of the
@@ -160,6 +163,9 @@ function ClientQuotes({
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportingPdfBundle, setExportingPdfBundle] = useState(false);
   const [pdfBundleError, setPdfBundleError] = useState<string | null>(null);
+  const [expandedCommentId, setExpandedCommentId] = useState<string | null>(null);
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
+  const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
   const [recalculatingId, setRecalculatingId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState<"recalculate" | "duplicate" | "status" | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
@@ -348,6 +354,26 @@ function ClientQuotes({
       setPdfBundleError("Не удалось связаться с сервером.");
     } finally {
       setExportingPdfBundle(false);
+    }
+  }
+
+  function getCommentDraft(quote: QuoteRecord): string {
+    return commentDrafts[quote.id] ?? quote.managerComment;
+  }
+
+  async function handleSaveManagerComment(quoteId: string) {
+    const quote = quotes.find((q) => q.id === quoteId);
+    if (!quote) return;
+    setSavingCommentId(quoteId);
+    try {
+      const res = await fetch(`/api/manager-quotes/${quoteId}/comment`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: getCommentDraft(quote) }),
+      });
+      if (res.ok) await load();
+    } finally {
+      setSavingCommentId(null);
     }
   }
 
@@ -585,6 +611,19 @@ function ClientQuotes({
 
               <button
                 type="button"
+                onClick={() => setExpandedCommentId(expandedCommentId === quote.id ? null : quote.id)}
+                className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary"
+                aria-label="Комментарии"
+                title="Комментарии"
+              >
+                <MessageSquare className="h-4 w-4" />
+                {quote.clientComment && (
+                  <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-error" />
+                )}
+              </button>
+
+              <button
+                type="button"
                 onClick={() => onEdit(quote.id)}
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary"
                 aria-label="Редактировать просчёт"
@@ -639,6 +678,36 @@ function ClientQuotes({
               <div className="mt-2 flex items-start gap-2 rounded-lg bg-error/10 px-2.5 py-2 text-xs font-medium text-error">
                 <AlertTriangle className="h-4 w-4 shrink-0" />
                 Почему так долго идёт просчёт? Это влияет на твой доход. Поторопись!
+              </div>
+            )}
+
+            {expandedCommentId === quote.id && (
+              <div className="mt-2 space-y-2 rounded-lg border border-border bg-bg p-2.5">
+                <div>
+                  <p className="mb-1 text-xs font-medium text-text-secondary">Комментарий клиента</p>
+                  <p className="rounded-md bg-surface px-2.5 py-1.5 text-sm text-text">
+                    {quote.clientComment || <span className="text-text-secondary">Пока нет комментария.</span>}
+                  </p>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs font-medium text-text-secondary">Комментарий менеджера</p>
+                  <textarea
+                    value={getCommentDraft(quote)}
+                    onChange={(e) => setCommentDrafts((current) => ({ ...current, [quote.id]: e.target.value }))}
+                    placeholder="Напишите комментарий, видимый клиенту"
+                    rows={2}
+                    className="w-full resize-none rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-text placeholder:text-text-secondary focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleSaveManagerComment(quote.id)}
+                    disabled={savingCommentId === quote.id || getCommentDraft(quote) === quote.managerComment}
+                    className="mt-1.5 flex w-fit items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {savingCommentId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    Сохранить
+                  </button>
+                </div>
               </div>
             )}
           </li>
