@@ -8,9 +8,16 @@ import { OrderStatus } from "@/generated/prisma/enums";
 import { DIRECTION_LABELS } from "@/lib/order-directions";
 import { STATUS_BADGE_CLASSES, STATUS_LABELS } from "@/lib/order-status";
 import { cn } from "@/lib/utils";
-import { PriceList, type ServiceCatalogItemRecord } from "@/components/account/price-list";
+import {
+  PriceList,
+  type ServiceCatalogItemRecord,
+} from "@/components/account/price-list";
 import { CartSheet } from "@/components/account/cart-sheet";
-import { AccountQuotes, type AccountQuote } from "@/components/account/account-quotes";
+import {
+  AccountQuotes,
+  type AccountQuote,
+} from "@/components/account/account-quotes";
+import { ServicePriceList } from "@/components/account/service-price-list";
 
 interface AccountOrderEvent {
   id: string;
@@ -38,7 +45,10 @@ interface AccountDocument {
 }
 
 function formatDate(value: string): string {
-  return new Date(value).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
+  return new Date(value).toLocaleString("ru-RU", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
 }
 
 function formatSize(bytes: number): string {
@@ -57,7 +67,9 @@ function AccountDashboard({
   quotes: AccountQuote[];
 }) {
   const router = useRouter();
-  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(orders[0]?.id ?? null);
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(
+    orders[0]?.id ?? null,
+  );
   const [loggingOut, setLoggingOut] = useState(false);
 
   const [cart, setCart] = useState<ServiceCatalogItemRecord[]>([]);
@@ -77,7 +89,9 @@ function AccountDashboard({
   }
 
   function handleAddToCart(item: ServiceCatalogItemRecord) {
-    setCart((current) => (current.some((c) => c.id === item.id) ? current : [...current, item]));
+    setCart((current) =>
+      current.some((c) => c.id === item.id) ? current : [...current, item],
+    );
   }
 
   function handleRemoveFromCart(id: string) {
@@ -91,7 +105,9 @@ function AccountDashboard({
       const res = await fetch("/api/account-orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ serviceCatalogItemIds: cart.map((item) => item.id) }),
+        body: JSON.stringify({
+          serviceCatalogItemIds: cart.map((item) => item.id),
+        }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -110,11 +126,13 @@ function AccountDashboard({
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-10">
+    <div className="mx-auto max-w-6xl px-4 py-10">
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-text">Личный кабинет</h1>
-          <p className="text-sm text-text-secondary">Ваши заказы, статусы и документы</p>
+          <p className="text-sm text-text-secondary">
+            Ваши заказы, статусы и документы
+          </p>
         </div>
         <button
           type="button"
@@ -127,104 +145,150 @@ function AccountDashboard({
         </button>
       </div>
 
-      <div className="mt-8">
-        <h2 className="text-base font-bold text-text">Мои просчёты</h2>
-        <p className="mb-3 text-sm text-text-secondary">Что и на каких условиях вам посчитал менеджер</p>
-        <AccountQuotes quotes={quotes} />
-      </div>
+      <div className="mt-8 grid gap-8 lg:grid-cols-[300px_1fr] lg:items-start">
+        <aside className="lg:sticky lg:top-6">
+          <ServicePriceList />
+        </aside>
 
-      <div className="mt-10 border-t border-border pt-8">
-        <h2 className="text-base font-bold text-text">Заказы</h2>
-      </div>
+        <div className="min-w-0">
+          <div>
+            <h2 className="text-base font-bold text-text">Мои просчёты</h2>
+            <p className="mb-3 text-sm text-text-secondary">
+              Что и на каких условиях вам посчитал менеджер
+            </p>
+            <AccountQuotes quotes={quotes} />
+          </div>
 
-      {orders.length === 0 ? (
-        <div className="mt-3 flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border py-16 text-center">
-          <PackageOpen className="h-8 w-8 text-text-secondary" />
-          <p className="text-sm text-text-secondary">Заказов пока нет — они появятся здесь, как только менеджер их оформит.</p>
+          <div className="mt-10 border-t border-border pt-8">
+            <h2 className="text-base font-bold text-text">Заказы</h2>
+          </div>
+
+          {orders.length === 0 ? (
+            <div className="mt-3 flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border py-16 text-center">
+              <PackageOpen className="h-8 w-8 text-text-secondary" />
+              <p className="text-sm text-text-secondary">
+                Заказов пока нет — они появятся здесь, как только менеджер их
+                оформит.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-6 space-y-3">
+              {orders.map((order) => {
+                const isOpen = expandedOrderId === order.id;
+                const orderDocuments = documents.filter(
+                  (doc) => doc.relatedId === order.id,
+                );
+                return (
+                  <div
+                    key={order.id}
+                    className="rounded-2xl border border-border bg-surface shadow-sm"
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedOrderId(isOpen ? null : order.id)
+                      }
+                      className="flex w-full items-center justify-between gap-3 p-4 text-left"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-text">
+                          {order.title}
+                          {order.price ? (
+                            <span className="ml-2 font-normal text-text-secondary">
+                              · {order.price}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="mt-0.5 text-xs text-text-secondary">
+                          {DIRECTION_LABELS[
+                            order.direction as keyof typeof DIRECTION_LABELS
+                          ] ?? order.direction}{" "}
+                          · {formatDate(order.createdAt)}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-3">
+                        <span
+                          className={cn(
+                            "rounded-full px-3 py-1 text-xs font-medium",
+                            STATUS_BADGE_CLASSES[order.status],
+                          )}
+                        >
+                          {STATUS_LABELS[order.status]}
+                        </span>
+                        <ChevronDown
+                          className={cn(
+                            "h-4 w-4 text-text-secondary transition-transform",
+                            isOpen && "rotate-180",
+                          )}
+                        />
+                      </div>
+                    </button>
+
+                    {isOpen && (
+                      <div className="space-y-4 border-t border-border p-4">
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-semibold text-text-secondary">
+                            История статуса
+                          </p>
+                          <ul className="space-y-1 text-xs text-text-secondary">
+                            {order.events.map((event) => (
+                              <li key={event.id}>
+                                {formatDate(event.createdAt)} —{" "}
+                                {STATUS_LABELS[event.status]}
+                                {event.note ? ` (${event.note})` : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-semibold text-text-secondary">
+                            Документы
+                          </p>
+                          {orderDocuments.length === 0 ? (
+                            <p className="text-xs text-text-secondary">
+                              Документов пока нет.
+                            </p>
+                          ) : (
+                            <ul className="space-y-1.5">
+                              {orderDocuments.map((doc) => (
+                                <li
+                                  key={doc.id}
+                                  className="flex items-center gap-2 rounded-lg border border-border bg-bg px-3 py-2 text-sm"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="truncate font-medium text-text">
+                                      {doc.originalName}
+                                    </div>
+                                    <div className="text-[11px] text-text-secondary">
+                                      {formatSize(doc.size)} ·{" "}
+                                      {formatDate(doc.uploadedAt)}
+                                    </div>
+                                  </div>
+                                  <a
+                                    href={`/api/account-documents/${doc.id}`}
+                                    aria-label={`Скачать ${doc.originalName}`}
+                                    className="shrink-0 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-black/5 hover:text-primary"
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </a>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="mt-10 border-t border-border pt-8">
+            <PriceList cartIds={cartIds} onAddToCart={handleAddToCart} />
+          </div>
         </div>
-      ) : (
-        <div className="mt-6 space-y-3">
-          {orders.map((order) => {
-            const isOpen = expandedOrderId === order.id;
-            const orderDocuments = documents.filter((doc) => doc.relatedId === order.id);
-            return (
-              <div key={order.id} className="rounded-2xl border border-border bg-surface shadow-sm">
-                <button
-                  type="button"
-                  onClick={() => setExpandedOrderId(isOpen ? null : order.id)}
-                  className="flex w-full items-center justify-between gap-3 p-4 text-left"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-text">
-                      {order.title}
-                      {order.price ? <span className="ml-2 font-normal text-text-secondary">· {order.price}</span> : null}
-                    </div>
-                    <div className="mt-0.5 text-xs text-text-secondary">
-                      {DIRECTION_LABELS[order.direction as keyof typeof DIRECTION_LABELS] ?? order.direction} ·{" "}
-                      {formatDate(order.createdAt)}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-3">
-                    <span className={cn("rounded-full px-3 py-1 text-xs font-medium", STATUS_BADGE_CLASSES[order.status])}>
-                      {STATUS_LABELS[order.status]}
-                    </span>
-                    <ChevronDown className={cn("h-4 w-4 text-text-secondary transition-transform", isOpen && "rotate-180")} />
-                  </div>
-                </button>
-
-                {isOpen && (
-                  <div className="space-y-4 border-t border-border p-4">
-                    <div className="space-y-1.5">
-                      <p className="text-xs font-semibold text-text-secondary">История статуса</p>
-                      <ul className="space-y-1 text-xs text-text-secondary">
-                        {order.events.map((event) => (
-                          <li key={event.id}>
-                            {formatDate(event.createdAt)} — {STATUS_LABELS[event.status]}
-                            {event.note ? ` (${event.note})` : ""}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <p className="text-xs font-semibold text-text-secondary">Документы</p>
-                      {orderDocuments.length === 0 ? (
-                        <p className="text-xs text-text-secondary">Документов пока нет.</p>
-                      ) : (
-                        <ul className="space-y-1.5">
-                          {orderDocuments.map((doc) => (
-                            <li
-                              key={doc.id}
-                              className="flex items-center gap-2 rounded-lg border border-border bg-bg px-3 py-2 text-sm"
-                            >
-                              <div className="min-w-0 flex-1">
-                                <div className="truncate font-medium text-text">{doc.originalName}</div>
-                                <div className="text-[11px] text-text-secondary">
-                                  {formatSize(doc.size)} · {formatDate(doc.uploadedAt)}
-                                </div>
-                              </div>
-                              <a
-                                href={`/api/account-documents/${doc.id}`}
-                                aria-label={`Скачать ${doc.originalName}`}
-                                className="shrink-0 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-black/5 hover:text-primary"
-                              >
-                                <Download className="h-4 w-4" />
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <div className="mt-10 border-t border-border pt-8">
-        <PriceList cartIds={cartIds} onAddToCart={handleAddToCart} />
       </div>
 
       <CartSheet
