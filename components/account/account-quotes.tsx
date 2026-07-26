@@ -227,12 +227,22 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
                   className="flex flex-1 items-center gap-3 text-left"
                 >
                   {heroPhotoId ? (
-                    // eslint-disable-next-line @next/next/no-img-element -- client-facing portal, no next/image domain config needed for a same-origin API route
-                    <img
-                      src={`/api/account-quotes/photos/${heroPhotoId}`}
-                      alt={quote.productName}
-                      className="h-14 w-14 shrink-0 rounded-lg border border-border object-contain bg-bg"
-                    />
+                    <div className="group relative shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- client-facing portal, no next/image domain config needed for a same-origin API route */}
+                      <img
+                        src={`/api/account-quotes/photos/${heroPhotoId}`}
+                        alt={quote.productName}
+                        className="h-14 w-14 rounded-lg border border-border object-contain bg-bg"
+                      />
+                      <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden group-hover:block">
+                        {/* eslint-disable-next-line @next/next/no-img-element -- see above */}
+                        <img
+                          src={`/api/account-quotes/photos/${heroPhotoId}`}
+                          alt={quote.productName}
+                          className="h-auto w-auto max-h-[260px] max-w-[260px] rounded-lg border border-border bg-bg shadow-lg"
+                        />
+                      </div>
+                    </div>
                   ) : (
                     <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-dashed border-border bg-bg text-text-secondary">
                       <ImageOff className="h-5 w-5" />
@@ -262,13 +272,22 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
                   {quote.photoIds.length > 1 && (
                     <div className="flex flex-wrap gap-2">
                       {quote.photoIds.map((photoId) => (
-                        // eslint-disable-next-line @next/next/no-img-element -- see above
-                        <img
-                          key={photoId}
-                          src={`/api/account-quotes/photos/${photoId}`}
-                          alt={quote.productName}
-                          className="h-16 w-16 rounded-lg border border-border bg-bg object-contain"
-                        />
+                        <div key={photoId} className="group relative">
+                          {/* eslint-disable-next-line @next/next/no-img-element -- see above */}
+                          <img
+                            src={`/api/account-quotes/photos/${photoId}`}
+                            alt={quote.productName}
+                            className="h-16 w-16 rounded-lg border border-border bg-bg object-contain"
+                          />
+                          <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden group-hover:block">
+                            {/* eslint-disable-next-line @next/next/no-img-element -- see above */}
+                            <img
+                              src={`/api/account-quotes/photos/${photoId}`}
+                              alt={quote.productName}
+                              className="h-auto w-auto max-h-[260px] max-w-[260px] rounded-lg border border-border bg-bg shadow-lg"
+                            />
+                          </div>
+                        </div>
                       ))}
                     </div>
                   )}
