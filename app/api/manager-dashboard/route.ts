@@ -44,6 +44,10 @@ interface QuoteForStats {
   // here would count 100% of cargo revenue as a pass-through cost and
   // silently hide that margin from "profit."
   cargoCostRub: unknown;
+  totalVolumeM3: unknown;
+  totalWeightKg: unknown;
+  searchServiceFeeRub: unknown;
+  buyoutCommissionRub: unknown;
 }
 
 // Company profit on a quote — the client's full payment minus the real
@@ -87,6 +91,16 @@ function summarize(quotes: QuoteForStats[]) {
   let pipelineGoodsRub = 0;
   let pipelineChinaDeliveryRub = 0;
   let pipelineCargoRub = 0;
+  // Physical totals (not ₽) behind the cargo income figure — "какой объём
+  // в расчётах общий и вес" next to "Доход за карго" — and the two revenue
+  // lines behind "Ожидаемый доход компании" ("сколько за услуги поиска и
+  // сколько комиссия за выкуп"). None of these four are confidential on
+  // their own (a manager already sees them per-quote); only the sections
+  // that render them company-wide are owner-gated, client-side.
+  let pipelineVolumeM3 = 0;
+  let pipelineWeightKg = 0;
+  let pipelineSearchFeeRub = 0;
+  let pipelineBuyoutCommissionRub = 0;
   for (const q of quotes) {
     statusCounts[q.status] = (statusCounts[q.status] ?? 0) + 1;
     // "Выкуплено": everything except cargo delivery, which hasn't happened
@@ -104,6 +118,10 @@ function summarize(quotes: QuoteForStats[]) {
       pipelineGoodsRub += Number(q.totalPriceRub);
       pipelineChinaDeliveryRub += Number(q.chinaDeliveryRub);
       pipelineCargoRub += Number(q.cargoDeliveryRub);
+      pipelineVolumeM3 += Number(q.totalVolumeM3);
+      pipelineWeightKg += Number(q.totalWeightKg);
+      pipelineSearchFeeRub += Number(q.searchServiceFeeRub);
+      pipelineBuyoutCommissionRub += Number(q.buyoutCommissionRub);
     }
   }
   // All-time, not just the open pipeline above — this is every quote this
@@ -138,6 +156,10 @@ function summarize(quotes: QuoteForStats[]) {
     pipelineGoodsRub,
     pipelineChinaDeliveryRub,
     pipelineCargoRub,
+    pipelineVolumeM3,
+    pipelineWeightKg,
+    pipelineSearchFeeRub,
+    pipelineBuyoutCommissionRub,
     pipelineProfitRub,
     pipelineCargoProfitRub,
     premiumRub,
@@ -166,6 +188,10 @@ export async function GET(req: NextRequest) {
       chinaDeliveryRub: true,
       cargoDeliveryRub: true,
       cargoCostRub: true,
+      totalVolumeM3: true,
+      totalWeightKg: true,
+      searchServiceFeeRub: true,
+      buyoutCommissionRub: true,
     },
   });
 
@@ -218,6 +244,14 @@ export async function GET(req: NextRequest) {
   // implies the cargo margin config in Тарифы, which is owner-confidential.
   let cargoProfitRub: number | null = null;
   let otherProfitRub: number | null = null;
+  // Alongside cargoProfitRub — "сколько объём в расчётах общий и вес" next
+  // to the "Доход за карго" figure.
+  let cargoVolumeM3: number | null = null;
+  let cargoWeightKg: number | null = null;
+  // Alongside expectedIncomeRub — "сколько за услуги поиска и сколько
+  // комиссия за выкуп" next to "Ожидаемый доход компании".
+  let searchFeeRub: number | null = null;
+  let buyoutCommissionRub: number | null = null;
   if (session.role === "owner" && perManager) {
     const totalManagerPremiumsRub = perManager.reduce(
       (sum, m) => sum + m.premiumRub,
@@ -226,6 +260,10 @@ export async function GET(req: NextRequest) {
     expectedIncomeRub = overall.pipelineProfitRub - totalManagerPremiumsRub;
     cargoProfitRub = overall.pipelineCargoProfitRub;
     otherProfitRub = overall.pipelineProfitRub - overall.pipelineCargoProfitRub;
+    cargoVolumeM3 = overall.pipelineVolumeM3;
+    cargoWeightKg = overall.pipelineWeightKg;
+    searchFeeRub = overall.pipelineSearchFeeRub;
+    buyoutCommissionRub = overall.pipelineBuyoutCommissionRub;
   }
 
   // pipelineCargoProfitRub itself never leaves the server for anyone but
@@ -252,5 +290,9 @@ export async function GET(req: NextRequest) {
     expectedIncomeRub,
     cargoProfitRub,
     otherProfitRub,
+    cargoVolumeM3,
+    cargoWeightKg,
+    searchFeeRub,
+    buyoutCommissionRub,
   });
 }

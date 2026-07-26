@@ -138,6 +138,12 @@ interface DashboardData {
   // Both null for everyone else.
   cargoProfitRub: number | null;
   otherProfitRub: number | null;
+  // Owner-only companions to cargoProfitRub/expectedIncomeRub — physical
+  // totals and the two revenue lines behind "Ожидаемый доход компании".
+  cargoVolumeM3: number | null;
+  cargoWeightKg: number | null;
+  searchFeeRub: number | null;
+  buyoutCommissionRub: number | null;
 }
 
 function fmt(value: number): string {
@@ -685,15 +691,23 @@ function ManagerDashboard() {
               <div className="text-xs text-text-secondary">
                 Ожидаемый доход компании
               </div>
-              <div
-                className={cn(
-                  "mt-1 text-lg font-bold",
-                  data.expectedIncomeRub != null ? "text-success" : "text-text",
+              <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <span
+                  className={cn(
+                    "text-lg font-bold",
+                    data.expectedIncomeRub != null ? "text-success" : "text-text",
+                  )}
+                >
+                  {data.expectedIncomeRub != null
+                    ? `${fmt(data.expectedIncomeRub)} ₽`
+                    : "— (только у руководителя)"}
+                </span>
+                {data.searchFeeRub != null && data.buyoutCommissionRub != null && (
+                  <span className="text-xs text-text-secondary">
+                    услуги поиска {fmt(data.searchFeeRub)} ₽ · комиссия за выкуп{" "}
+                    {fmt(data.buyoutCommissionRub)} ₽
+                  </span>
                 )}
-              >
-                {data.expectedIncomeRub != null
-                  ? `${fmt(data.expectedIncomeRub)} ₽`
-                  : "— (только у руководителя)"}
               </div>
             </div>
           </div>
@@ -723,8 +737,15 @@ function ManagerDashboard() {
                 <div className="flex items-center gap-1.5 text-xs text-text-secondary">
                   <Ship className="h-3.5 w-3.5" /> Доход за карго
                 </div>
-                <div className="mt-1 text-lg font-bold text-success">
-                  {fmt(data.cargoProfitRub)} ₽
+                <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <span className="text-lg font-bold text-success">
+                    {fmt(data.cargoProfitRub)} ₽
+                  </span>
+                  {data.cargoVolumeM3 != null && data.cargoWeightKg != null && (
+                    <span className="text-xs text-text-secondary">
+                      {data.cargoVolumeM3.toFixed(1)} м³ · {fmt(data.cargoWeightKg)} кг
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

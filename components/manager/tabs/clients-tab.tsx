@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
+  ArrowLeftRight,
   ChevronDown,
   Copy,
   Download,
@@ -88,7 +89,7 @@ interface QuoteRecord {
   deliveryPricingMode: string;
   densityKgM3: string;
   createdAt: string;
-  manager: { name: string };
+  manager: { id: string; name: string };
   firstPhotoId: string | null;
   clientComment: string;
   managerComment: string;
@@ -148,11 +149,13 @@ function ClientQuotes({
   refreshKey,
   onEdit,
   onChanged,
+  allManagers,
 }: {
   clientId: string;
   refreshKey: number;
   onEdit: (quoteId: string) => void;
   onChanged: () => void;
+  allManagers: { id: string; name: string }[] | null;
 }) {
   const [quotes, setQuotes] = useState<QuoteRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -166,6 +169,7 @@ function ClientQuotes({
   const [expandedCommentId, setExpandedCommentId] = useState<string | null>(null);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
+  const [reassigningId, setReassigningId] = useState<string | null>(null);
   const [recalculatingId, setRecalculatingId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState<"recalculate" | "duplicate" | "status" | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
@@ -374,6 +378,24 @@ function ClientQuotes({
       if (res.ok) await load();
     } finally {
       setSavingCommentId(null);
+    }
+  }
+
+  // Reassigns just this one quote's managerId — independent of the client's
+  // own createdByManagerId (which stays put), so the premium for this quote
+  // specifically counts for whoever it's handed to.
+  async function handleReassignQuote(quoteId: string, managerId: string) {
+    if (!managerId) return;
+    setReassigningId(quoteId);
+    try {
+      const res = await fetch(`/api/manager-quotes/${quoteId}/reassign`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ managerId }),
+      });
+      if (res.ok) await load();
+    } finally {
+      setReassigningId(null);
     }
   }
 
@@ -621,6 +643,38 @@ function ClientQuotes({
                   <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-error" />
                 )}
               </button>
+
+              {allManagers && (
+                <Select
+                  value=""
+                  onValueChange={(managerId) => handleReassignQuote(quote.id, managerId)}
+                  disabled={reassigningId === quote.id}
+                >
+                  <SelectTrigger
+                    className="h-8 w-8 shrink-0 justify-center gap-0 rounded-lg border-0 p-0 text-text-secondary hover:bg-primary/10 hover:text-primary [&>svg:last-child]:hidden"
+                    aria-label="Передать другому менеджеру"
+                    title="Передать другому менеджеру"
+                  >
+                    {reassigningId === quote.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ArrowLeftRight className="h-4 w-4" />
+                    )}
+                  </SelectTrigger>
+                  {/* position="popper" — the default "item-aligned" mode tries to
+                      align the (nonexistent, value="") selected item over this
+                      8px-square icon trigger and miscomputes wildly off-screen. */}
+                  <SelectContent position="popper" align="end">
+                    {allManagers
+                      .filter((m) => m.id !== quote.manager.id)
+                      .map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              )}
 
               <button
                 type="button"
@@ -1076,6 +1130,7 @@ function ManagerClientsTab() {
                     <ClientQuotes
                       clientId={client.id}
                       refreshKey={quotesRefreshKey}
+                      allManagers={allManagers}
                       onEdit={(quoteId) => {
                         setQuoteDialogClientId(client.id);
                         setEditingQuoteId(quoteId);
