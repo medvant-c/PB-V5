@@ -147,6 +147,7 @@ model Client {
   createdAt    DateTime @default(now())
   orders       Order[]
   quotes       Quote[]
+  cashOrders   CashOrder[]
 
   @@index([createdByManagerId])
 }
@@ -200,6 +201,8 @@ model Manager {
   quotes         Quote[]
   tariffUpdates  TariffSettings[]
   uploadedFiles  DeskFile[]
+  cashOrders     CashOrder[]
+  cashOpeningBalanceUpdates CashOpeningBalance[]
 }
 
 // Which tier of the "Поиск товара" service a quote is billed under — the
@@ -595,4 +598,88 @@ model ProductCardExport {
   mimeType     String
   size         Int
   createdAt    DateTime @default(now())
+}
+
+// Owner's manual daily cash ledger ("Отчёты по дням") — a real-money
+// record of income/expense orders, tracked entirely separately from the
+// Quote-based profit dashboard (that one estimates/confirms profit on
+// quotes; this one is the owner's actual кассовая книга for reconciling
+// against a real bank/cash balance). Balance is tracked in CNY.
+enum CashOrderType {
+  income
+  expense
+}
+
+enum CashCurrency {
+  cny
+  usd
+  rub
+}
+
+// Статья — separate lists for income vs expense (an income статья like
+// "приход комиссия" never belongs on an expense order and vice versa).
+// Free-form, not an enum, so the owner can add a new статья from the UI
+// without a schema migration — same principle as DensityTariff.categoryLabel.
+model CashCategory {
+  id        String        @id @default(cuid())
+  type      CashOrderType
+  name      String
+  createdAt DateTime      @default(now())
+  orders    CashOrder[]
+
+  @@unique([type, name])
+}
+
+model CashOrder {
+  id         String        @id @default(cuid())
+  type       CashOrderType
+  // The ledger date the owner assigns to this operation, not createdAt.
+  date       DateTime
+  categoryId String
+  category   CashCategory  @relation(fields: [categoryId], references: [id])
+  // Only ever set for income orders (UI doesn't offer this field for
+  // expense) — the same Client used everywhere else in the system, with a
+  // quick-create option right from the order dialog.
+  clientId   String?
+  client     Client?       @relation(fields: [clientId], references: [id])
+  currency   CashCurrency
+  // Always positive — type (income/expense) determines the sign when
+  // summing into a running balance, so the entry form never asks for a
+  // signed number.
+  amount     Decimal
+  // How many units of `currency` equal 1 CNY ("1 ¥ = X ₽/$"), entered by
+  // hand each time (not pulled from TariffSettings — this ledger is
+  // intentionally independent) — 1 when currency is cny. Deliberately the
+  // SAME quoting direction as TariffSettings.cnyRateRub ("Курс юаня (CNY →
+  // RUB)") rather than its inverse — a real owner-entered RUB order was
+  // once saved 163x too large because an earlier version of this field
+  // asked for the opposite direction (¥ per 1 unit of currency), which
+  // doesn't match how a rate is normally quoted/typed for RUB.
+  cnyToCurrencyRate Decimal
+  // amount / cnyToCurrencyRate (amount for currency=cny), snapshotted at
+  // create/edit time so a later edit to the rate on ANOTHER order never
+  // silently changes this one's total.
+  amountCny  Decimal
+  comment    String        @default("")
+  createdByManagerId String
+  createdByManager   Manager @relation(fields: [createdByManagerId], references: [id])
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([date])
+  @@index([categoryId])
+}
+
+// Single anchor row: "as of this date, the balance was this many CNY" —
+// set once when the owner starts using this ledger (editable later to
+// reconcile). Balance at the start/end of ANY period after effectiveDate is
+// always DERIVED as anchor + running sum of CashOrder.amountCny, never
+// entered by hand month to month.
+model CashOpeningBalance {
+  id                 String   @id @default(cuid())
+  effectiveDate      DateTime
+  amountCny          Decimal
+  updatedByManagerId String
+  updatedByManager   Manager  @relation(fields: [updatedByManagerId], references: [id])
+  updatedAt          DateTime @updatedAt
 }

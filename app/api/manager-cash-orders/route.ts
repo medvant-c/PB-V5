@@ -1,0 +1,161 @@
+import { NextRequest } from "next/server";
+import { getManagerSessionFromRequest } from "@/lib/manager-auth";
+import { prisma } from "@/lib/prisma";
+
+function requireOwner(session: { role: string } | null) {
+  return session !== null && session.role === "owner";
+}
+
+// "YYYY-MM" -> [monthStart, monthEndExclusive]. Defaults to the current
+// month when omitted/invalid.
+function parseMonthRange(monthParam: string | null): [Date, Date] {
+  const match = monthParam?.match(/^(\d{4})-(\d{2})$/);
+  const now = new Date();
+  const year = match ? Number(match[1]) : now.getFullYear();
+  const monthIndex = match ? Number(match[2]) - 1 : now.getMonth();
+  return [new Date(year, monthIndex, 1), new Date(year, monthIndex + 1, 1)];
+}
+
+interface OrderForSum {
+  type: string;
+  amountCny: unknown;
+}
+
+function sumByType(orders: OrderForSum[], type: "income" | "expense"): number {
+  return orders.filter((o) => o.type === type).reduce((sum, o) => sum + Number(o.amountCny), 0);
+}
+
+// GET returns three things: `orders` (the table view, filtered by
+// categoryId/type query params), `summary` (opening/income/expense/closing
+// balance for the WHOLE month, independent of those filters — a filtered
+// view must never make the balance look wrong), and `categoryBreakdown`
+// (also whole-month, for the Excel "Свод" sheet and the summary cards).
+export async function GET(req: NextRequest) {
+  const session = await getManagerSessionFromRequest(req);
+  if (!requireOwner(session)) {
+    return Response.json({ error: "Доступно только руководителю." }, { status: 403 });
+  }
+
+  const [monthStart, monthEnd] = parseMonthRange(req.nextUrl.searchParams.get("month"));
+  const categoryIdFilter = req.nextUrl.searchParams.get("categoryId");
+  const typeFilter = req.nextUrl.searchParams.get("type");
+
+  const anchor = await prisma.cashOpeningBalance.findFirst({ orderBy: { updatedAt: "desc" } });
+  const beforeMonthOrders = await prisma.cashOrder.findMany({
+    where: {
+      date: { lt: monthStart, ...(anchor ? { gte: anchor.effectiveDate } : {}) },
+    },
+    select: { type: true, amountCny: true },
+  });
+  const openingBalanceCny = Number(anchor?.amountCny ?? 0) + sumByType(beforeMonthOrders, "income") - sumByType(beforeMonthOrders, "expense");
+
+  const monthOrders = await prisma.cashOrder.findMany({
+    where: { date: { gte: monthStart, lt: monthEnd } },
+    include: { category: true, client: { select: { id: true, name: true } }, createdByManager: { select: { name: true } } },
+    orderBy: { date: "desc" },
+  });
+
+  const incomeCny = sumByType(monthOrders, "income");
+  const expenseCny = sumByType(monthOrders, "expense");
+  const closingBalanceCny = openingBalanceCny + incomeCny - expenseCny;
+
+  const breakdownMap = new Map<string, { categoryId: string; name: string; type: string; totalCny: number }>();
+  for (const order of monthOrders) {
+    const key = order.categoryId;
+    const entry = breakdownMap.get(key) ?? { categoryId: key, name: order.category.name, type: order.type, totalCny: 0 };
+    entry.totalCny += Number(order.amountCny);
+    breakdownMap.set(key, entry);
+  }
+  const categoryBreakdown = [...breakdownMap.values()].sort((a, b) => b.totalCny - a.totalCny);
+
+  const orders = monthOrders.filter(
+    (o) => (!categoryIdFilter || o.categoryId === categoryIdFilter) && (!typeFilter || o.type === typeFilter),
+  );
+
+  return Response.json({
+    orders,
+    summary: { openingBalanceCny, incomeCny, expenseCny, closingBalanceCny },
+    categoryBreakdown,
+  });
+}
+
+export async function POST(req: NextRequest) {
+  const session = await getManagerSessionFromRequest(req);
+  if (!requireOwner(session)) {
+    return Response.json({ error: "Доступно только руководителю." }, { status: 403 });
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "Некорректный запрос." }, { status: 400 });
+  }
+  const { type, date, categoryId, clientId, currency, amount, cnyToCurrencyRate, comment } =
+    (body as {
+      type?: unknown;
+      date?: unknown;
+      categoryId?: unknown;
+      clientId?: unknown;
+      currency?: unknown;
+      amount?: unknown;
+      cnyToCurrencyRate?: unknown;
+      comment?: unknown;
+    }) ?? {};
+
+  if (type !== "income" && type !== "expense") {
+    return Response.json({ error: "Некорректный тип ордера." }, { status: 400 });
+  }
+  const parsedDate = typeof date === "string" ? new Date(date) : null;
+  if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
+    return Response.json({ error: "Укажите дату." }, { status: 400 });
+  }
+  if (typeof categoryId !== "string" || !categoryId) {
+    return Response.json({ error: "Укажите статью." }, { status: 400 });
+  }
+  const category = await prisma.cashCategory.findUnique({ where: { id: categoryId } });
+  if (!category || category.type !== type) {
+    return Response.json({ error: "Статья не соответствует типу ордера." }, { status: 400 });
+  }
+  if (currency !== "cny" && currency !== "usd" && currency !== "rub") {
+    return Response.json({ error: "Некорректная валюта." }, { status: 400 });
+  }
+  const amountNum = Number(amount);
+  if (!Number.isFinite(amountNum) || amountNum <= 0) {
+    return Response.json({ error: "Укажите сумму." }, { status: 400 });
+  }
+  const rateNum = currency === "cny" ? 1 : Number(cnyToCurrencyRate);
+  if (!Number.isFinite(rateNum) || rateNum <= 0) {
+    return Response.json({ error: "Укажите курс." }, { status: 400 });
+  }
+
+  // clientId only meaningful for income orders — an expense order (Саша /
+  // Влад / менеджер / закупка) is never client-attributed.
+  let resolvedClientId: string | null = null;
+  if (type === "income" && typeof clientId === "string" && clientId) {
+    const client = await prisma.client.findUnique({ where: { id: clientId } });
+    if (!client) return Response.json({ error: "Клиент не найден." }, { status: 400 });
+    resolvedClientId = clientId;
+  }
+
+  const order = await prisma.cashOrder.create({
+    data: {
+      type,
+      date: parsedDate,
+      categoryId,
+      clientId: resolvedClientId,
+      currency,
+      amount: amountNum,
+      cnyToCurrencyRate: rateNum,
+      // rateNum = how many units of `currency` equal 1 ¥, so converting
+      // FROM currency TO ¥ divides — see the schema comment on
+      // CashOrder.cnyToCurrencyRate for why this direction was chosen.
+      amountCny: amountNum / rateNum,
+      comment: typeof comment === "string" ? comment.trim() : "",
+      createdByManagerId: session!.managerId,
+    },
+    include: { category: true, client: { select: { id: true, name: true } }, createdByManager: { select: { name: true } } },
+  });
+
+  return Response.json({ order }, { status: 201 });
+}

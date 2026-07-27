@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, Calculator, CheckSquare, Database, LogOut, Tag, Users, UsersRound } from "lucide-react";
+import { Briefcase, Calculator, CheckSquare, Database, LogOut, Tag, Users, UsersRound, Wallet } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ManagerClientsTab } from "@/components/manager/tabs/clients-tab";
@@ -11,6 +11,7 @@ import { ManagerStaffTab } from "@/components/manager/tabs/staff-tab";
 import { ManagerPriceListTab } from "@/components/manager/tabs/price-list-tab";
 import { ManagerDatabaseTab } from "@/components/manager/tabs/database-tab";
 import { ManagerConfirmationsTab } from "@/components/manager/tabs/confirmations-tab";
+import { ManagerCashTab } from "@/components/manager/tabs/cash-tab";
 import { ManagerDashboard } from "@/components/manager/manager-dashboard";
 
 interface ManagerWorkspaceProps {
@@ -33,6 +34,7 @@ const ALL_SECTIONS = [
   { id: "tariffs", label: "Тарифы", icon: Calculator, Component: ManagerTariffsTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "confirmations", label: "Подтверждения", icon: CheckSquare, Component: ManagerConfirmationsTab, ownerOnly: false, seniorOrOwnerOnly: true },
   { id: "price-list", label: "Прайс-лист", icon: Tag, Component: ManagerPriceListTab, ownerOnly: true, seniorOrOwnerOnly: false },
+  { id: "cash", label: "Отчёты по дням", icon: Wallet, Component: ManagerCashTab, ownerOnly: true, seniorOrOwnerOnly: false },
   { id: "database", label: "База данных", icon: Database, Component: ManagerDatabaseTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "staff", label: "Сотрудники", icon: UsersRound, Component: ManagerStaffTab, ownerOnly: true, seniorOrOwnerOnly: false },
 ] as const;
