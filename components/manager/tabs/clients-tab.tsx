@@ -80,6 +80,8 @@ interface ClientRecord {
   selfSourcedClaimed: boolean;
   selfSourcedClaimedAt: string | null;
   selfSourcedConfirmed: boolean;
+  contactsHiddenFromManager: boolean;
+  contactsHidden: boolean;
   archivedAt: string | null;
   createdAt: string;
 }
@@ -1153,9 +1155,19 @@ function ManagerClientsTab() {
   // as "can I confirm facts" the same way /api/managers above doubles as
   // "am I the owner", without a dedicated whoami endpoint.
   const [canConfirmBuyout, setCanConfirmBuyout] = useState(false);
+  // Manager-scoped team list (owner: everyone; senior: self + own
+  // subordinates) — drives the client-level "передать менеджеру" dropdown
+  // and doubles as "am I senior/owner" for the contacts-visibility toggle.
+  // Deliberately NOT the owner-only allManagers/api/managers above — that
+  // one also gates quote-level reassignment, which stays owner-only.
+  const [teamManagers, setTeamManagers] = useState<{ id: string; name: string }[] | null>(null);
   useEffect(() => {
     fetch("/api/manager-confirmations")
-      .then((res) => setCanConfirmBuyout(res.ok));
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        setCanConfirmBuyout(Boolean(data));
+        setTeamManagers(data?.teamManagers ?? null);
+      });
   }, []);
 
   async function handleTransfer(clientId: string, managerId: string) {
@@ -1173,6 +1185,21 @@ function ManagerClientsTab() {
       }
     } finally {
       setTransferringClientId(null);
+    }
+  }
+
+  const [contactsToggleBusyId, setContactsToggleBusyId] = useState<string | null>(null);
+  async function handleToggleContactsHidden(clientId: string, nextHidden: boolean) {
+    setContactsToggleBusyId(clientId);
+    try {
+      const res = await fetch(`/api/manager-clients/${clientId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contactsHiddenFromManager: nextHidden }),
+      });
+      if (res.ok) await loadClients();
+    } finally {
+      setContactsToggleBusyId(null);
     }
   }
 
@@ -1261,10 +1288,21 @@ function ManagerClientsTab() {
     setEditSaving(true);
     setEditError(null);
     try {
+      // Contacts stay out of the request entirely when hidden from this
+      // viewer — editDraft.phone/messenger/email are empty strings in that
+      // case (the API never sent the real values), and the PATCH route
+      // treats an empty messenger/email as "clear it", so sending them
+      // would silently wipe the real contact data.
+      const client = clients.find((c) => c.id === clientId);
+      const { phone, messenger, email, ...rest } = editDraft;
+      const body = client?.contactsHidden ? rest : editDraft;
+      void phone;
+      void messenger;
+      void email;
       const res = await fetch(`/api/manager-clients/${clientId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editDraft),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1408,8 +1446,14 @@ function ManagerClientsTab() {
                         {client.archivedAt && <span className="ml-1.5 text-xs font-normal text-error">архив</span>}
                       </div>
                       <div className="text-xs text-text-secondary">
-                        {client.email ?? "без email"}
-                        {client.phone ? ` · ${client.phone}` : ""}
+                        {client.contactsHidden ? (
+                          <span className="italic">контакты скрыты</span>
+                        ) : (
+                          <>
+                            {client.email ?? "без email"}
+                            {client.phone ? ` · ${client.phone}` : ""}
+                          </>
+                        )}
                         {client.source ? ` · ${SOURCE_LABELS[client.source] ?? client.source}` : ""}
                       </div>
                     </div>
@@ -1423,6 +1467,24 @@ function ManagerClientsTab() {
                       <p className="text-xs text-text-secondary">
                         Сейчас у менеджера: <span className="font-medium text-text">{client.createdByManager?.name ?? "—"}</span>
                       </p>
+                    )}
+                    {teamManagers ? (
+                      <label className="flex items-center gap-1.5 text-xs text-text-secondary">
+                        <input
+                          type="checkbox"
+                          checked={!client.contactsHiddenFromManager}
+                          disabled={contactsToggleBusyId === client.id}
+                          onChange={(e) => handleToggleContactsHidden(client.id, !e.target.checked)}
+                        />
+                        Показывать контакты менеджеру
+                        {contactsToggleBusyId === client.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                      </label>
+                    ) : (
+                      client.contactsHidden && (
+                        <p className="text-xs text-text-secondary">
+                          Контакты скрыты старшим менеджером или руководителем.
+                        </p>
+                      )
                     )}
                     {client.selfSourcedConfirmed ? (
                       <p className="text-xs font-medium text-success">✓ Личный клиент менеджера — премия 35% с даты подтверждения</p>
@@ -1473,7 +1535,7 @@ function ManagerClientsTab() {
                             "В архив"
                           )}
                         </Button>
-                        {allManagers && (
+                        {teamManagers && (
                           <Select
                             value=""
                             onValueChange={(managerId) => handleTransfer(client.id, managerId)}
@@ -1483,7 +1545,7 @@ function ManagerClientsTab() {
                               <SelectValue placeholder="Передать менеджеру" />
                             </SelectTrigger>
                             <SelectContent>
-                              {allManagers
+                              {teamManagers
                                 .filter((m) => m.id !== client.createdByManagerId)
                                 .map((m) => (
                                   <SelectItem key={m.id} value={m.id}>
@@ -1513,22 +1575,30 @@ function ManagerClientsTab() {
                             value={editDraft.company}
                             onChange={(e) => setEditDraft((d) => ({ ...d, company: e.target.value }))}
                           />
-                          <Input
-                            placeholder="Телефон"
-                            value={editDraft.phone}
-                            onChange={(e) => setEditDraft((d) => ({ ...d, phone: e.target.value }))}
-                          />
-                          <Input
-                            placeholder="Telegram / WeChat"
-                            value={editDraft.messenger}
-                            onChange={(e) => setEditDraft((d) => ({ ...d, messenger: e.target.value }))}
-                          />
-                          <Input
-                            type="email"
-                            placeholder="Email (необязательно)"
-                            value={editDraft.email}
-                            onChange={(e) => setEditDraft((d) => ({ ...d, email: e.target.value }))}
-                          />
+                          {client.contactsHidden ? (
+                            <p className="text-xs text-text-secondary sm:col-span-2">
+                              Телефон, Telegram/WeChat и email скрыты — недоступны для редактирования.
+                            </p>
+                          ) : (
+                            <>
+                              <Input
+                                placeholder="Телефон"
+                                value={editDraft.phone}
+                                onChange={(e) => setEditDraft((d) => ({ ...d, phone: e.target.value }))}
+                              />
+                              <Input
+                                placeholder="Telegram / WeChat"
+                                value={editDraft.messenger}
+                                onChange={(e) => setEditDraft((d) => ({ ...d, messenger: e.target.value }))}
+                              />
+                              <Input
+                                type="email"
+                                placeholder="Email (необязательно)"
+                                value={editDraft.email}
+                                onChange={(e) => setEditDraft((d) => ({ ...d, email: e.target.value }))}
+                              />
+                            </>
+                          )}
                           <Select value={editDraft.source} onValueChange={(v) => setEditDraft((d) => ({ ...d, source: v }))}>
                             <SelectTrigger className="w-full">
                               <SelectValue />

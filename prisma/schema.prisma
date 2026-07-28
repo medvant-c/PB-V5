@@ -132,6 +132,15 @@ model Client {
   selfSourcedConfirmed           Boolean   @default(false)
   selfSourcedConfirmedAt         DateTime?
   selfSourcedConfirmedByManagerId String?
+  // Senior/owner-only manual toggle — hides phone/email/messenger from the
+  // currently assigned manager (createdByManagerId) until explicitly
+  // allowed. Deliberately independent of selfSourcedConfirmed above (that
+  // one only drives premium rate) — a company-sourced lead that gets
+  // assigned to a manager should stay contact-hidden even if nobody has
+  // claimed/confirmed it as self-sourced. Auto-set true whenever a client
+  // is transferred to a new manager (see PATCH .../[id]); senior/owner can
+  // flip it back at any time from the client card.
+  contactsHiddenFromManager Boolean @default(false)
   // Null until the client opens their activation link and sets a password —
   // an account can exist (created by staff) before it's ever activated.
   passwordHash String?

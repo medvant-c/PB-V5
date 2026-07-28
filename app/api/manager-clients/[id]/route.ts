@@ -37,7 +37,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { name, company, phone, messenger, email, source, archived, transferToManagerId } =
+  const { name, company, phone, messenger, email, source, archived, transferToManagerId, contactsHiddenFromManager } =
     (body as {
       name?: unknown;
       company?: unknown;
@@ -47,29 +47,48 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       source?: unknown;
       archived?: unknown;
       transferToManagerId?: unknown;
+      contactsHiddenFromManager?: unknown;
     }) ?? {};
 
-  // Owner-only, and a separate atomic step (not folded into the `data`
-  // object below) — moving a client also has to move every one of their
-  // quotes' managerId, so the new manager's dashboard/KPI reflects the full
+  // Owner or senior; senior can only hand off to their own subordinate —
+  // a separate atomic step (not folded into the `data` object below)
+  // because moving a client also has to move every one of their quotes'
+  // managerId, so the new manager's dashboard/KPI reflects the full
   // history as their own, not just future quotes. This deliberately
   // rewrites who's credited with past quotes; if you want the original
   // manager's name preserved for audit purposes instead, this is the one
-  // line to change.
+  // line to change. Also auto-hides contacts from the new manager (see
+  // Client.contactsHiddenFromManager) — a handed-off client defaults to
+  // "company lead", not automatically visible to whoever it lands on.
   if (typeof transferToManagerId === "string" && transferToManagerId) {
-    if (session.role !== "owner") {
-      return Response.json({ error: "Передавать клиентов может только руководитель." }, { status: 403 });
+    if (session.role !== "owner" && session.role !== "senior") {
+      return Response.json({ error: "Передавать клиентов может только старший менеджер или руководитель." }, { status: 403 });
     }
     const newManager = await prisma.manager.findUnique({ where: { id: transferToManagerId } });
     if (!newManager) return Response.json({ error: "Менеджер не найден." }, { status: 404 });
+    if (session.role === "senior" && newManager.supervisorId !== session.managerId) {
+      return Response.json({ error: "Можно передавать только своим подчинённым менеджерам." }, { status: 403 });
+    }
 
     await prisma.$transaction([
-      prisma.client.update({ where: { id }, data: { createdByManagerId: transferToManagerId } }),
+      prisma.client.update({ where: { id }, data: { createdByManagerId: transferToManagerId, contactsHiddenFromManager: true } }),
       prisma.quote.updateMany({ where: { clientId: id }, data: { managerId: transferToManagerId } }),
     ]);
   }
 
+  // Senior/owner-only manual override of the contact-visibility flag — a
+  // plain manager (including the client's own createdByManagerId) can
+  // never grant themselves access to contacts someone else hid.
+  if (typeof contactsHiddenFromManager === "boolean") {
+    if (session.role !== "owner" && session.role !== "senior") {
+      return Response.json({ error: "Эту настройку может менять только старший менеджер или руководитель." }, { status: 403 });
+    }
+  }
+
   const data: Record<string, unknown> = {};
+  if (typeof contactsHiddenFromManager === "boolean" && (session.role === "owner" || session.role === "senior")) {
+    data.contactsHiddenFromManager = contactsHiddenFromManager;
+  }
   if (typeof name === "string" && name.trim()) data.name = name.trim();
   if (typeof phone === "string" && phone.trim()) data.phone = phone.trim();
   if (typeof company === "string") data.company = company.trim() || null;

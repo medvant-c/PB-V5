@@ -39,13 +39,28 @@ export async function GET(req: NextRequest) {
       selfSourcedClaimed: true,
       selfSourcedClaimedAt: true,
       selfSourcedConfirmed: true,
+      contactsHiddenFromManager: true,
       active: true,
       archivedAt: true,
       createdAt: true,
     },
   });
 
-  return Response.json({ clients });
+  // A plain manager never sees the real contact fields for a client the
+  // senior/owner has explicitly hidden (see Client.contactsHiddenFromManager)
+  // — stripped here, server-side, not just hidden in the UI, since the API
+  // response itself must never carry the real values in that case.
+  const responseClients = clients.map((client) => {
+    const shouldMask = session.role === "manager" && client.contactsHiddenFromManager;
+    if (!shouldMask) return { ...client, contactsHidden: false };
+    const { phone, email, messenger, ...rest } = client;
+    void phone;
+    void email;
+    void messenger;
+    return { ...rest, phone: null, email: null, messenger: null, contactsHidden: true };
+  });
+
+  return Response.json({ clients: responseClients });
 }
 
 export async function POST(req: NextRequest) {

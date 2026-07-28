@@ -28,6 +28,17 @@ export async function GET(req: NextRequest) {
   const managerFilter = visibleManagerIds === "all" ? {} : { managerId: { in: visibleManagerIds } };
   const clientManagerFilter = visibleManagerIds === "all" ? {} : { createdByManagerId: { in: visibleManagerIds } };
 
+  // Also doubles as the manager-scoped "who can I hand a client off to"
+  // list for clients-tab.tsx's transfer dropdown — owner sees everyone,
+  // senior sees themself + their own subordinates only. Deliberately NOT
+  // the owner-only /api/managers (that one also gates quote-level
+  // reassignment, which stays owner-only).
+  const teamManagers = await prisma.manager.findMany({
+    where: { active: true, ...(session.role === "owner" ? {} : { OR: [{ id: session.managerId }, { supervisorId: session.managerId }] }) },
+    orderBy: { displayId: "asc" },
+    select: { id: true, name: true },
+  });
+
   const [pendingBuyouts, pendingClients] = await Promise.all([
     prisma.quote.findMany({
       where: { ...managerFilter, status: { in: POST_BUYOUT_STATUSES }, buyoutFactConfirmed: false },
@@ -58,5 +69,5 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
-  return Response.json({ pendingBuyouts, pendingClients });
+  return Response.json({ pendingBuyouts, pendingClients, teamManagers });
 }
