@@ -267,14 +267,14 @@ model TariffSettings {
   standardPriceRub         Decimal
   expertPriceRub           Decimal
   proPriceRub              Decimal
-  // Manager's flat cargo compensation for a company-sourced lead — per the
-  // 2026-07 mativation policy, cargo is no longer a % of margin/revenue for
-  // a company lead (only self-sourced clients still get 10% of
-  // cargoDeliveryRub, computed in app/api/manager-dashboard). Whichever
-  // basis the quote actually prices cargo on (weight vs volume — same
-  // density>=100 rule as actualize-cargo) determines which rate applies.
-  // Editable like the other plain rate fields above (not owner-confidential
-  // margin data), gated by canEditTariffs same as everything else here.
+  // Manager's flat cargo compensation for a CONFIRMED SELF-SOURCED client
+  // only (2026-07-28 motivation policy, corrected same day — a company
+  // lead earns the manager nothing from cargo at all; see
+  // app/api/manager-dashboard). Whichever basis the quote actually prices
+  // cargo on (weight vs volume — same density>=100 rule as
+  // actualize-cargo) determines which rate applies. Editable like the
+  // other plain rate fields above (not owner-confidential margin data),
+  // gated by canEditTariffs same as everything else here.
   managerCargoRateUsdPerKg  Decimal @default(0.3)
   managerCargoRateUsdPerM3  Decimal @default(5)
   // Owner-confidential cargo margin baked into every rate above: every

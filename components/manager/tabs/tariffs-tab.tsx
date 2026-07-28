@@ -55,8 +55,8 @@ const FIELD_LABELS: Record<
   standardPriceRub: "Поиск товара Standart, ₽",
   expertPriceRub: "Поиск товара Expert, ₽",
   proPriceRub: "Поиск товара Pro, ₽",
-  managerCargoRateUsdPerKg: "Премия менеджеру за карго (лид компании), $/кг",
-  managerCargoRateUsdPerM3: "Премия менеджеру за карго (лид компании), $/м³",
+  managerCargoRateUsdPerKg: "Премия менеджеру за карго (свой клиент), $/кг",
+  managerCargoRateUsdPerM3: "Премия менеджеру за карго (свой клиент), $/м³",
 };
 
 // Owner-only — never rendered for anyone else (see TariffSettingsRecord).

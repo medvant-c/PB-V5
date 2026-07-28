@@ -25,24 +25,26 @@ const OPEN_STATUSES: QuoteStatus[] = QUOTE_STATUSES.filter((s) => s !== "rejecte
 // color threshold has something to reference.
 const CONVERSION_PREMIUM_THRESHOLD_PERCENT = 60;
 
-// 2026-07-28 motivation policy (see PB-V5 chat) — replaces the earlier
-// 10%/35%-of-services + 0%/10%-of-cargo scheme:
-//   - Company lead: 10% each on Просчёт, Выкуп, Скидка поставщика.
-//   - Self-sourced (свой клиент): 100% on Просчёт and Скидка, still only
-//     10% on Выкуп ("остальное — по общей схеме").
+// 2026-07-28 motivation policy, corrected 2026-07-28 (see PB-V5 chat) —
+// replaces the earlier 10%/35%-of-services + 0%/10%-of-cargo scheme:
+//   - Company lead: 10% each on Просчёт, Выкуп, Скидка поставщика. ZERO
+//     from Карго or Фулфилмент — those two bonuses exist only for a
+//     confirmed self-sourced client.
+//   - Self-sourced (свой клиент): 100% on Просчёт, Выкуп, AND Скидка (all
+//     three, not just two) — PLUS a flat $/кг or $/м³ cargo bonus (see
+//     TariffSettings.managerCargoRateUsdPerKg/M3) — PLUS 10% of
+//     Фулфилмент revenue.
 //   - Курсовая разница never goes to the manager, only to Влад/учредители.
-//   - Карго: company lead gets a flat $/кг or $/м³ (see TariffSettings.
-//     managerCargoRateUsdPerKg/M3), NOT a % — self-sourced keeps the old
-//     10%-of-cargo-revenue rule unchanged.
 const NORMAL_RATE_PERCENT = 10;
 const SELF_SOURCED_BOOSTED_RATE_PERCENT = 100;
-const SELF_SOURCED_CARGO_BONUS_RATE_PERCENT = 10;
 // Vlad (Партнёр) takes 10% off the top of every source, on every
 // confirmed deal, regardless of lead source — computed once, company-wide,
 // not per-manager.
 const VLAD_SHARE_RATE_PERCENT = 10;
-// Фулфилмент — flat 10% of what was billed to the client, not tied to
-// self-sourced status (unlike Просчёт/Скидка above).
+// Фулфилмент — flat 10% of what was billed to the client, ONLY for a
+// confirmed self-sourced client (see policy note above) — zero for a
+// company lead, even though the full revenue still counts toward the
+// Влад/founders profit pool below.
 const FULFILLMENT_PREMIUM_RATE_PERCENT = 10;
 
 interface QuoteForStats {
@@ -136,11 +138,11 @@ function cargoProfitRub(q: QuoteForStats): number {
   return Number(q.cargoDeliveryRub) - Number(q.cargoCostRub);
 }
 
-// Company-lead cargo bonus: flat $/кг or $/м³ (owner-editable in Тарифы),
-// on whichever basis the quote actually prices cargo on — same "density
-// mode AND density>=100 -> weight basis, else volume basis" rule as
-// actualize-cargo route, so the bonus always matches how cargoDeliveryRub
-// itself was computed.
+// Self-sourced-client cargo bonus: flat $/кг or $/м³ (owner-editable in
+// Тарифы), on whichever basis the quote actually prices cargo on — same
+// "density mode AND density>=100 -> weight basis, else volume basis" rule
+// as actualize-cargo route, so the bonus always matches how
+// cargoDeliveryRub itself was computed. A company lead gets none at all.
 function flatCargoBonusRub(q: QuoteForStats, rates: { usdPerKg: number; usdPerM3: number }): number {
   const basisIsDensity = q.deliveryPricingMode === "density" && Number(q.densityKgM3) >= 100;
   const usdRateUsed = Number(q.usdRateUsed);
@@ -217,36 +219,31 @@ function summarize(quotes: QuoteForStats[], cargoRates: { usdPerKg: number; usdP
       factualBuyoutRub += buyoutRub;
       factualDiscountRub += discountRub;
       // Locked at confirmation time (buyoutSelfSourcedBoost), never
-      // recomputed live — see schema comment on that field.
+      // recomputed live — see schema comment on that field. All three
+      // sources share the same boosted rate for a self-sourced client —
+      // no partial boost.
       const boostedRate = q.buyoutSelfSourcedBoost ? SELF_SOURCED_BOOSTED_RATE_PERCENT : NORMAL_RATE_PERCENT;
-      factualPremiumRub +=
-        Math.max(0, proscetRub) * (boostedRate / 100) +
-        Math.max(0, buyoutRub) * (NORMAL_RATE_PERCENT / 100) +
-        Math.max(0, discountRub) * (boostedRate / 100);
+      factualPremiumRub += (Math.max(0, proscetRub) + Math.max(0, buyoutRub) + Math.max(0, discountRub)) * (boostedRate / 100);
     } else {
       const { proscetRub, buyoutRub } = estimatedSourceProfits(q);
       potentialProscetRub += proscetRub;
       potentialBuyoutRub += buyoutRub;
       const boostedRate = isSelfSourcedFor(q, q.managerId) ? SELF_SOURCED_BOOSTED_RATE_PERCENT : NORMAL_RATE_PERCENT;
-      potentialPremiumRub += Math.max(0, proscetRub) * (boostedRate / 100) + Math.max(0, buyoutRub) * (NORMAL_RATE_PERCENT / 100);
+      potentialPremiumRub += (Math.max(0, proscetRub) + Math.max(0, buyoutRub)) * (boostedRate / 100);
     }
 
     // Карго — gated on cargoBonusRatePercent being locked in, which only
     // happens at the handed_to_client transition (see status/route.ts).
-    // The stored value only ever distinguishes self-sourced (10) from
-    // company-lead (0) — the RUB amount for company-lead is computed here
-    // via the flat rate, not by treating 0 literally as "0 rub bonus".
+    // The stored value distinguishes self-sourced (10) from company-lead
+    // (0) — only self-sourced gets the flat-rate bonus, company-lead gets
+    // nothing (cargoProfitRub itself is still tracked either way, for the
+    // owner's own accounting).
     if (q.cargoBonusRatePercent !== null && q.cargoBonusRatePercent !== undefined) {
       factualCargoProfitRub += cargoProfitRub(q);
-      factualCargoBonusRub +=
-        Number(q.cargoBonusRatePercent) > 0
-          ? Number(q.cargoDeliveryRub) * (Number(q.cargoBonusRatePercent) / 100)
-          : flatCargoBonusRub(q, cargoRates);
+      factualCargoBonusRub += Number(q.cargoBonusRatePercent) > 0 ? flatCargoBonusRub(q, cargoRates) : 0;
     } else {
       potentialCargoProfitRub += cargoProfitRub(q);
-      potentialCargoBonusRub += isSelfSourcedFor(q, q.managerId)
-        ? Number(q.cargoDeliveryRub) * (SELF_SOURCED_CARGO_BONUS_RATE_PERCENT / 100)
-        : flatCargoBonusRub(q, cargoRates);
+      potentialCargoBonusRub += isSelfSourcedFor(q, q.managerId) ? flatCargoBonusRub(q, cargoRates) : 0;
     }
   }
 
@@ -332,21 +329,29 @@ export async function GET(req: NextRequest) {
   // Фулфилмент — a separate business line from Quote entirely (see PB-V5
   // chat 2026-07-28), recognized immediately (no potential/factual split —
   // it's a completed transaction the moment the order is saved, not a
-  // pending estimate). Manager gets a flat 10% of what was billed.
+  // pending estimate). Manager gets a flat 10% of what was billed, but
+  // ONLY for a confirmed self-sourced client — a company lead earns the
+  // manager nothing here (corrected 2026-07-28). The full revenue still
+  // counts toward the Влад/founders pool below either way.
   const fulfillmentOrders = await prisma.fulfillmentOrder.findMany({
     where: visibleManagerIds === "all" ? undefined : { managerId: { in: visibleManagerIds } },
-    select: { managerId: true, totalRub: true },
+    select: { managerId: true, totalRub: true, client: { select: { selfSourcedConfirmed: true, createdByManagerId: true } } },
   });
-  const fulfillmentRubByManager = new Map<string, number>();
+  const fulfillmentPremiumRubByManager = new Map<string, number>();
   let fulfillmentTotalRub = 0;
   for (const o of fulfillmentOrders) {
     const rub = Number(o.totalRub);
     fulfillmentTotalRub += rub;
-    fulfillmentRubByManager.set(o.managerId, (fulfillmentRubByManager.get(o.managerId) ?? 0) + rub);
+    const isSelfSourced = o.client.selfSourcedConfirmed && o.client.createdByManagerId === o.managerId;
+    if (!isSelfSourced) continue;
+    const premium = rub * (FULFILLMENT_PREMIUM_RATE_PERCENT / 100);
+    fulfillmentPremiumRubByManager.set(o.managerId, (fulfillmentPremiumRubByManager.get(o.managerId) ?? 0) + premium);
   }
   function withFulfillmentPremium<T extends { factualPremiumRub: number }>(row: T, managerId: string | "all"): T & { factualFulfillmentPremiumRub: number } {
-    const rub = managerId === "all" ? fulfillmentTotalRub : (fulfillmentRubByManager.get(managerId) ?? 0);
-    const premium = rub * (FULFILLMENT_PREMIUM_RATE_PERCENT / 100);
+    const premium =
+      managerId === "all"
+        ? [...fulfillmentPremiumRubByManager.values()].reduce((sum, v) => sum + v, 0)
+        : (fulfillmentPremiumRubByManager.get(managerId) ?? 0);
     return { ...row, factualFulfillmentPremiumRub: premium, factualPremiumRub: row.factualPremiumRub + premium };
   }
 
