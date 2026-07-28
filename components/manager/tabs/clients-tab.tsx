@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowLeftRight,
   Banknote,
+  Check,
   ChevronDown,
   Copy,
   Download,
@@ -184,6 +185,144 @@ function formatDate(value: string): string {
 function isStale(quote: QuoteRecord): boolean {
   if (quote.status !== "in_progress") return false;
   return Date.now() - new Date(quote.statusChangedAt).getTime() > STALE_IN_PROGRESS_MS;
+}
+
+interface DraftRequestRecord {
+  id: string;
+  displayId: number;
+  note: string;
+  done: boolean;
+  createdAt: string;
+  manager: { id: string; name: string };
+}
+
+// "Черновики" — lightweight reminders ("клиент попросил X, есть только фото
+// референса") deliberately styled in warning/amber, never white/bg-surface
+// like a real Quote card, so it can never be mistaken for a quote actually
+// in progress — see PB-V5 chat 2026-07-28.
+function ClientDraftRequests({ clientId, refreshKey }: { clientId: string; refreshKey: number }) {
+  const [drafts, setDrafts] = useState<DraftRequestRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [note, setNote] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    return fetch(`/api/manager-quote-drafts?clientId=${clientId}`)
+      .then((res) => res.json())
+      .then((data) => setDrafts(data.drafts ?? []))
+      .finally(() => setLoading(false));
+  }, [clientId]);
+
+  useEffect(() => {
+    load();
+  }, [load, refreshKey]);
+
+  async function handleCreate(event: React.FormEvent) {
+    event.preventDefault();
+    if (creating || !note.trim()) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/manager-quote-drafts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId, note }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Не удалось создать черновик.");
+        return;
+      }
+      setNote("");
+      await load();
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleMarkDone(id: string) {
+    setBusyId(id);
+    try {
+      const res = await fetch(`/api/manager-quote-drafts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ done: true }),
+      });
+      if (res.ok) await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!window.confirm("Удалить черновик?")) return;
+    setBusyId(id);
+    try {
+      const res = await fetch(`/api/manager-quote-drafts/${id}`, { method: "DELETE" });
+      if (res.ok) await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-xl border border-warning/30 bg-warning/5 p-3">
+      <p className="flex items-center gap-1.5 text-xs font-semibold text-warning">
+        <AlertTriangle className="h-3.5 w-3.5" /> Черновики — заявки на просчёт (ещё не в работе)
+      </p>
+      {!loading && drafts.length > 0 && (
+        <ul className="space-y-1.5">
+          {drafts.map((draft) => (
+            <li key={draft.id} className="flex items-start justify-between gap-2 rounded-lg border border-warning/20 bg-surface p-2.5 text-sm">
+              <div className="min-w-0">
+                <span className="mr-1.5 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+                  к выполнению
+                </span>
+                <span className="text-text">{draft.note}</span>
+                <div className="mt-0.5 text-xs text-text-secondary">
+                  {new Date(draft.createdAt).toLocaleDateString("ru-RU")} · {draft.manager.name}
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleMarkDone(draft.id)}
+                  disabled={busyId === draft.id}
+                  title="Просчёт создан — убрать из черновиков"
+                  className="text-text-secondary transition-colors hover:text-success disabled:opacity-50"
+                >
+                  <Check className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(draft.id)}
+                  disabled={busyId === draft.id}
+                  className="text-text-secondary transition-colors hover:text-error disabled:opacity-50"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form onSubmit={handleCreate} className="flex gap-2">
+        <Input
+          placeholder="Что просит клиент? (например: хочет подвесы для качелей, скинул фото)"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          className="h-8 flex-1 text-sm"
+        />
+        <Button type="submit" size="sm" disabled={creating || !note.trim()}>
+          {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Добавить"}
+        </Button>
+      </form>
+      {error && <p className="text-xs text-error">{error}</p>}
+    </div>
+  );
 }
 
 function ClientQuotes({
@@ -1245,6 +1384,7 @@ function ManagerClientsTab() {
   const [messenger, setMessenger] = useState("");
   const [email, setEmail] = useState("");
   const [source, setSource] = useState<string>("other");
+  const [newClientSelfSourced, setNewClientSelfSourced] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1341,7 +1481,7 @@ function ManagerClientsTab() {
       const res = await fetch("/api/manager-clients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, company, phone, messenger, email, source }),
+        body: JSON.stringify({ name, company, phone, messenger, email, source, selfSourced: newClientSelfSourced }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1354,6 +1494,7 @@ function ManagerClientsTab() {
       setMessenger("");
       setEmail("");
       setSource("other");
+      setNewClientSelfSourced(false);
       setShowNewForm(false);
       await loadClients();
     } catch {
@@ -1385,6 +1526,28 @@ function ManagerClientsTab() {
       {showNewForm && (
         <form onSubmit={handleCreate} className="space-y-2 rounded-xl border border-dashed border-border p-3">
           <p className="text-xs font-semibold text-text-secondary">Новый клиент</p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setNewClientSelfSourced(false)}
+              className={cn(
+                "flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
+                !newClientSelfSourced ? "border-error/40 bg-error/10 text-error" : "border-border text-text-secondary hover:border-error/30",
+              )}
+            >
+              Клиент компании
+            </button>
+            <button
+              type="button"
+              onClick={() => setNewClientSelfSourced(true)}
+              className={cn(
+                "flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
+                newClientSelfSourced ? "border-success/40 bg-success/10 text-success" : "border-border text-text-secondary hover:border-success/30",
+              )}
+            >
+              Мой личный клиент
+            </button>
+          </div>
           <div className="grid gap-2 sm:grid-cols-2">
             <Input placeholder="Имя клиента" value={name} onChange={(e) => setName(e.target.value)} required />
             <Input placeholder="Компания" value={company} onChange={(e) => setCompany(e.target.value)} />
@@ -1440,10 +1603,20 @@ function ManagerClientsTab() {
                       {client.name.trim().charAt(0).toUpperCase() || "?"}
                     </span>
                     <div className="min-w-0">
-                      <div className="text-sm font-medium text-text">
-                        <span className="text-text-secondary">№{client.displayId}</span> {client.name}
-                        {client.company && <span className="text-text-secondary"> · {client.company}</span>}
-                        {client.archivedAt && <span className="ml-1.5 text-xs font-normal text-error">архив</span>}
+                      <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-text">
+                        <span>
+                          <span className="text-text-secondary">№{client.displayId}</span> {client.name}
+                          {client.company && <span className="text-text-secondary"> · {client.company}</span>}
+                        </span>
+                        <span
+                          className={cn(
+                            "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                            client.selfSourcedClaimed ? "bg-success/10 text-success" : "bg-error/10 text-error",
+                          )}
+                        >
+                          {client.selfSourcedClaimed ? "свой клиент" : "клиент компании"}
+                        </span>
+                        {client.archivedAt && <span className="text-xs font-normal text-error">архив</span>}
                       </div>
                       <div className="text-xs text-text-secondary">
                         {client.contactsHidden ? (
@@ -1623,6 +1796,8 @@ function ManagerClientsTab() {
                         </div>
                       </div>
                     )}
+
+                    <ClientDraftRequests clientId={client.id} refreshKey={quotesRefreshKey} />
 
                     <Label>Документы клиента</Label>
                     <ClientFilesPanel clientId={client.id} />

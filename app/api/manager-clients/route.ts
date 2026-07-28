@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
 
-  const { name, company, phone, messenger, email, source } =
+  const { name, company, phone, messenger, email, source, selfSourced } =
     (body as {
       name?: unknown;
       company?: unknown;
@@ -84,6 +84,7 @@ export async function POST(req: NextRequest) {
       messenger?: unknown;
       email?: unknown;
       source?: unknown;
+      selfSourced?: unknown;
     }) ?? {};
 
   if (typeof name !== "string" || !name.trim()) {
@@ -111,6 +112,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // "Ваш личный клиент" at creation time just pre-fills the same claim a
+  // manager could otherwise make afterward via "Заявить как личного
+  // клиента" — still needs senior/owner confirmation before it actually
+  // affects premium (see confirm-self-sourced route), this only saves the
+  // separate follow-up click.
+  const isSelfSourced = selfSourced === true;
+
   const client = await prisma.client.create({
     data: {
       displayId: await nextClientDisplayId(),
@@ -121,6 +129,7 @@ export async function POST(req: NextRequest) {
       phone: phone.trim(),
       source: normalizedSource as never,
       createdByManagerId: session.managerId,
+      ...(isSelfSourced ? { selfSourcedClaimed: true, selfSourcedClaimedAt: new Date() } : {}),
     },
   });
 

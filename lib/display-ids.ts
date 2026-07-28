@@ -30,6 +30,12 @@ async function nextFulfillmentOrderDisplayId(): Promise<number> {
   return (last?.displayId ?? 0) + 1;
 }
 
+// Same max+1 pattern, for черновики ("Черновик №N").
+async function nextQuoteDraftRequestDisplayId(): Promise<number> {
+  const last = await prisma.quoteDraftRequest.findFirst({ orderBy: { displayId: "desc" } });
+  return (last?.displayId ?? 0) + 1;
+}
+
 // Two-letter prefix per direction for service SKUs, e.g. "ST-014".
 const DIRECTION_CODE_PREFIX: Record<OrderDirection, string> = {
   start: "ST",
@@ -56,6 +62,7 @@ export {
   nextManagerDisplayId,
   nextQuoteDisplayId,
   nextFulfillmentOrderDisplayId,
+  nextQuoteDraftRequestDisplayId,
   nextServiceCode,
   DIRECTION_CODE_PREFIX,
 };

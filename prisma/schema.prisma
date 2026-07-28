@@ -158,6 +158,7 @@ model Client {
   quotes       Quote[]
   cashOrders   CashOrder[]
   fulfillmentOrders FulfillmentOrder[]
+  quoteDraftRequests QuoteDraftRequest[]
 
   @@index([createdByManagerId])
 }
@@ -214,6 +215,7 @@ model Manager {
   cashOrders     CashOrder[]
   cashOpeningBalanceUpdates CashOpeningBalance[]
   fulfillmentOrders FulfillmentOrder[]
+  quoteDraftRequests QuoteDraftRequest[]
 }
 
 // Which tier of the "Поиск товара" service a quote is billed under — the
@@ -794,4 +796,31 @@ model FulfillmentOrderItem {
   quantity      Int
 
   @@index([orderId])
+}
+
+// A lightweight "don't forget to build this quote" note — the client asked
+// for something (maybe just a reference photo or a rough description) but
+// there isn't yet enough to build a real Quote (price, weight, dimensions
+// etc.). Deliberately minimal (just free text, no structured fields) —
+// this is a reminder/inbox item, not a quote in progress; see PB-V5 chat
+// 2026-07-28 ("план по поиску что бы не забыть"). Reference photos, if
+// any, go through the existing per-client DeskFile uploader, not a
+// dedicated field here.
+model QuoteDraftRequest {
+  id        String   @id @default(cuid())
+  displayId Int      @unique
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id])
+  managerId String
+  manager   Manager  @relation(fields: [managerId], references: [id])
+  note      String
+  // Marked done once a real Quote has been built for it (or it turned out
+  // not to be needed) — done items drop out of the default list rather
+  // than accumulating as clutter once handled.
+  done      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([managerId])
 }
