@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, Calculator, CheckSquare, Database, LogOut, Package, Tag, Users, UsersRound, Wallet } from "lucide-react";
+import { Briefcase, Calculator, CheckSquare, Database, LogOut, Package, Tag, UserCog, Users, UsersRound, Wallet } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ManagerClientsTab } from "@/components/manager/tabs/clients-tab";
@@ -18,6 +18,10 @@ import { ManagerDashboard } from "@/components/manager/manager-dashboard";
 interface ManagerWorkspaceProps {
   name: string;
   role: "manager" | "senior" | "owner";
+  // Set only when the owner is viewing via "Войти как сотрудник" — carries
+  // their own name for the banner, not just a boolean, so the banner can
+  // say who's actually looking without another round trip.
+  impersonatedByName: string | null;
 }
 
 const ROLE_LABEL: Record<ManagerWorkspaceProps["role"], string> = {
@@ -47,9 +51,10 @@ function isValidSectionId(value: string | null): value is (typeof ALL_SECTIONS)[
   return ALL_SECTIONS.some((section) => section.id === value);
 }
 
-function ManagerWorkspace({ name, role }: ManagerWorkspaceProps) {
+function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspaceProps) {
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
+  const [exitingImpersonation, setExitingImpersonation] = useState(false);
   const [activeSection, setActiveSection] = useState<(typeof ALL_SECTIONS)[number]["id"]>("clients");
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -85,12 +90,45 @@ function ManagerWorkspace({ name, role }: ManagerWorkspaceProps) {
     }
   }
 
+  // Full reload (not router.refresh()) — the new session's role/section
+  // list can differ enough (owner sees owner-only tabs again) that a soft
+  // refresh could leave stale client state pointing at a tab that no
+  // longer applies.
+  async function handleExitImpersonation() {
+    setExitingImpersonation(true);
+    try {
+      const res = await fetch("/api/manager-exit-impersonation", { method: "POST" });
+      if (res.ok) window.location.href = "/desk/manager";
+    } finally {
+      setExitingImpersonation(false);
+    }
+  }
+
   const active = SECTIONS.find((section) => section.id === activeSection) ?? SECTIONS[0];
   const ActiveComponent = active.Component;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
-      <div className="sticky top-0 z-30 rounded-2xl border border-primary/15 bg-gradient-to-r from-primary/8 via-secondary/6 to-primary/8 p-3 shadow-sm backdrop-blur-md">
+      <div className="sticky top-0 z-30 space-y-2">
+        {impersonatedByName && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-warning/30 bg-warning/10 px-4 py-2.5 text-sm backdrop-blur-md">
+            <div className="flex items-center gap-2 text-text">
+              <UserCog className="h-4 w-4 shrink-0 text-warning" />
+              <span>
+                {impersonatedByName} просматривает кабинет как <span className="font-semibold">{name}</span>
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleExitImpersonation}
+              disabled={exitingImpersonation}
+              className="shrink-0 rounded-lg border border-warning/40 px-2.5 py-1 text-xs font-medium text-text transition-colors hover:bg-warning/20 disabled:opacity-50"
+            >
+              {exitingImpersonation ? "Возврат…" : "Вернуться к своей учётке"}
+            </button>
+          </div>
+        )}
+        <div className="rounded-2xl border border-primary/15 bg-gradient-to-r from-primary/8 via-secondary/6 to-primary/8 p-3 shadow-sm backdrop-blur-md">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-secondary text-white">
@@ -131,6 +169,7 @@ function ManagerWorkspace({ name, role }: ManagerWorkspaceProps) {
             </button>
           ))}
         </nav>
+      </div>
       </div>
 
       <div className="mt-6">

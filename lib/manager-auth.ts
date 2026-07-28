@@ -23,8 +23,13 @@ function getSecretKey() {
   return new TextEncoder().encode(secret);
 }
 
-async function createManagerSessionToken(managerId: string, role: ManagerRole): Promise<string> {
-  return new SignJWT({ scope: "manager", managerId, role })
+// impersonatedBy: set only when the owner opened this session via "Войти
+// как сотрудник" (see app/api/managers/[id]/impersonate) — carries the
+// owner's own managerId so the "Вернуться к своей учётке" flow can hand
+// them straight back their own session without a password, and so the
+// workspace UI knows to show the "you're viewing as X" banner at all.
+async function createManagerSessionToken(managerId: string, role: ManagerRole, impersonatedBy?: string): Promise<string> {
+  return new SignJWT({ scope: "manager", managerId, role, ...(impersonatedBy ? { impersonatedBy } : {}) })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${SESSION_DURATION_SECONDS}s`)
@@ -34,6 +39,7 @@ async function createManagerSessionToken(managerId: string, role: ManagerRole): 
 interface ManagerSession {
   managerId: string;
   role: ManagerRole;
+  impersonatedBy?: string;
 }
 
 async function verifyManagerSessionToken(token: string): Promise<ManagerSession | null> {
@@ -41,7 +47,8 @@ async function verifyManagerSessionToken(token: string): Promise<ManagerSession 
     const { payload } = await jwtVerify(token, getSecretKey());
     if (payload.scope !== "manager" || typeof payload.managerId !== "string") return null;
     if (payload.role !== "manager" && payload.role !== "owner" && payload.role !== "senior") return null;
-    return { managerId: payload.managerId, role: payload.role };
+    const impersonatedBy = typeof payload.impersonatedBy === "string" ? payload.impersonatedBy : undefined;
+    return { managerId: payload.managerId, role: payload.role, ...(impersonatedBy ? { impersonatedBy } : {}) };
   } catch {
     return null;
   }

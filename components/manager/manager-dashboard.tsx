@@ -293,20 +293,24 @@ function StatCardsRow({
           </>
         }
       />
-      <StatCard
-        icon={Wallet}
-        label="Доход компании (факт)"
-        value={actualIncomeRub != null ? `${fmt(actualIncomeRub)} ₽` : "—"}
-        valueClassName={actualIncomeRub != null ? "text-success" : "text-text-secondary"}
-        subtitle={actualIncomeRub != null ? "Уже подтверждено" : "Видно только руководителю"}
-      />
-      <StatCard
-        icon={Wallet}
-        label="Доход компании (потенциал)"
-        value={expectedIncomeRub != null ? `${fmt(expectedIncomeRub)} ₽` : "—"}
-        valueClassName={expectedIncomeRub != null ? "text-success" : "text-text-secondary"}
-        subtitle={expectedIncomeRub != null ? "Если всё в работе будет куплено" : "Видно только руководителю"}
-      />
+      {actualIncomeRub != null && expectedIncomeRub != null && (
+        <>
+          <StatCard
+            icon={Wallet}
+            label="Доход компании (факт)"
+            value={`${fmt(actualIncomeRub)} ₽`}
+            valueClassName="text-success"
+            subtitle="Уже подтверждено"
+          />
+          <StatCard
+            icon={Wallet}
+            label="Доход компании (потенциал)"
+            value={`${fmt(expectedIncomeRub)} ₽`}
+            valueClassName="text-success"
+            subtitle="Если всё в работе будет куплено"
+          />
+        </>
+      )}
     </div>
   );
 }

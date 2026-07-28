@@ -7,11 +7,13 @@ interface RouteParams {
 }
 
 // Step 2 of 2 — owner/senior only, and never the same person who claimed
-// the client (conflict-of-interest control: the manager who'd earn the 35%
-// premium can't be the one who confirms their own claim). Confirming does
-// NOT retroactively raise the premium on quotes already confirmed before
-// today — see buyoutPremiumRatePercent on Quote, which is locked in at
-// each quote's own confirmation time, not recomputed live off this flag.
+// the client (conflict-of-interest control: the manager who'd earn the
+// boosted self-sourced premium can't be the one who confirms their own
+// claim). Confirming does NOT retroactively raise the premium on quotes
+// already confirmed before today — see buyoutSelfSourcedBoost on Quote,
+// which is locked in at each quote's own confirmation time, not
+// recomputed live off this flag. See also reject-self-sourced/route.ts
+// for declining a claim instead.
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Mail, Plus, Trash2 } from "lucide-react";
+import { Loader2, LogIn, Mail, Plus, Trash2 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -112,6 +112,25 @@ function ManagerStaffTab() {
         setResetSentId(id);
         setTimeout(() => setResetSentId(null), 4000);
       }
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // Secure alternative to "знать пароль" — opens the target manager's own
+  // session directly, no password involved. Full navigation (not a fetch +
+  // local state update) since the role/tab list genuinely changes.
+  async function handleImpersonate(id: string) {
+    setBusyId(id);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/managers/${id}/impersonate`, { method: "POST" });
+      if (res.ok) {
+        window.location.href = "/desk/manager";
+        return;
+      }
+      const data = await res.json();
+      setActionError(data.error ?? "Не удалось войти как сотрудник.");
     } finally {
       setBusyId(null);
     }
@@ -306,6 +325,18 @@ function ManagerStaffTab() {
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-3">
+                    {manager.role !== "owner" && (
+                      <button
+                        type="button"
+                        onClick={() => handleImpersonate(manager.id)}
+                        disabled={busyId === manager.id}
+                        title="Войти в кабинет этого сотрудника без пароля"
+                        className="flex items-center gap-1.5 text-xs font-medium text-text-secondary transition-colors hover:text-primary disabled:opacity-50"
+                      >
+                        <LogIn className="h-3.5 w-3.5" />
+                        Войти как
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleResetPassword(manager.id)}

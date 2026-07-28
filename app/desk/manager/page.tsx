@@ -28,5 +28,15 @@ export default async function ManagerCabinetPage() {
     return <ManagerLoginForm />;
   }
 
-  return <ManagerWorkspace name={manager.name} role={session.role} />;
+  // Impersonated session ("Войти как сотрудник") — resolve the original
+  // owner's name for the workspace's "you're viewing as X" banner. Falls
+  // back to treating this as a normal session if that owner account is
+  // somehow gone (deleted since impersonating) rather than erroring out.
+  let impersonatedByName: string | null = null;
+  if (session.impersonatedBy) {
+    const owner = await prisma.manager.findUnique({ where: { id: session.impersonatedBy }, select: { name: true } });
+    impersonatedByName = owner?.name ?? null;
+  }
+
+  return <ManagerWorkspace name={manager.name} role={session.role} impersonatedByName={impersonatedByName} />;
 }

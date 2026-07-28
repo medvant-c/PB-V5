@@ -109,6 +109,23 @@ function ManagerConfirmationsTab() {
     }
   }
 
+  async function handleRejectClient(clientId: string) {
+    if (!window.confirm("Отклонить заявку? Менеджер сможет заявить этого клиента снова.")) return;
+    setBusyId(clientId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/manager-clients/${clientId}/reject-self-sourced`, { method: "PATCH" });
+      if (res.ok) {
+        await load();
+      } else {
+        const data = await res.json();
+        setError(data.error ?? "Не удалось отклонить заявку.");
+      }
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   if (loading) return <p className="text-sm text-text-secondary">Загрузка…</p>;
 
   const isEmpty = pendingBuyouts.length === 0 && pendingClients.length === 0;
@@ -242,15 +259,25 @@ function ManagerConfirmationsTab() {
                         {client.selfSourcedClaimedAt ? ` · ${formatDate(client.selfSourcedClaimedAt)}` : ""}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmClient(client.id)}
-                      disabled={busyId === client.id}
-                      className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
-                    >
-                      {busyId === client.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                      Подтвердить
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleRejectClient(client.id)}
+                        disabled={busyId === client.id}
+                        className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-error/30 hover:text-error disabled:opacity-50"
+                      >
+                        Отклонить
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmClient(client.id)}
+                        disabled={busyId === client.id}
+                        className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
+                      >
+                        {busyId === client.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        Подтвердить
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
