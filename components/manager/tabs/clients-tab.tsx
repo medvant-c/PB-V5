@@ -1462,7 +1462,7 @@ function ManagerClientsTab() {
                 </button>
 
                 {isOpen && (
-                  <div className="space-y-3 border-t border-border p-3">
+                  <div className="space-y-3 rounded-b-xl border-t border-border bg-bg p-3">
                     {allManagers && (
                       <p className="text-xs text-text-secondary">
                         Сейчас у менеджера: <span className="font-medium text-text">{client.createdByManager?.name ?? "—"}</span>
