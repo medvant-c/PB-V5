@@ -14,6 +14,8 @@ interface TariffSettingsRecord {
   standardPriceRub: string;
   expertPriceRub: string;
   proPriceRub: string;
+  managerCargoRateUsdPerKg: string;
+  managerCargoRateUsdPerM3: string;
   createdAt: string;
   // Present only for the owner — GET /api/manager-tariffs strips these two
   // for everyone else, so their presence here doubles as "am I the owner."
@@ -53,6 +55,8 @@ const FIELD_LABELS: Record<
   standardPriceRub: "Поиск товара Standart, ₽",
   expertPriceRub: "Поиск товара Expert, ₽",
   proPriceRub: "Поиск товара Pro, ₽",
+  managerCargoRateUsdPerKg: "Премия менеджеру за карго (лид компании), $/кг",
+  managerCargoRateUsdPerM3: "Премия менеджеру за карго (лид компании), $/м³",
 };
 
 // Owner-only — never rendered for anyone else (see TariffSettingsRecord).

@@ -88,10 +88,12 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
         ? {
             actualBuyoutCny: null,
             actualBuyoutRateUsed: null,
+            actualSupplierDiscountCny: null,
             buyoutFactConfirmed: false,
             buyoutConfirmedByManagerId: null,
             buyoutConfirmedAt: null,
             buyoutPremiumRatePercent: null,
+            buyoutSelfSourcedBoost: null,
             actualClientPaymentRub: null,
             actualClientPaymentRateUsed: null,
             clientPaymentCashOrderId: null,

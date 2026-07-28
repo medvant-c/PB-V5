@@ -265,6 +265,16 @@ model TariffSettings {
   standardPriceRub         Decimal
   expertPriceRub           Decimal
   proPriceRub              Decimal
+  // Manager's flat cargo compensation for a company-sourced lead — per the
+  // 2026-07 mativation policy, cargo is no longer a % of margin/revenue for
+  // a company lead (only self-sourced clients still get 10% of
+  // cargoDeliveryRub, computed in app/api/manager-dashboard). Whichever
+  // basis the quote actually prices cargo on (weight vs volume — same
+  // density>=100 rule as actualize-cargo) determines which rate applies.
+  // Editable like the other plain rate fields above (not owner-confidential
+  // margin data), gated by canEditTariffs same as everything else here.
+  managerCargoRateUsdPerKg  Decimal @default(0.3)
+  managerCargoRateUsdPerM3  Decimal @default(5)
   // Owner-confidential cargo margin baked into every rate above: every
   // density-tier ratePerKgUsd already has this much profit added on top of
   // the real cost, and volumeRateUsdPerCbm has cargoVolumeMarginUsdPerCbm
@@ -458,17 +468,34 @@ model Quote {
   // this flag, not on Quote.status itself.
   actualBuyoutCny          Decimal?
   actualBuyoutRateUsed     Decimal?
+  // Extra factory discount ON TOP of the quoted goods price, entered
+  // alongside actualBuyoutCny at the same real rate (actualBuyoutRateUsed)
+  // — a distinct profit source from "Выкуп" under the 2026-07 motivation
+  // policy ("Скидка поставщика"), not folded into actualBuyoutCny itself.
+  // Optional — most deals have none.
+  actualSupplierDiscountCny Decimal?
   buyoutFactConfirmed      Boolean   @default(false)
   buyoutConfirmedByManagerId String?
   buyoutConfirmedAt        DateTime?
-  // Locked in AT confirmation time (10 or 35) — not recomputed live off
-  // Client.selfSourcedConfirmed later, so a client being confirmed
-  // self-sourced today never silently changes the premium already earned
-  // on quotes confirmed before that date ("только по новым с даты
-  // подтверждения"). Also captures whichever manager this quote actually
-  // belonged to at the moment of confirmation, independent of any later
-  // reassignment via /api/manager-quotes/[id]/reassign.
+  // Locked in AT confirmation time — always 10 as of the 2026-07 motivation
+  // policy (the old 35%-for-self-sourced multiplier on buyout profit was
+  // dropped; a self-sourced client instead gets 100% on Просчёт/Скидка,
+  // computed in app/api/manager-dashboard, not stored here). Field kept
+  // (rather than hardcoding 10 everywhere) so already-confirmed quotes from
+  // before this policy change keep displaying whatever rate they were
+  // actually confirmed at (some show 35) — never rewritten retroactively.
+  // Also captures whichever manager this quote actually belonged to at the
+  // moment of confirmation, independent of any later reassignment via
+  // /api/manager-quotes/[id]/reassign.
   buyoutPremiumRatePercent Decimal?
+  // Whether this quote's client was a confirmed self-sourced client of the
+  // (then-current) manager AT THE MOMENT of buyout confirmation — drives
+  // the 100%-on-Просчёт/Скидка dashboard formula. Locked here (not
+  // recomputed live off Client.selfSourcedConfirmed) for the exact same
+  // reason buyoutPremiumRatePercent above is locked: a client confirmed
+  // self-sourced today must never retroactively boost a quote confirmed
+  // before that date. Null until buyoutFactConfirmed.
+  buyoutSelfSourcedBoost   Boolean?
 
   // Real payment actually RECEIVED from the client for buyout+services —
   // the mirror of actualBuyoutCny above (that one is the real COST of

@@ -30,8 +30,11 @@ interface StatSummary {
   pipelineGoodsRub: number;
   pipelineChinaDeliveryRub: number;
   pipelineCargoRub: number;
-  potentialServicesProfitRub: number;
-  factualServicesProfitRub: number;
+  potentialProscetRub: number;
+  potentialBuyoutRub: number;
+  factualProscetRub: number;
+  factualBuyoutRub: number;
+  factualDiscountRub: number;
   potentialCargoProfitRub: number;
   factualCargoProfitRub: number;
   potentialCargoBonusRub: number;
@@ -112,8 +115,11 @@ interface DashboardData {
   expectedIncomeRub: number | null;
   actualIncomeRub: number | null;
   // Owner-only source breakdown behind those two totals.
-  potentialServicesProfitRub: number | null;
-  factualServicesProfitRub: number | null;
+  potentialProscetRub: number | null;
+  potentialBuyoutRub: number | null;
+  factualProscetRub: number | null;
+  factualBuyoutRub: number | null;
+  factualDiscountRub: number | null;
   potentialCargoProfitRub: number | null;
   factualCargoProfitRub: number | null;
   // Owner-only companions — physical totals and the two revenue lines
@@ -122,6 +128,11 @@ interface DashboardData {
   cargoWeightKg: number | null;
   searchFeeRub: number | null;
   buyoutCommissionRub: number | null;
+  // Owner-only — Влад's 10% cut and what's left for the two founders
+  // (Александр/Антон, 50/50) after Влад and every manager's premium — see
+  // PB-V5 chat 2026-07-28.
+  vladShareRub: number | null;
+  founderShareRub: number | null;
 }
 
 function fmt(value: number): string {
@@ -261,7 +272,9 @@ function StatCardsRow({
         subtitle={`ожидается ещё ${fmt(stats.estimatedPremiumRub)} ₽`}
         tooltip={
           <>
-            <BreakdownRow label="Факт — за услуги" value={`${fmt(stats.factualServicesProfitRub >= 0 ? stats.factualServicesProfitRub : 0)} ₽ прибыли`} />
+            <BreakdownRow label="Факт — просчёт" value={`${fmt(Math.max(0, stats.factualProscetRub))} ₽ прибыли`} />
+            <BreakdownRow label="Факт — выкуп" value={`${fmt(Math.max(0, stats.factualBuyoutRub))} ₽ прибыли`} />
+            <BreakdownRow label="Факт — скидка поставщика" value={`${fmt(Math.max(0, stats.factualDiscountRub))} ₽ прибыли`} />
             <BreakdownRow label="Факт — премия" value={`${fmt(stats.factualPremiumRub - stats.factualCargoBonusRub)} ₽`} />
             <BreakdownRow label="Факт — бонус за карго" value={`${fmt(stats.factualCargoBonusRub)} ₽`} />
             <BreakdownRow label="Итого фактическая премия" value={`${fmt(stats.factualPremiumRub)} ₽`} isTotal />
@@ -480,20 +493,28 @@ function ManagerDashboard() {
             <Info className="h-4 w-4 text-text-secondary" /> Как считается премия
           </div>
           <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
-            <span className="font-semibold text-text">Услуги</span> (услуга поиска + комиссия за выкуп + доп. услуги +
-            выгода от выкупа дешевле плана) — 10% от прибыли для обычного клиента, 35% для подтверждённого личного
-            клиента менеджера. Считается по факту, как только старший менеджер или руководитель подтвердит сумму
-            реального выкупа.
+            <span className="font-semibold text-text">Просчёт</span> (услуга поиска) и{" "}
+            <span className="font-semibold text-text">Скидка поставщика</span> — 10% от прибыли для обычного клиента,
+            100% для подтверждённого личного клиента менеджера.
           </p>
           <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
-            <span className="font-semibold text-text">Карго</span> — только для личных клиентов, 10% от суммы, которую
-            клиент платит за карго (не от прибыли и не от себестоимости). Начисляется автоматически при статусе «Выдан
-            клиенту».
+            <span className="font-semibold text-text">Выкуп</span> (комиссия за выкуп + доп. услуги + выгода от
+            покупки дешевле плана) — всегда 10% от прибыли, независимо от того, личный клиент или нет. Курсовая
+            разница менеджеру не начисляется — считается только для доли партнёров. Всё по факту, как только старший
+            менеджер или руководитель подтвердит реальную сумму выкупа.
+          </p>
+          <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
+            <span className="font-semibold text-text">Карго</span> — для лида компании фиксированная ставка $/кг или
+            $/м³ (задаётся во вкладке «Тарифы»), для личного клиента — как раньше, 10% от суммы, которую клиент
+            платит за карго. Начисляется автоматически при статусе «Выдан клиенту».
           </p>
         </div>
 
-        {data.potentialServicesProfitRub != null &&
-          data.factualServicesProfitRub != null &&
+        {data.potentialProscetRub != null &&
+          data.potentialBuyoutRub != null &&
+          data.factualProscetRub != null &&
+          data.factualBuyoutRub != null &&
+          data.factualDiscountRub != null &&
           data.potentialCargoProfitRub != null &&
           data.factualCargoProfitRub != null && (
             <div className="rounded-2xl border border-border bg-bg p-4 sm:p-5">
@@ -502,21 +523,27 @@ function ManagerDashboard() {
               </div>
               <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
                 «В работе» выше — это оборот (всё, что заплатит клиент). Здесь — сколько из него реальная прибыль
-                компании, отдельно по услугам и по карго, и отдельно — что уже подтверждено (факт), а что ещё оценка
-                (потенциал).
+                компании, по источникам (Просчёт + Выкуп, Скидка поставщика, Карго), и отдельно — что уже
+                подтверждено (факт), а что ещё оценка (потенциал).
               </p>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl border border-border bg-surface p-3.5">
                   <div className="flex items-center gap-1.5 text-xs text-text-secondary">
-                    <Handshake className="h-3.5 w-3.5" /> Услуги — потенциал
+                    <Handshake className="h-3.5 w-3.5" /> Просчёт + Выкуп — потенциал
                   </div>
-                  <div className="mt-1 text-lg font-bold text-text">{fmt(data.potentialServicesProfitRub)} ₽</div>
+                  <div className="mt-1 text-lg font-bold text-text">{fmt(data.potentialProscetRub + data.potentialBuyoutRub)} ₽</div>
                 </div>
                 <div className="rounded-xl border border-border bg-surface p-3.5">
                   <div className="flex items-center gap-1.5 text-xs text-text-secondary">
-                    <Handshake className="h-3.5 w-3.5" /> Услуги — факт
+                    <Handshake className="h-3.5 w-3.5" /> Просчёт + Выкуп — факт
                   </div>
-                  <div className="mt-1 text-lg font-bold text-success">{fmt(data.factualServicesProfitRub)} ₽</div>
+                  <div className="mt-1 text-lg font-bold text-success">{fmt(data.factualProscetRub + data.factualBuyoutRub)} ₽</div>
+                </div>
+                <div className="rounded-xl border border-border bg-surface p-3.5">
+                  <div className="flex items-center gap-1.5 text-xs text-text-secondary">
+                    <Handshake className="h-3.5 w-3.5" /> Скидка поставщика — факт
+                  </div>
+                  <div className="mt-1 text-lg font-bold text-success">{fmt(data.factualDiscountRub)} ₽</div>
                 </div>
                 <div className="rounded-xl border border-border bg-surface p-3.5">
                   <div className="flex items-center gap-1.5 text-xs text-text-secondary">
@@ -542,11 +569,19 @@ function ManagerDashboard() {
               {incomeExplainerOpen && (
                 <div className="mt-3 space-y-2 rounded-xl border border-border bg-surface p-3.5 text-xs leading-relaxed text-text-secondary">
                   <div>
-                    <span className="font-semibold text-text">Услуги</span> = услуга поиска (Standart/Expert/Pro) +
-                    комиссия за организацию выкупа + доп. услуги из прайс-листа + разница между плановой ценой товара
-                    и тем, что реально потрачено на выкуп (скидка от фабрики или курсовая разница). Потенциал считает
-                    эту разницу как 0 (план = факт), пока старший менеджер или руководитель не подтвердит реальную
-                    сумму выкупа — тогда просчёт переходит в факт.
+                    <span className="font-semibold text-text">Просчёт</span> = услуга поиска (Standart/Expert/Pro).{" "}
+                    <span className="font-semibold text-text">Выкуп</span> = комиссия за организацию выкупа + доп.
+                    услуги из прайс-листа + разница между плановой ценой товара и тем, что реально потрачено на
+                    выкуп.
+                  </div>
+                  <div>
+                    <span className="font-semibold text-text">Скидка поставщика</span> — дополнительная скидка
+                    фабрики сверх плановой цены, вводится вручную вместе с фактом выкупа. Отдельный источник, не
+                    входит в «Выкуп» выше.
+                  </div>
+                  <div>
+                    Потенциал считает разницу план/факт как 0, пока старший менеджер или руководитель не подтвердит
+                    реальную сумму выкупа — тогда просчёт переходит в факт.
                   </div>
                   <div>
                     <span className="font-semibold text-text">Карго</span> = то, что заплатил клиент за
@@ -571,6 +606,32 @@ function ManagerDashboard() {
               </button>
             </div>
           )}
+
+        {data.vladShareRub != null && data.founderShareRub != null && (
+          <div className="rounded-2xl border border-border bg-bg p-4 sm:p-5">
+            <div className="flex items-center gap-1.5 text-sm font-bold text-text">
+              <Lock className="h-4 w-4 text-text-secondary" /> Доля партнёров — видно только руководителю
+            </div>
+            <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
+              10% от прибыли по каждой подтверждённой сделке (со всех источников, включая курсовую разницу) —
+              Владу. Остаток после доли Влада и премий всех менеджеров делится 50/50 между Александром и Антоном.
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-border bg-surface p-3.5">
+                <div className="text-xs text-text-secondary">Влад (Партнёр) — 10%</div>
+                <div className="mt-1 text-lg font-bold text-text">{fmt(data.vladShareRub)} ₽</div>
+              </div>
+              <div className="rounded-xl border border-border bg-surface p-3.5">
+                <div className="text-xs text-text-secondary">Александр (Основатель/Инвестор)</div>
+                <div className="mt-1 text-lg font-bold text-text">{fmt(data.founderShareRub)} ₽</div>
+              </div>
+              <div className="rounded-xl border border-border bg-surface p-3.5">
+                <div className="text-xs text-text-secondary">Антон</div>
+                <div className="mt-1 text-lg font-bold text-text">{fmt(data.founderShareRub)} ₽</div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {data.perManager && data.perManager.length > 0 && (
           <div className="rounded-2xl border border-border bg-surface p-4 sm:p-5">

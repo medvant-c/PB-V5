@@ -41,7 +41,7 @@ function ManagerConfirmationsTab() {
   const [pendingClients, setPendingClients] = useState<PendingClient[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [drafts, setDrafts] = useState<Record<string, { cny: string; rate: string; rub: string; rateRub: string }>>({});
+  const [drafts, setDrafts] = useState<Record<string, { cny: string; rate: string; discount: string; rub: string; rateRub: string }>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,7 +61,7 @@ function ManagerConfirmationsTab() {
   }, []);
 
   async function handleConfirmBuyout(quoteId: string) {
-    const draft = drafts[quoteId] ?? { cny: "", rate: "", rub: "", rateRub: "" };
+    const draft = drafts[quoteId] ?? { cny: "", rate: "", discount: "", rub: "", rateRub: "" };
     const cny = Number(draft.cny);
     const rate = Number(draft.rate);
     const rub = Number(draft.rub);
@@ -77,6 +77,7 @@ function ManagerConfirmationsTab() {
         body: JSON.stringify({
           actualBuyoutCny: cny,
           actualBuyoutRateUsed: rate,
+          actualSupplierDiscountCny: draft.discount ? Number(draft.discount) : undefined,
           actualClientPaymentRub: rub,
           actualClientPaymentRateUsed: rateRub,
         }),
@@ -138,7 +139,7 @@ function ManagerConfirmationsTab() {
               </p>
               <ul className="mt-2 space-y-2">
                 {pendingBuyouts.map((quote) => {
-                  const draft = drafts[quote.id] ?? { cny: "", rate: "", rub: "", rateRub: "" };
+                  const draft = drafts[quote.id] ?? { cny: "", rate: "", discount: "", rub: "", rateRub: "" };
                   const days = daysWaiting(quote.statusChangedAt);
                   return (
                     <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
@@ -177,6 +178,14 @@ function ManagerConfirmationsTab() {
                             value={draft.rate}
                             onChange={(e) => setDrafts((current) => ({ ...current, [quote.id]: { ...draft, rate: e.target.value } }))}
                             className="w-28 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="скидка поставщика, ¥ (необязательно)"
+                            value={draft.discount}
+                            onChange={(e) => setDrafts((current) => ({ ...current, [quote.id]: { ...draft, discount: e.target.value } }))}
+                            className="w-56 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
                           />
                         </div>
                         <div className="flex flex-wrap items-center gap-2">

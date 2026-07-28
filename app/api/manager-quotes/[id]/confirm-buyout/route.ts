@@ -21,15 +21,16 @@ async function getOrCreateBuyoutIncomeCategory() {
 // Owner/senior only — deliberately excludes "manager" (including the
 // quote's own manager) so the person who'd benefit from underreporting the
 // real buyout spend can never be the one reporting it. Locks in the
-// premium rate (10% normally, 35% if the client is a confirmed
-// self-sourced client of whoever currently owns this quote) at the moment
-// of confirmation — later changes to Client.selfSourcedConfirmed or a
-// quote reassignment never retroactively touch an already-confirmed rate.
+// premium rate (always 10 as of the 2026-07 motivation policy — a
+// self-sourced client's 100%-on-Просчёт/Скидка boost is computed live in
+// the dashboard, not stored here) at the moment of confirmation.
 //
-// Also captures the real payment RECEIVED from the client (actualClientPaymentRub
-// — the mirror of actualBuyoutCny's real COST) and auto-creates/updates a
-// linked income CashOrder in Отчёты по дням, so the manager never has to
-// separately re-enter the same payment by hand in the cash ledger.
+// Also captures actualSupplierDiscountCny (a distinct profit source —
+// "Скидка поставщика" — from actualBuyoutCny itself) and the real payment
+// RECEIVED from the client (actualClientPaymentRub — the mirror of
+// actualBuyoutCny's real COST), auto-creating/updating a linked income
+// CashOrder in Отчёты по дням so the manager never has to separately
+// re-enter the same payment by hand in the cash ledger.
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
@@ -57,10 +58,11 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { actualBuyoutCny, actualBuyoutRateUsed, actualClientPaymentRub, actualClientPaymentRateUsed } =
+  const { actualBuyoutCny, actualBuyoutRateUsed, actualSupplierDiscountCny, actualClientPaymentRub, actualClientPaymentRateUsed } =
     (body as {
       actualBuyoutCny?: unknown;
       actualBuyoutRateUsed?: unknown;
+      actualSupplierDiscountCny?: unknown;
       actualClientPaymentRub?: unknown;
       actualClientPaymentRateUsed?: unknown;
     }) ?? {};
@@ -69,14 +71,28 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   if (!Number.isFinite(cny) || cny <= 0 || !Number.isFinite(rate) || rate <= 0) {
     return Response.json({ error: "Укажите потраченную сумму в юанях и курс." }, { status: 400 });
   }
+  // Optional — most deals have no extra supplier discount beyond the
+  // quoted goods price.
+  let discountCny: number | null = null;
+  if (actualSupplierDiscountCny !== undefined && actualSupplierDiscountCny !== null && actualSupplierDiscountCny !== "") {
+    const parsedDiscount = Number(actualSupplierDiscountCny);
+    if (!Number.isFinite(parsedDiscount) || parsedDiscount < 0) {
+      return Response.json({ error: "Скидка поставщика должна быть неотрицательным числом." }, { status: 400 });
+    }
+    discountCny = parsedDiscount;
+  }
   const paymentRub = Number(actualClientPaymentRub);
   const paymentRate = Number(actualClientPaymentRateUsed);
   if (!Number.isFinite(paymentRub) || paymentRub <= 0 || !Number.isFinite(paymentRate) || paymentRate <= 0) {
     return Response.json({ error: "Укажите сумму поступления от клиента в рублях и курс." }, { status: 400 });
   }
 
-  const isSelfSourced = quote.client.selfSourcedConfirmed && quote.client.createdByManagerId === quote.managerId;
-  const premiumRatePercent = isSelfSourced ? 35 : 10;
+  // Always 10 — see PB-V5 chat 2026-07-28, the old 35%-for-self-sourced
+  // multiplier was dropped from this field entirely. Self-sourced instead
+  // gets a 100%-on-Просчёт/Скидка boost, locked in via buyoutSelfSourcedBoost
+  // below (computed here, at confirmation time, not live later).
+  const premiumRatePercent = 10;
+  const selfSourcedBoost = quote.client.selfSourcedConfirmed && quote.client.createdByManagerId === quote.managerId;
 
   const category = await getOrCreateBuyoutIncomeCategory();
   const paymentAmountCny = paymentRub / paymentRate;
@@ -115,10 +131,12 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     data: {
       actualBuyoutCny: cny,
       actualBuyoutRateUsed: rate,
+      actualSupplierDiscountCny: discountCny,
       buyoutFactConfirmed: true,
       buyoutConfirmedByManagerId: session.managerId,
       buyoutConfirmedAt: new Date(),
       buyoutPremiumRatePercent: premiumRatePercent,
+      buyoutSelfSourcedBoost: selfSourcedBoost,
       actualClientPaymentRub: paymentRub,
       actualClientPaymentRateUsed: paymentRate,
       clientPaymentCashOrderId: cashOrder.id,
@@ -127,9 +145,11 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       id: true,
       actualBuyoutCny: true,
       actualBuyoutRateUsed: true,
+      actualSupplierDiscountCny: true,
       buyoutFactConfirmed: true,
       buyoutConfirmedAt: true,
       buyoutPremiumRatePercent: true,
+      buyoutSelfSourcedBoost: true,
       actualClientPaymentRub: true,
       actualClientPaymentRateUsed: true,
       clientPaymentCashOrderId: true,

@@ -68,6 +68,8 @@ export async function POST(req: NextRequest) {
     standardPriceRub: toPositiveNumber(raw.standardPriceRub),
     expertPriceRub: toPositiveNumber(raw.expertPriceRub),
     proPriceRub: toPositiveNumber(raw.proPriceRub),
+    managerCargoRateUsdPerKg: toPositiveNumber(raw.managerCargoRateUsdPerKg),
+    managerCargoRateUsdPerM3: toPositiveNumber(raw.managerCargoRateUsdPerM3),
   };
 
   for (const [key, value] of Object.entries(fields)) {
@@ -103,6 +105,8 @@ export async function POST(req: NextRequest) {
       standardPriceRub: validated.standardPriceRub,
       expertPriceRub: validated.expertPriceRub,
       proPriceRub: validated.proPriceRub,
+      managerCargoRateUsdPerKg: validated.managerCargoRateUsdPerKg,
+      managerCargoRateUsdPerM3: validated.managerCargoRateUsdPerM3,
       cargoDensityMarginUsdPerKg,
       cargoVolumeMarginUsdPerCbm,
       createdByManagerId: session.managerId,
