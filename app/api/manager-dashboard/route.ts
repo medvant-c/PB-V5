@@ -30,13 +30,16 @@ const CONVERSION_PREMIUM_THRESHOLD_PERCENT = 60;
 //   - Company lead: 10% each on Просчёт, Выкуп, Скидка поставщика. ZERO
 //     from Карго or Фулфилмент — those two bonuses exist only for a
 //     confirmed self-sourced client.
-//   - Self-sourced (свой клиент): 100% on Просчёт, Выкуп, AND Скидка (all
-//     three, not just two) — PLUS a flat $/кг or $/м³ cargo bonus (see
-//     TariffSettings.managerCargoRateUsdPerKg/M3) — PLUS 10% of
-//     Фулфилмент revenue.
-//   - Курсовая разница never goes to the manager, only to Влад/учредители.
+//   - Self-sourced (свой клиент): 100% on Просчёт, 50% on Выкуп, 50% on
+//     Скидка — PLUS a flat $/кг or $/м³ cargo bonus (see TariffSettings.
+//     managerCargoRateUsdPerKg/M3) — PLUS 10% of Фулфилмент revenue.
+//   - Курсовая разница never goes to the manager, only to Влад/учредители
+//     — and deliberately never mentioned anywhere in the manager-facing
+//     UI (see components/manager/manager-dashboard.tsx), not just excluded
+//     from the math.
 const NORMAL_RATE_PERCENT = 10;
-const SELF_SOURCED_BOOSTED_RATE_PERCENT = 100;
+const SELF_SOURCED_PROSCET_RATE_PERCENT = 100;
+const SELF_SOURCED_BUYOUT_DISCOUNT_RATE_PERCENT = 50;
 // Vlad (Партнёр) takes 10% off the top of every source, on every
 // confirmed deal, regardless of lead source — computed once, company-wide,
 // not per-manager.
@@ -219,17 +222,22 @@ function summarize(quotes: QuoteForStats[], cargoRates: { usdPerKg: number; usdP
       factualBuyoutRub += buyoutRub;
       factualDiscountRub += discountRub;
       // Locked at confirmation time (buyoutSelfSourcedBoost), never
-      // recomputed live — see schema comment on that field. All three
-      // sources share the same boosted rate for a self-sourced client —
-      // no partial boost.
-      const boostedRate = q.buyoutSelfSourcedBoost ? SELF_SOURCED_BOOSTED_RATE_PERCENT : NORMAL_RATE_PERCENT;
-      factualPremiumRub += (Math.max(0, proscetRub) + Math.max(0, buyoutRub) + Math.max(0, discountRub)) * (boostedRate / 100);
+      // recomputed live — see schema comment on that field. Просчёт gets
+      // the full 100% boost for a self-sourced client; Выкуп/Скидка get a
+      // smaller 50% boost — not the same rate as Просчёт.
+      const proscetRate = q.buyoutSelfSourcedBoost ? SELF_SOURCED_PROSCET_RATE_PERCENT : NORMAL_RATE_PERCENT;
+      const buyoutDiscountRate = q.buyoutSelfSourcedBoost ? SELF_SOURCED_BUYOUT_DISCOUNT_RATE_PERCENT : NORMAL_RATE_PERCENT;
+      factualPremiumRub +=
+        Math.max(0, proscetRub) * (proscetRate / 100) +
+        (Math.max(0, buyoutRub) + Math.max(0, discountRub)) * (buyoutDiscountRate / 100);
     } else {
       const { proscetRub, buyoutRub } = estimatedSourceProfits(q);
       potentialProscetRub += proscetRub;
       potentialBuyoutRub += buyoutRub;
-      const boostedRate = isSelfSourcedFor(q, q.managerId) ? SELF_SOURCED_BOOSTED_RATE_PERCENT : NORMAL_RATE_PERCENT;
-      potentialPremiumRub += (Math.max(0, proscetRub) + Math.max(0, buyoutRub)) * (boostedRate / 100);
+      const isBoosted = isSelfSourcedFor(q, q.managerId);
+      const proscetRate = isBoosted ? SELF_SOURCED_PROSCET_RATE_PERCENT : NORMAL_RATE_PERCENT;
+      const buyoutRate = isBoosted ? SELF_SOURCED_BUYOUT_DISCOUNT_RATE_PERCENT : NORMAL_RATE_PERCENT;
+      potentialPremiumRub += Math.max(0, proscetRub) * (proscetRate / 100) + Math.max(0, buyoutRub) * (buyoutRate / 100);
     }
 
     // Карго — gated on cargoBonusRatePercent being locked in, which only

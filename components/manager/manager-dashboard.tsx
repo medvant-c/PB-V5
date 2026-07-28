@@ -501,10 +501,11 @@ function ManagerDashboard() {
             <Info className="h-4 w-4 text-text-secondary" /> Как считается премия
           </div>
           <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
-            <span className="font-semibold text-text">Просчёт, Выкуп и Скидка поставщика</span> — 10% от прибыли для
-            обычного клиента (лид компании), 100% для подтверждённого личного клиента менеджера. Курсовая разница
-            менеджеру не начисляется никогда — считается только для доли партнёров. Всё по факту, как только старший
-            менеджер или руководитель подтвердит реальную сумму выкупа.
+            <span className="font-semibold text-text">Просчёт</span> — 10% от прибыли для обычного клиента (лид
+            компании), 100% для подтверждённого личного клиента менеджера.{" "}
+            <span className="font-semibold text-text">Выкуп и Скидка поставщика</span> — 10% для обычного клиента,
+            50% для личного клиента. Всё по факту, как только старший менеджер или руководитель подтвердит реальную
+            сумму выкупа.
           </p>
           <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
             <span className="font-semibold text-text">Карго и Фулфилмент</span> — премия менеджеру только для
