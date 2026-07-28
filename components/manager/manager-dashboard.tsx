@@ -16,6 +16,7 @@ import {
   Loader2,
   ImageOff,
   Download,
+  AlertTriangle,
 } from "lucide-react";
 import { QUOTE_STATUSES, QUOTE_STATUS_LABEL, QUOTE_STATUS_BADGE_CLASSES, QUOTE_STATUS_DOT_COLOR } from "@/lib/quote-statuses";
 import { cn } from "@/lib/utils";
@@ -94,6 +95,9 @@ function ConversionRing({ percent, size = 56 }: { percent: number; size?: number
 interface PerManagerRow extends StatSummary {
   managerId: string;
   managerName: string;
+  completedToday: number;
+  completedWeek: number;
+  completedMonth: number;
 }
 
 // Enough fields to render one row of the click-to-filter quote list below
@@ -137,10 +141,21 @@ interface DashboardData {
   // PB-V5 chat 2026-07-28.
   vladShareRub: number | null;
   founderShareRub: number | null;
+  // Every ₽ amount on this dashboard is displayed converted to ¥ using this
+  // rate (see PB-V5 chat 2026-07-28) — underlying storage/math stays RUB,
+  // only the presentation changes.
+  cnyRateRub: number;
 }
 
 function fmt(value: number): string {
   return Math.round(value).toLocaleString("ru-RU");
+}
+
+// Every monetary figure on this dashboard renders in ¥, not ₽ — the values
+// coming from the API are still RUB internally (that's what quotes are
+// priced in), converted here purely for display.
+function fmtCny(rub: number, cnyRateRub: number): string {
+  return fmt(rub / cnyRateRub);
 }
 
 // One row inside a hover breakdown — label left, ₽ value right, an
@@ -224,12 +239,15 @@ function StatCardsRow({
   stats,
   expectedIncomeRub,
   actualIncomeRub,
+  cnyRateRub,
 }: {
   stats: StatSummary;
   expectedIncomeRub: number | null;
   actualIncomeRub: number | null;
+  cnyRateRub: number;
 }) {
   const isHighConversion = stats.conversionPercent >= CONVERSION_HEALTHY_THRESHOLD_PERCENT;
+  const m = (rub: number) => fmtCny(rub, cnyRateRub);
 
   // Residual, not a tracked field — guarantees the four rows always sum to
   // exactly pipelineRub instead of drifting from a separately-summed value.
@@ -241,15 +259,15 @@ function StatCardsRow({
         featured
         icon={TrendingUp}
         label="В работе (потенциал)"
-        value={`${fmt(stats.pipelineRub)} ₽`}
+        value={`${m(stats.pipelineRub)} ¥`}
         subtitle={`${stats.totalQuotes} просчётов`}
         tooltip={
           <>
-            <BreakdownRow label="Товар" value={`${fmt(stats.pipelineGoodsRub)} ₽`} />
-            <BreakdownRow label="Доставка по Китаю" value={`${fmt(stats.pipelineChinaDeliveryRub)} ₽`} />
-            <BreakdownRow label="Доставка карго" value={`${fmt(stats.pipelineCargoRub)} ₽`} />
-            <BreakdownRow label="Услуги и комиссии" value={`${fmt(pipelineServicesRub)} ₽`} />
-            <BreakdownRow label="Итого в работе" value={`${fmt(stats.pipelineRub)} ₽`} isTotal />
+            <BreakdownRow label="Товар" value={`${m(stats.pipelineGoodsRub)} ¥`} />
+            <BreakdownRow label="Доставка по Китаю" value={`${m(stats.pipelineChinaDeliveryRub)} ¥`} />
+            <BreakdownRow label="Доставка карго" value={`${m(stats.pipelineCargoRub)} ¥`} />
+            <BreakdownRow label="Услуги и комиссии" value={`${m(pipelineServicesRub)} ¥`} />
+            <BreakdownRow label="Итого в работе" value={`${m(stats.pipelineRub)} ¥`} isTotal />
           </>
         }
       />
@@ -271,25 +289,25 @@ function StatCardsRow({
       <StatCard
         icon={Gift}
         label="Премия менеджерам"
-        value={`${fmt(stats.factualPremiumRub)} ₽`}
+        value={`${m(stats.factualPremiumRub)} ¥`}
         valueClassName="text-success"
-        subtitle={`ожидается ещё ${fmt(stats.estimatedPremiumRub)} ₽`}
+        subtitle={`ожидается ещё ${m(stats.estimatedPremiumRub)} ¥`}
         tooltip={
           <>
-            <BreakdownRow label="Факт — просчёт" value={`${fmt(Math.max(0, stats.factualProscetRub))} ₽ прибыли`} />
-            <BreakdownRow label="Факт — выкуп" value={`${fmt(Math.max(0, stats.factualBuyoutRub))} ₽ прибыли`} />
-            <BreakdownRow label="Факт — скидка поставщика" value={`${fmt(Math.max(0, stats.factualDiscountRub))} ₽ прибыли`} />
+            <BreakdownRow label="Факт — просчёт" value={`${m(Math.max(0, stats.factualProscetRub))} ¥ прибыли`} />
+            <BreakdownRow label="Факт — выкуп" value={`${m(Math.max(0, stats.factualBuyoutRub))} ¥ прибыли`} />
+            <BreakdownRow label="Факт — скидка поставщика" value={`${m(Math.max(0, stats.factualDiscountRub))} ¥ прибыли`} />
             <BreakdownRow
               label="Факт — премия"
-              value={`${fmt(stats.factualPremiumRub - stats.factualCargoBonusRub - stats.factualFulfillmentPremiumRub)} ₽`}
+              value={`${m(stats.factualPremiumRub - stats.factualCargoBonusRub - stats.factualFulfillmentPremiumRub)} ¥`}
             />
-            <BreakdownRow label="Факт — бонус за карго" value={`${fmt(stats.factualCargoBonusRub)} ₽`} />
-            <BreakdownRow label="Факт — фулфилмент" value={`${fmt(stats.factualFulfillmentPremiumRub)} ₽`} />
-            <BreakdownRow label="Итого фактическая премия" value={`${fmt(stats.factualPremiumRub)} ₽`} isTotal />
+            <BreakdownRow label="Факт — бонус за карго" value={`${m(stats.factualCargoBonusRub)} ¥`} />
+            <BreakdownRow label="Факт — фулфилмент" value={`${m(stats.factualFulfillmentPremiumRub)} ¥`} />
+            <BreakdownRow label="Итого фактическая премия" value={`${m(stats.factualPremiumRub)} ¥`} isTotal />
             <div className="pt-2 text-[11px] text-white/60">Ниже — то, что ещё не подтверждено (потенциал):</div>
-            <BreakdownRow label="Потенциал — премия за услуги" value={`${fmt(stats.estimatedPremiumRub - stats.potentialCargoBonusRub)} ₽`} />
-            <BreakdownRow label="Потенциал — бонус за карго" value={`${fmt(stats.potentialCargoBonusRub)} ₽`} />
-            <BreakdownRow label="Итого ожидаемая премия" value={`${fmt(stats.estimatedPremiumRub)} ₽`} isTotal />
+            <BreakdownRow label="Потенциал — премия за услуги" value={`${m(stats.estimatedPremiumRub - stats.potentialCargoBonusRub)} ¥`} />
+            <BreakdownRow label="Потенциал — бонус за карго" value={`${m(stats.potentialCargoBonusRub)} ¥`} />
+            <BreakdownRow label="Итого ожидаемая премия" value={`${m(stats.estimatedPremiumRub)} ¥`} isTotal />
           </>
         }
       />
@@ -298,14 +316,14 @@ function StatCardsRow({
           <StatCard
             icon={Wallet}
             label="Доход компании (факт)"
-            value={`${fmt(actualIncomeRub)} ₽`}
+            value={`${m(actualIncomeRub)} ¥`}
             valueClassName="text-success"
             subtitle="Уже подтверждено"
           />
           <StatCard
             icon={Wallet}
             label="Доход компании (потенциал)"
-            value={`${fmt(expectedIncomeRub)} ₽`}
+            value={`${m(expectedIncomeRub)} ¥`}
             valueClassName="text-success"
             subtitle="Если всё в работе будет куплено"
           />
@@ -329,10 +347,12 @@ function StatusPillsRow({
   stats,
   activeFilter,
   onSelect,
+  cnyRateRub,
 }: {
   stats: StatSummary;
   activeFilter: string | null;
   onSelect: (filter: PillFilter) => void;
+  cnyRateRub: number;
 }) {
   function pillClass(key: string, colored?: string) {
     const isActive = activeFilter === key;
@@ -354,14 +374,14 @@ function StatusPillsRow({
         onClick={() => onSelect({ key: "bought", statuses: BOUGHT_STATUSES })}
         className={pillClass("bought", "border border-border bg-surface text-text-secondary")}
       >
-        <Wallet className="h-3.5 w-3.5" /> Выкуплено · {fmt(stats.boughtRub)} ₽
+        <Wallet className="h-3.5 w-3.5" /> Выкуплено · {fmtCny(stats.boughtRub, cnyRateRub)} ¥
       </button>
       <button
         type="button"
         onClick={() => onSelect({ key: "handed_to_client", statuses: ["handed_to_client"] })}
         className={pillClass("handed_to_client", "border border-border bg-surface text-text-secondary")}
       >
-        <PackageCheck className="h-3.5 w-3.5" /> Выдано · {fmt(stats.handedRub)} ₽
+        <PackageCheck className="h-3.5 w-3.5" /> Выдано · {fmtCny(stats.handedRub, cnyRateRub)} ¥
       </button>
 
       {QUOTE_STATUSES.map((status) => {
@@ -378,7 +398,15 @@ function StatusPillsRow({
   );
 }
 
-function QuoteListPanel({ quotes, loading }: { quotes: QuoteListItem[] | null; loading: boolean }) {
+function QuoteListPanel({
+  quotes,
+  loading,
+  cnyRateRub,
+}: {
+  quotes: QuoteListItem[] | null;
+  loading: boolean;
+  cnyRateRub: number;
+}) {
   if (loading) {
     return (
       <div className="mt-3 flex items-center gap-2 rounded-2xl border border-border bg-surface p-4 text-sm text-text-secondary">
@@ -419,7 +447,7 @@ function QuoteListPanel({ quotes, loading }: { quotes: QuoteListItem[] | null; l
           <span className={cn("shrink-0 rounded-full px-2.5 py-1 text-xs font-medium", QUOTE_STATUS_BADGE_CLASSES[quote.status as keyof typeof QUOTE_STATUS_BADGE_CLASSES])}>
             {QUOTE_STATUS_LABEL[quote.status as keyof typeof QUOTE_STATUS_LABEL] ?? quote.status}
           </span>
-          <span className="w-28 shrink-0 text-right font-bold text-text">{fmt(Number(quote.totalRub))} ₽</span>
+          <span className="w-28 shrink-0 text-right font-bold text-text">{fmtCny(Number(quote.totalRub), cnyRateRub)} ¥</span>
         </a>
       ))}
     </div>
@@ -438,6 +466,58 @@ function TodayPill() {
     <div className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-surface px-4 py-2 text-sm font-medium text-text-secondary">
       <Calendar className="h-4 w-4" />
       {today ?? "—"}
+    </div>
+  );
+}
+
+interface QuoteDraftItem {
+  id: string;
+  note: string;
+  createdAt: string;
+  client: { id: string; name: string; company: string | null };
+}
+
+// Aggregates QuoteDraftRequest across every client this manager can see
+// (GET /api/manager-quote-drafts with no clientId filter) — the dashboard
+// counterpart to the per-client badge in clients-tab.tsx, so a manager
+// doesn't have to open every client to notice an unhandled search request.
+// See PB-V5 chat 2026-07-28.
+function SearchDraftsWidget() {
+  const [drafts, setDrafts] = useState<QuoteDraftItem[] | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/manager-quote-drafts")
+      .then((res) => res.json())
+      .then((d) => setDrafts(d.drafts ?? []));
+  }, []);
+
+  if (!drafts || drafts.length === 0) return null;
+
+  return (
+    <div className="rounded-2xl border border-warning/30 bg-warning/5 p-4 sm:p-5">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between gap-2 text-left">
+        <span className="flex items-center gap-1.5 text-sm font-bold text-warning">
+          <AlertTriangle className="h-4 w-4" /> Заявки на поиск — необработанные: {drafts.length}
+        </span>
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-warning transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <ul className="mt-3 space-y-1.5">
+          {drafts.map((draft) => (
+            <li key={draft.id} className="rounded-lg border border-warning/20 bg-surface p-2.5 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium text-text">
+                  {draft.client.name}
+                  {draft.client.company ? ` · ${draft.client.company}` : ""}
+                </span>
+                <span className="text-xs text-text-secondary">{new Date(draft.createdAt).toLocaleDateString("ru-RU")}</span>
+              </div>
+              <p className="mt-0.5 text-text-secondary">{draft.note}</p>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -496,9 +576,21 @@ function ManagerDashboard() {
           <TodayPill />
         </div>
 
-        <StatCardsRow stats={data.overall} expectedIncomeRub={data.expectedIncomeRub} actualIncomeRub={data.actualIncomeRub} />
-        <StatusPillsRow stats={data.overall} activeFilter={activeFilter?.key ?? null} onSelect={handlePillSelect} />
-        {activeFilter && <QuoteListPanel quotes={filteredQuotes} loading={loadingQuotes} />}
+        <SearchDraftsWidget />
+
+        <StatCardsRow
+          stats={data.overall}
+          expectedIncomeRub={data.expectedIncomeRub}
+          actualIncomeRub={data.actualIncomeRub}
+          cnyRateRub={data.cnyRateRub}
+        />
+        <StatusPillsRow
+          stats={data.overall}
+          activeFilter={activeFilter?.key ?? null}
+          onSelect={handlePillSelect}
+          cnyRateRub={data.cnyRateRub}
+        />
+        {activeFilter && <QuoteListPanel quotes={filteredQuotes} loading={loadingQuotes} cnyRateRub={data.cnyRateRub} />}
 
         <div className="rounded-2xl border border-border bg-bg p-4 sm:p-5">
           <div className="flex items-center gap-1.5 text-sm font-bold text-text">
@@ -540,26 +632,24 @@ function ManagerDashboard() {
                   <div className="flex items-center gap-1.5 text-xs text-text-secondary">
                     <Handshake className="h-3.5 w-3.5" /> Просчёт + Выкуп — потенциал
                   </div>
-                  <div className="mt-1 text-lg font-bold text-text">{fmt(data.potentialProscetRub + data.potentialBuyoutRub)} ₽</div>
+                  <div className="mt-1 text-lg font-bold text-text">
+                    {fmtCny(data.potentialProscetRub + data.potentialBuyoutRub, data.cnyRateRub)} ¥
+                  </div>
                 </div>
                 <div className="rounded-xl border border-border bg-surface p-3.5">
                   <div className="flex items-center gap-1.5 text-xs text-text-secondary">
                     <Handshake className="h-3.5 w-3.5" /> Просчёт + Выкуп — факт
                   </div>
-                  <div className="mt-1 text-lg font-bold text-success">{fmt(data.factualProscetRub + data.factualBuyoutRub)} ₽</div>
-                </div>
-                <div className="rounded-xl border border-border bg-surface p-3.5">
-                  <div className="flex items-center gap-1.5 text-xs text-text-secondary">
-                    <Handshake className="h-3.5 w-3.5" /> Скидка поставщика — факт
+                  <div className="mt-1 text-lg font-bold text-success">
+                    {fmtCny(data.factualProscetRub + data.factualBuyoutRub, data.cnyRateRub)} ¥
                   </div>
-                  <div className="mt-1 text-lg font-bold text-success">{fmt(data.factualDiscountRub)} ₽</div>
                 </div>
                 <div className="rounded-xl border border-border bg-surface p-3.5">
                   <div className="flex items-center gap-1.5 text-xs text-text-secondary">
                     <Ship className="h-3.5 w-3.5" /> Карго — потенциал
                   </div>
                   <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    <span className="text-lg font-bold text-text">{fmt(data.potentialCargoProfitRub)} ₽</span>
+                    <span className="text-lg font-bold text-text">{fmtCny(data.potentialCargoProfitRub, data.cnyRateRub)} ¥</span>
                     {data.cargoVolumeM3 != null && data.cargoWeightKg != null && (
                       <span className="text-xs text-text-secondary">
                         {data.cargoVolumeM3.toFixed(1)} м³ · {fmt(data.cargoWeightKg)} кг
@@ -571,7 +661,13 @@ function ManagerDashboard() {
                   <div className="flex items-center gap-1.5 text-xs text-text-secondary">
                     <Ship className="h-3.5 w-3.5" /> Карго — факт
                   </div>
-                  <div className="mt-1 text-lg font-bold text-success">{fmt(data.factualCargoProfitRub)} ₽</div>
+                  <div className="mt-1 text-lg font-bold text-success">{fmtCny(data.factualCargoProfitRub, data.cnyRateRub)} ¥</div>
+                </div>
+                <div className="rounded-xl border border-border bg-surface p-3.5 sm:col-span-2">
+                  <div className="flex items-center gap-1.5 text-xs text-text-secondary">
+                    <Handshake className="h-3.5 w-3.5" /> Скидка поставщика — факт
+                  </div>
+                  <div className="mt-1 text-lg font-bold text-success">{fmtCny(data.factualDiscountRub, data.cnyRateRub)} ¥</div>
                 </div>
               </div>
 
@@ -628,15 +724,15 @@ function ManagerDashboard() {
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <div className="rounded-xl border border-border bg-surface p-3.5">
                 <div className="text-xs text-text-secondary">Влад (Партнёр) — 10%</div>
-                <div className="mt-1 text-lg font-bold text-text">{fmt(data.vladShareRub)} ₽</div>
+                <div className="mt-1 text-lg font-bold text-text">{fmtCny(data.vladShareRub, data.cnyRateRub)} ¥</div>
               </div>
               <div className="rounded-xl border border-border bg-surface p-3.5">
                 <div className="text-xs text-text-secondary">Александр (Основатель/Инвестор)</div>
-                <div className="mt-1 text-lg font-bold text-text">{fmt(data.founderShareRub)} ₽</div>
+                <div className="mt-1 text-lg font-bold text-text">{fmtCny(data.founderShareRub, data.cnyRateRub)} ¥</div>
               </div>
               <div className="rounded-xl border border-border bg-surface p-3.5">
                 <div className="text-xs text-text-secondary">Антон</div>
-                <div className="mt-1 text-lg font-bold text-text">{fmt(data.founderShareRub)} ₽</div>
+                <div className="mt-1 text-lg font-bold text-text">{fmtCny(data.founderShareRub, data.cnyRateRub)} ¥</div>
               </div>
             </div>
           </div>
@@ -651,11 +747,11 @@ function ManagerDashboard() {
                   <tr className="border-b border-border text-left text-xs text-text-secondary">
                     <th className="py-1.5 font-medium">Менеджер</th>
                     <th className="py-1.5 font-medium">Просчётов</th>
-                    <th className="py-1.5 font-medium">Выкуплено, ₽</th>
-                    <th className="py-1.5 font-medium">Выдано, ₽</th>
-                    <th className="py-1.5 font-medium">В работе, ₽</th>
-                    <th className="py-1.5 font-medium">Премия факт, ₽</th>
-                    <th className="py-1.5 font-medium">Премия потенциал, ₽</th>
+                    <th className="py-1.5 font-medium">Выкуплено, ¥</th>
+                    <th className="py-1.5 font-medium">Выдано, ¥</th>
+                    <th className="py-1.5 font-medium">В работе, ¥</th>
+                    <th className="py-1.5 font-medium">Премия факт, ¥</th>
+                    <th className="py-1.5 font-medium">Премия потенциал, ¥</th>
                     <th className="py-1.5 font-medium">Конверсия</th>
                   </tr>
                 </thead>
@@ -664,14 +760,46 @@ function ManagerDashboard() {
                     <tr key={row.managerId} className="border-b border-border last:border-0">
                       <td className="py-1.5 font-medium text-text">{row.managerName}</td>
                       <td className="py-1.5 text-text-secondary">{row.totalQuotes}</td>
-                      <td className="py-1.5 text-text-secondary">{fmt(row.boughtRub)}</td>
-                      <td className="py-1.5 text-text-secondary">{fmt(row.handedRub)}</td>
-                      <td className="py-1.5 text-text-secondary">{fmt(row.pipelineRub)}</td>
-                      <td className="py-1.5 font-semibold text-success">{fmt(row.factualPremiumRub)}</td>
-                      <td className="py-1.5 text-text-secondary">{fmt(row.estimatedPremiumRub)}</td>
+                      <td className="py-1.5 text-text-secondary">{fmtCny(row.boughtRub, data.cnyRateRub)}</td>
+                      <td className="py-1.5 text-text-secondary">{fmtCny(row.handedRub, data.cnyRateRub)}</td>
+                      <td className="py-1.5 text-text-secondary">{fmtCny(row.pipelineRub, data.cnyRateRub)}</td>
+                      <td className="py-1.5 font-semibold text-success">{fmtCny(row.factualPremiumRub, data.cnyRateRub)}</td>
+                      <td className="py-1.5 text-text-secondary">{fmtCny(row.estimatedPremiumRub, data.cnyRateRub)}</td>
                       <td className="py-1.5">
                         <ConversionRing percent={row.conversionPercent} size={32} />
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {data.perManager && data.perManager.length > 0 && (
+          <div className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
+            <h3 className="text-sm font-bold text-text">Готовые просчёты по менеджерам</h3>
+            <p className="mt-1 text-xs text-text-secondary">
+              Просчёт считается готовым, как только менеджер отправил его «На согласовании» — независимо от
+              дальнейшей судьбы сделки.
+            </p>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full min-w-100 border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs text-text-secondary">
+                    <th className="py-1.5 font-medium">Менеджер</th>
+                    <th className="py-1.5 font-medium">Сегодня</th>
+                    <th className="py-1.5 font-medium">За неделю</th>
+                    <th className="py-1.5 font-medium">За месяц</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.perManager.map((row) => (
+                    <tr key={row.managerId} className="border-b border-border last:border-0">
+                      <td className="py-1.5 font-medium text-text">{row.managerName}</td>
+                      <td className="py-1.5 text-text-secondary">{row.completedToday}</td>
+                      <td className="py-1.5 text-text-secondary">{row.completedWeek}</td>
+                      <td className="py-1.5 text-text-secondary">{row.completedMonth}</td>
                     </tr>
                   ))}
                 </tbody>

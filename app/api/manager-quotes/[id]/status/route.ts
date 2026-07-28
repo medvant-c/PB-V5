@@ -84,6 +84,11 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     data: {
       status,
       statusChangedAt: new Date(),
+      // Set once, forever — never overwritten by a later status change in
+      // either direction. Drives "готовые просчёты за день/неделю/месяц" on
+      // the dashboard (see PB-V5 chat 2026-07-28): the manager did the
+      // calculation work the moment this was first true.
+      ...(status === "pending_approval" && !existing.completedAt ? { completedAt: new Date() } : {}),
       ...(revertingPastBuyout
         ? {
             actualBuyoutCny: null,

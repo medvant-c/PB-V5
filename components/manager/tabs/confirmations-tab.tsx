@@ -12,6 +12,9 @@ interface PendingBuyout {
   statusChangedAt: string;
   totalPriceCny: string;
   totalRub: string;
+  searchServiceFeeRub: string;
+  buyoutCommissionRub: string;
+  cnyRateUsed: string;
   manager: { id: string; name: string };
   client: { name: string; company: string | null };
 }
@@ -36,12 +39,29 @@ function daysWaiting(value: string): number {
   return Math.floor((Date.now() - new Date(value).getTime()) / (24 * 60 * 60 * 1000));
 }
 
+// Live client-side mirror of the server formula in confirm-buyout/route.ts —
+// purely a preview so the person confirming sees «Скидка» update as they
+// type, before it's actually computed and stored server-side on submit.
+function previewDiscountCny(
+  quote: PendingBuyout,
+  draft: { cny: string; rate: string; rub: string; rateRub: string },
+): number | null {
+  const buyoutCny = Number(draft.cny);
+  const paymentRub = Number(draft.rub);
+  const paymentRate = Number(draft.rateRub);
+  if (!Number.isFinite(buyoutCny) || buyoutCny <= 0) return null;
+  if (!Number.isFinite(paymentRub) || paymentRub <= 0 || !Number.isFinite(paymentRate) || paymentRate <= 0) return null;
+  const paymentAmountCny = paymentRub / paymentRate;
+  const servicesAndCommissionCny = (Number(quote.searchServiceFeeRub) + Number(quote.buyoutCommissionRub)) / Number(quote.cnyRateUsed);
+  return paymentAmountCny - servicesAndCommissionCny - buyoutCny;
+}
+
 function ManagerConfirmationsTab() {
   const [pendingBuyouts, setPendingBuyouts] = useState<PendingBuyout[]>([]);
   const [pendingClients, setPendingClients] = useState<PendingClient[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [drafts, setDrafts] = useState<Record<string, { cny: string; rate: string; discount: string; rub: string; rateRub: string }>>({});
+  const [drafts, setDrafts] = useState<Record<string, { cny: string; rate: string; rub: string; rateRub: string }>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,7 +81,7 @@ function ManagerConfirmationsTab() {
   }, []);
 
   async function handleConfirmBuyout(quoteId: string) {
-    const draft = drafts[quoteId] ?? { cny: "", rate: "", discount: "", rub: "", rateRub: "" };
+    const draft = drafts[quoteId] ?? { cny: "", rate: "", rub: "", rateRub: "" };
     const cny = Number(draft.cny);
     const rate = Number(draft.rate);
     const rub = Number(draft.rub);
@@ -77,7 +97,6 @@ function ManagerConfirmationsTab() {
         body: JSON.stringify({
           actualBuyoutCny: cny,
           actualBuyoutRateUsed: rate,
-          actualSupplierDiscountCny: draft.discount ? Number(draft.discount) : undefined,
           actualClientPaymentRub: rub,
           actualClientPaymentRateUsed: rateRub,
         }),
@@ -156,8 +175,10 @@ function ManagerConfirmationsTab() {
               </p>
               <ul className="mt-2 space-y-2">
                 {pendingBuyouts.map((quote) => {
-                  const draft = drafts[quote.id] ?? { cny: "", rate: "", discount: "", rub: "", rateRub: "" };
+                  const draft = drafts[quote.id] ?? { cny: "", rate: "", rub: "", rateRub: "" };
                   const days = daysWaiting(quote.statusChangedAt);
+                  const servicesAndCommissionCny = (Number(quote.searchServiceFeeRub) + Number(quote.buyoutCommissionRub)) / Number(quote.cnyRateUsed);
+                  const discountPreview = previewDiscountCny(quote, draft);
                   return (
                     <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -174,12 +195,14 @@ function ManagerConfirmationsTab() {
                           ждёт {days} {days === 1 ? "день" : "дн."}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-text-secondary">
-                        По плану: {quote.totalPriceCny}¥ · {Number(quote.totalRub).toLocaleString("ru-RU")}₽
-                      </p>
+
                       <div className="mt-2 space-y-1.5">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="w-44 shrink-0 text-xs text-text-secondary">Потрачено на выкуп:</span>
+                          <span className="w-44 shrink-0 text-xs text-text-secondary">Выкуп план (авто):</span>
+                          <span className="w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text-secondary">
+                            {quote.totalPriceCny}¥
+                          </span>
+                          <span className="w-44 shrink-0 text-xs text-text-secondary">Выкуп факт (вручную):</span>
                           <input
                             type="number"
                             step="0.01"
@@ -196,17 +219,17 @@ function ManagerConfirmationsTab() {
                             onChange={(e) => setDrafts((current) => ({ ...current, [quote.id]: { ...draft, rate: e.target.value } }))}
                             className="w-28 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
                           />
-                          <input
-                            type="number"
-                            step="0.01"
-                            placeholder="скидка поставщика, ¥ (необязательно)"
-                            value={draft.discount}
-                            onChange={(e) => setDrafts((current) => ({ ...current, [quote.id]: { ...draft, discount: e.target.value } }))}
-                            className="w-56 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
-                          />
                         </div>
+
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="w-44 shrink-0 text-xs text-text-secondary">Поступило от клиента:</span>
+                          <span className="w-44 shrink-0 text-xs text-text-secondary">Услуги поиска и комиссия (авто):</span>
+                          <span className="w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text-secondary">
+                            {servicesAndCommissionCny.toFixed(2)}¥
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="w-44 shrink-0 text-xs text-text-secondary">Оплата от клиента (вручную):</span>
                           <input
                             type="number"
                             step="0.01"
@@ -224,6 +247,20 @@ function ManagerConfirmationsTab() {
                             className="w-28 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
                           />
                         </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="w-44 shrink-0 text-xs text-text-secondary">Скидка (авто):</span>
+                          <span
+                            className={
+                              discountPreview === null
+                                ? "w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text-secondary"
+                                : "w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm font-semibold text-success"
+                            }
+                          >
+                            {discountPreview === null ? "—" : `${discountPreview.toFixed(2)}¥`}
+                          </span>
+                        </div>
+
                         <button
                           type="button"
                           onClick={() => handleConfirmBuyout(quote.id)}

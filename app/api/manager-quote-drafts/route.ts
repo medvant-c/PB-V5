@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
       ...(includeDone ? {} : { done: false }),
     },
     orderBy: { createdAt: "asc" },
-    include: { manager: { select: { id: true, name: true } } },
+    include: { manager: { select: { id: true, name: true } }, client: { select: { id: true, name: true, company: true } } },
   });
 
   return Response.json({ drafts });

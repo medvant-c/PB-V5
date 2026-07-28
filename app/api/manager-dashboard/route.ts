@@ -330,9 +330,26 @@ export async function GET(req: NextRequest) {
       actualSupplierDiscountCny: true,
       buyoutSelfSourcedBoost: true,
       cargoBonusRatePercent: true,
+      completedAt: true,
       client: { select: { selfSourcedConfirmed: true, createdByManagerId: true } },
     },
   });
+
+  // "Готовые просчёты" — how many quotes each manager marked complete
+  // (first reached pending_approval) today/this week/this month, per PB-V5
+  // chat 2026-07-28. Monday-indexed week, calendar month — completedAt is
+  // permanent (see status/route.ts), so this reflects real completed work
+  // regardless of what happened to the deal afterward.
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const mondayIndexedDay = (now.getDay() + 6) % 7;
+  const startOfWeek = new Date(startOfDay);
+  startOfWeek.setDate(startOfDay.getDate() - mondayIndexedDay);
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  function countCompletedSince(managerId: string, since: Date): number {
+    return quotes.filter((q) => q.managerId === managerId && q.completedAt && new Date(q.completedAt) >= since).length;
+  }
 
   // Фулфилмент — a separate business line from Quote entirely (see PB-V5
   // chat 2026-07-28), recognized immediately (no potential/factual split —
@@ -388,6 +405,9 @@ export async function GET(req: NextRequest) {
       managerId: m.id,
       managerName: m.name,
       ...withFulfillmentPremium(summarize(byManager.get(m.id) ?? [], cargoRates), m.id),
+      completedToday: countCompletedSince(m.id, startOfDay),
+      completedWeek: countCompletedSince(m.id, startOfWeek),
+      completedMonth: countCompletedSince(m.id, startOfMonth),
     }));
   }
 
@@ -491,6 +511,11 @@ export async function GET(req: NextRequest) {
     buyoutCommissionRub,
     vladShareRub,
     founderShareRub,
+    // Every ₽ figure on the dashboard is DISPLAYED in ¥ (per PB-V5 chat
+    // 2026-07-28) — the frontend converts using this rate rather than the
+    // backend recomputing everything in CNY, so the underlying premium/
+    // profit math stays exactly as-is, just rendered in a different unit.
+    cnyRateRub: tariffSettings ? Number(tariffSettings.cnyRateRub) : 1,
     conversionPremiumThresholdPercent: CONVERSION_PREMIUM_THRESHOLD_PERCENT,
   });
 }

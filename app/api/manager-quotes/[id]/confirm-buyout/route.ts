@@ -25,12 +25,20 @@ async function getOrCreateBuyoutIncomeCategory() {
 // self-sourced client's 100%-on-Просчёт/Скидка boost is computed live in
 // the dashboard, not stored here) at the moment of confirmation.
 //
-// Also captures actualSupplierDiscountCny (a distinct profit source —
-// "Скидка поставщика" — from actualBuyoutCny itself) and the real payment
-// RECEIVED from the client (actualClientPaymentRub — the mirror of
-// actualBuyoutCny's real COST), auto-creating/updating a linked income
-// CashOrder in Отчёты по дням so the manager never has to separately
-// re-enter the same payment by hand in the cash ledger.
+// actualSupplierDiscountCny ("Скидка поставщика") is no longer entered by
+// hand — see PB-V5 chat 2026-07-28 — it's a reconciliation residual,
+// computed here from the other three real-money figures:
+//   Скидка¥ = ОплатаФакт¥ − УслугиИКомиссия¥ − ВыкупФакт¥
+// where ОплатаФакт¥ = actualClientPaymentRub / actualClientPaymentRateUsed
+// and УслугиИКомиссия¥ = (searchServiceFeeRub + buyoutCommissionRub) / cnyRateUsed
+// (both already-quoted RUB figures converted at the quote's own snapshotted
+// rate, not the real buyout rate — the client was quoted and billed in RUB
+// at cnyRateUsed regardless of what the factory purchase rate later turns
+// out to be). Also captures the real payment RECEIVED from the client
+// (actualClientPaymentRub — the mirror of actualBuyoutCny's real COST),
+// auto-creating/updating a linked income CashOrder in Отчёты по дням so the
+// manager never has to separately re-enter the same payment by hand in the
+// cash ledger.
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
@@ -58,11 +66,10 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { actualBuyoutCny, actualBuyoutRateUsed, actualSupplierDiscountCny, actualClientPaymentRub, actualClientPaymentRateUsed } =
+  const { actualBuyoutCny, actualBuyoutRateUsed, actualClientPaymentRub, actualClientPaymentRateUsed } =
     (body as {
       actualBuyoutCny?: unknown;
       actualBuyoutRateUsed?: unknown;
-      actualSupplierDiscountCny?: unknown;
       actualClientPaymentRub?: unknown;
       actualClientPaymentRateUsed?: unknown;
     }) ?? {};
@@ -70,16 +77,6 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const rate = Number(actualBuyoutRateUsed);
   if (!Number.isFinite(cny) || cny <= 0 || !Number.isFinite(rate) || rate <= 0) {
     return Response.json({ error: "Укажите потраченную сумму в юанях и курс." }, { status: 400 });
-  }
-  // Optional — most deals have no extra supplier discount beyond the
-  // quoted goods price.
-  let discountCny: number | null = null;
-  if (actualSupplierDiscountCny !== undefined && actualSupplierDiscountCny !== null && actualSupplierDiscountCny !== "") {
-    const parsedDiscount = Number(actualSupplierDiscountCny);
-    if (!Number.isFinite(parsedDiscount) || parsedDiscount < 0) {
-      return Response.json({ error: "Скидка поставщика должна быть неотрицательным числом." }, { status: 400 });
-    }
-    discountCny = parsedDiscount;
   }
   const paymentRub = Number(actualClientPaymentRub);
   const paymentRate = Number(actualClientPaymentRateUsed);
@@ -96,6 +93,9 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
   const category = await getOrCreateBuyoutIncomeCategory();
   const paymentAmountCny = paymentRub / paymentRate;
+  // Реконсиляционный остаток — см. комментарий над PATCH выше.
+  const servicesAndCommissionCny = (Number(quote.searchServiceFeeRub) + Number(quote.buyoutCommissionRub)) / Number(quote.cnyRateUsed);
+  const discountCny = paymentAmountCny - servicesAndCommissionCny - cny;
   const comment = `Просчёт №${quote.displayId} — ${quote.productName}`;
 
   const cashOrder = quote.clientPaymentCashOrderId

@@ -350,8 +350,11 @@ model VolumeTariff {
 // enough to drive the "stuck in progress" warning; nothing here needs a
 // full audit trail yet).
 enum QuoteStatus {
+  new_request // новая заявка
   in_progress // взят в работу
   pending_approval // на согласовании
+  approved_by_client // согласовано клиентом
+  needs_replacement // нужна замена — this specific product won't work, still an active deal (see PB-V5 chat 2026-07-28)
   rejected // отказ
   awaiting_payment // ждём оплату
   need_to_buyout // нужно выкупить — money's in, goods not bought yet
@@ -369,10 +372,17 @@ model Quote {
   managerId String
   manager  Manager @relation(fields: [managerId], references: [id])
 
-  status          QuoteStatus @default(in_progress)
+  status          QuoteStatus @default(new_request)
   // Bumped on every status change (not just createdAt) — lets the UI show
   // "stuck in progress for >24h" without a separate history table.
   statusChangedAt DateTime    @default(now())
+  // Set ONCE, the first time this quote ever reaches pending_approval —
+  // never overwritten by later status changes (even a rollback or a later
+  // needs_replacement/rejected doesn't clear it). Drives the owner's
+  // "готовые просчёты за день/неделю/месяц" count in the dashboard — the
+  // manager did the calculation work the moment this was true, regardless
+  // of what happens to the deal afterward. See PB-V5 chat 2026-07-28.
+  completedAt     DateTime?
 
   quoteType           QuoteType
   // Snapshot of the chosen tier's price at creation time (from

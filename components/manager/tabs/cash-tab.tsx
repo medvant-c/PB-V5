@@ -90,6 +90,7 @@ function ManagerCashTab() {
 
   const [filterCategoryId, setFilterCategoryId] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
+  const [filterClientId, setFilterClientId] = useState<string>("all");
 
   const incomeCategories = categories.filter((c) => c.type === "income");
   const expenseCategories = categories.filter((c) => c.type === "expense");
@@ -112,6 +113,7 @@ function ManagerCashTab() {
       const params = new URLSearchParams({ month });
       if (filterCategoryId !== "all") params.set("categoryId", filterCategoryId);
       if (filterType !== "all") params.set("type", filterType);
+      if (filterClientId !== "all") params.set("clientId", filterClientId);
       const res = await fetch(`/api/manager-cash-orders?${params.toString()}`);
       const data = await res.json();
       if (res.ok) {
@@ -121,7 +123,7 @@ function ManagerCashTab() {
     } finally {
       setLoading(false);
     }
-  }, [month, filterCategoryId, filterType]);
+  }, [month, filterCategoryId, filterType, filterClientId]);
 
   useEffect(() => {
     loadCategories();
@@ -245,7 +247,7 @@ function ManagerCashTab() {
         type: dialogType,
         date: draft.date,
         categoryId: draft.categoryId,
-        clientId: dialogType === "income" && draft.clientId ? draft.clientId : null,
+        clientId: draft.clientId || null,
         currency: draft.currency,
         amount: Number(draft.amount),
         cnyToCurrencyRate: draft.currency === "cny" ? 1 : Number(draft.cnyToCurrencyRate),
@@ -457,6 +459,20 @@ function ManagerCashTab() {
               ))}
             </SelectContent>
           </Select>
+          <Select value={filterClientId} onValueChange={setFilterClientId}>
+            <SelectTrigger className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все клиенты</SelectItem>
+              {clients.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.name}
+                  {c.company ? ` (${c.company})` : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -623,10 +639,12 @@ function ManagerCashTab() {
               )}
             </div>
 
-            {dialogType === "income" && (
+            {dialogType && (
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label>Клиент</Label>
+                  <Label>
+                    Клиент{dialogType === "expense" ? " (например, для выкупа за товар)" : ""}
+                  </Label>
                   {!showNewClientForm && (
                     <button type="button" onClick={() => setShowNewClientForm(true)} className="text-xs text-primary hover:underline">
                       + новый клиент

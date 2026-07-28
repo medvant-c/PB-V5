@@ -200,7 +200,15 @@ interface DraftRequestRecord {
 // референса") deliberately styled in warning/amber, never white/bg-surface
 // like a real Quote card, so it can never be mistaken for a quote actually
 // in progress — see PB-V5 chat 2026-07-28.
-function ClientDraftRequests({ clientId, refreshKey }: { clientId: string; refreshKey: number }) {
+function ClientDraftRequests({
+  clientId,
+  refreshKey,
+  onChange,
+}: {
+  clientId: string;
+  refreshKey: number;
+  onChange: () => void;
+}) {
   const [drafts, setDrafts] = useState<DraftRequestRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState("");
@@ -238,6 +246,7 @@ function ClientDraftRequests({ clientId, refreshKey }: { clientId: string; refre
       }
       setNote("");
       await load();
+      onChange();
     } finally {
       setCreating(false);
     }
@@ -251,7 +260,10 @@ function ClientDraftRequests({ clientId, refreshKey }: { clientId: string; refre
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ done: true }),
       });
-      if (res.ok) await load();
+      if (res.ok) {
+        await load();
+        onChange();
+      }
     } finally {
       setBusyId(null);
     }
@@ -262,7 +274,10 @@ function ClientDraftRequests({ clientId, refreshKey }: { clientId: string; refre
     setBusyId(id);
     try {
       const res = await fetch(`/api/manager-quote-drafts/${id}`, { method: "DELETE" });
-      if (res.ok) await load();
+      if (res.ok) {
+        await load();
+        onChange();
+      }
     } finally {
       setBusyId(null);
     }
@@ -1410,6 +1425,26 @@ function ManagerClientsTab() {
     loadClients();
   }, [loadClients]);
 
+  // Not-done draft count per client — fetched once across all of this
+  // manager's visible clients (not per-client) so the "заявки на поиск: N"
+  // badge is already visible in the COLLAPSED row, before expanding a
+  // client to see ClientDraftRequests itself. See PB-V5 chat 2026-07-28.
+  const [draftCounts, setDraftCounts] = useState<Record<string, number>>({});
+  const loadDraftCounts = useCallback(async () => {
+    const res = await fetch("/api/manager-quote-drafts");
+    const data = await res.json();
+    if (!res.ok) return;
+    const counts: Record<string, number> = {};
+    for (const draft of data.drafts ?? []) {
+      counts[draft.clientId] = (counts[draft.clientId] ?? 0) + 1;
+    }
+    setDraftCounts(counts);
+  }, []);
+
+  useEffect(() => {
+    loadDraftCounts();
+  }, [loadDraftCounts]);
+
   function startEditing(client: ClientRecord) {
     setEditingClientId(client.id);
     setEditError(null);
@@ -1616,6 +1651,11 @@ function ManagerClientsTab() {
                         >
                           {client.selfSourcedClaimed ? "свой клиент" : "клиент компании"}
                         </span>
+                        {draftCounts[client.id] > 0 && (
+                          <span className="flex items-center gap-1 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+                            <AlertTriangle className="h-3 w-3" /> заявки на поиск не обработаны: {draftCounts[client.id]}
+                          </span>
+                        )}
                         {client.archivedAt && <span className="text-xs font-normal text-error">архив</span>}
                       </div>
                       <div className="text-xs text-text-secondary">
@@ -1797,7 +1837,7 @@ function ManagerClientsTab() {
                       </div>
                     )}
 
-                    <ClientDraftRequests clientId={client.id} refreshKey={quotesRefreshKey} />
+                    <ClientDraftRequests clientId={client.id} refreshKey={quotesRefreshKey} onChange={loadDraftCounts} />
 
                     <Label>Документы клиента</Label>
                     <ClientFilesPanel clientId={client.id} />

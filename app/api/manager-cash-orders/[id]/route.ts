@@ -64,7 +64,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   }
 
   let resolvedClientId: string | null = null;
-  if (existing.type === "income" && typeof clientId === "string" && clientId) {
+  if (typeof clientId === "string" && clientId) {
     const client = await prisma.client.findUnique({ where: { id: clientId } });
     if (!client) return Response.json({ error: "Клиент не найден." }, { status: 400 });
     resolvedClientId = clientId;

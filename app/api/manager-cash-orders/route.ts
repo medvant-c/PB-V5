@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
   const [monthStart, monthEnd] = parseMonthRange(req.nextUrl.searchParams.get("month"));
   const categoryIdFilter = req.nextUrl.searchParams.get("categoryId");
   const typeFilter = req.nextUrl.searchParams.get("type");
+  const clientIdFilter = req.nextUrl.searchParams.get("clientId");
 
   const anchor = await prisma.cashOpeningBalance.findFirst({ orderBy: { updatedAt: "desc" } });
   const beforeMonthOrders = await prisma.cashOrder.findMany({
@@ -69,7 +70,10 @@ export async function GET(req: NextRequest) {
   const categoryBreakdown = [...breakdownMap.values()].sort((a, b) => b.totalCny - a.totalCny);
 
   const orders = monthOrders.filter(
-    (o) => (!categoryIdFilter || o.categoryId === categoryIdFilter) && (!typeFilter || o.type === typeFilter),
+    (o) =>
+      (!categoryIdFilter || o.categoryId === categoryIdFilter) &&
+      (!typeFilter || o.type === typeFilter) &&
+      (!clientIdFilter || o.clientId === clientIdFilter),
   );
 
   return Response.json({
@@ -129,10 +133,12 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Укажите курс." }, { status: 400 });
   }
 
-  // clientId only meaningful for income orders — an expense order (Саша /
-  // Влад / менеджер / закупка) is never client-attributed.
+  // clientId is optional either way — most expense orders (Саша / Влад /
+  // менеджер / общие закупки) still have no client, but a "выкуп за товар"
+  // expense order needs one to actually be attributable, so it's allowed on
+  // both types rather than income-only.
   let resolvedClientId: string | null = null;
-  if (type === "income" && typeof clientId === "string" && clientId) {
+  if (typeof clientId === "string" && clientId) {
     const client = await prisma.client.findUnique({ where: { id: clientId } });
     if (!client) return Response.json({ error: "Клиент не найден." }, { status: 400 });
     resolvedClientId = clientId;
