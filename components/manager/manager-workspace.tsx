@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, Calculator, CheckSquare, Database, LogOut, Tag, Users, UsersRound, Wallet } from "lucide-react";
+import { Briefcase, Calculator, CheckSquare, Database, LogOut, Package, Tag, Users, UsersRound, Wallet } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ManagerClientsTab } from "@/components/manager/tabs/clients-tab";
@@ -12,6 +12,7 @@ import { ManagerPriceListTab } from "@/components/manager/tabs/price-list-tab";
 import { ManagerDatabaseTab } from "@/components/manager/tabs/database-tab";
 import { ManagerConfirmationsTab } from "@/components/manager/tabs/confirmations-tab";
 import { ManagerCashTab } from "@/components/manager/tabs/cash-tab";
+import { ManagerFulfillmentTab } from "@/components/manager/tabs/fulfillment-tab";
 import { ManagerDashboard } from "@/components/manager/manager-dashboard";
 
 interface ManagerWorkspaceProps {
@@ -31,6 +32,7 @@ const ROLE_LABEL: Record<ManagerWorkspaceProps["role"], string> = {
 // components/desk/desk-workspace.tsx, filtered by role below.
 const ALL_SECTIONS = [
   { id: "clients", label: "Клиенты", icon: Users, Component: ManagerClientsTab, ownerOnly: false, seniorOrOwnerOnly: false },
+  { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "tariffs", label: "Тарифы", icon: Calculator, Component: ManagerTariffsTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "confirmations", label: "Подтверждения", icon: CheckSquare, Component: ManagerConfirmationsTab, ownerOnly: false, seniorOrOwnerOnly: true },
   { id: "price-list", label: "Прайс-лист", icon: Tag, Component: ManagerPriceListTab, ownerOnly: true, seniorOrOwnerOnly: false },

@@ -157,6 +157,7 @@ model Client {
   orders       Order[]
   quotes       Quote[]
   cashOrders   CashOrder[]
+  fulfillmentOrders FulfillmentOrder[]
 
   @@index([createdByManagerId])
 }
@@ -212,6 +213,7 @@ model Manager {
   uploadedFiles  DeskFile[]
   cashOrders     CashOrder[]
   cashOpeningBalanceUpdates CashOpeningBalance[]
+  fulfillmentOrders FulfillmentOrder[]
 }
 
 // Which tier of the "Поиск товара" service a quote is billed under — the
@@ -551,6 +553,7 @@ model Quote {
   updatedAt DateTime @updatedAt
 
   attachedServices QuoteAttachedService[]
+  fulfillmentOrders FulfillmentOrder[]
 
   @@index([clientId])
   @@index([managerId])
@@ -740,4 +743,55 @@ model CashOpeningBalance {
   updatedByManagerId String
   updatedByManager   Manager  @relation(fields: [updatedByManagerId], references: [id])
   updatedAt          DateTime @updatedAt
+}
+
+// Фулфилмент — warehouse services billed directly to a client (goods
+// inspection/repackaging/labelling), a separate business line from the
+// Quote-based buyout/cargo flow (see PB-V5 chat 2026-07-28). Deliberately
+// simple per the owner's request ("пока этот блок расширенным делать не
+// будем") — no status/workflow, just recording which services were done
+// and the total billed.
+model FulfillmentServiceItem {
+  id         String                   @id @default(cuid())
+  name       String
+  priceRub   Decimal
+  createdAt  DateTime                 @default(now())
+  orderItems FulfillmentOrderItem[]
+}
+
+model FulfillmentOrder {
+  id        String   @id @default(cuid())
+  displayId Int      @unique
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id])
+  // Optional — a client can come in for fulfillment only, with no Quote at
+  // all (goods bought elsewhere, just landed on our warehouse).
+  quoteId   String?
+  quote     Quote?   @relation(fields: [quoteId], references: [id])
+  managerId String
+  manager   Manager  @relation(fields: [managerId], references: [id])
+  // Sum of items' priceRub × quantity — snapshotted at creation, not
+  // recomputed from items later.
+  totalRub  Decimal
+  createdAt DateTime @default(now())
+  items     FulfillmentOrderItem[]
+
+  @@index([clientId])
+  @@index([managerId])
+}
+
+// Snapshotted (name/priceRub), not a live reference — same reasoning as
+// QuoteAttachedService — so a later price change or deleted service never
+// alters an already-billed order.
+model FulfillmentOrderItem {
+  id            String                  @id @default(cuid())
+  orderId       String
+  order         FulfillmentOrder        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  serviceItemId String?
+  serviceItem   FulfillmentServiceItem? @relation(fields: [serviceItemId], references: [id], onDelete: SetNull)
+  name          String
+  priceRub      Decimal
+  quantity      Int
+
+  @@index([orderId])
 }

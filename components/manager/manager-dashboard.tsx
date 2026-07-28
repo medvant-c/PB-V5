@@ -39,6 +39,10 @@ interface StatSummary {
   factualCargoProfitRub: number;
   potentialCargoBonusRub: number;
   factualCargoBonusRub: number;
+  // Фулфилмент — flat 10% of billed amount, no potential/factual split
+  // (recognized the moment the order is saved) — see PB-V5 chat
+  // 2026-07-28.
+  factualFulfillmentPremiumRub: number;
   estimatedPremiumRub: number;
   factualPremiumRub: number;
   conversionPercent: number;
@@ -275,8 +279,12 @@ function StatCardsRow({
             <BreakdownRow label="Факт — просчёт" value={`${fmt(Math.max(0, stats.factualProscetRub))} ₽ прибыли`} />
             <BreakdownRow label="Факт — выкуп" value={`${fmt(Math.max(0, stats.factualBuyoutRub))} ₽ прибыли`} />
             <BreakdownRow label="Факт — скидка поставщика" value={`${fmt(Math.max(0, stats.factualDiscountRub))} ₽ прибыли`} />
-            <BreakdownRow label="Факт — премия" value={`${fmt(stats.factualPremiumRub - stats.factualCargoBonusRub)} ₽`} />
+            <BreakdownRow
+              label="Факт — премия"
+              value={`${fmt(stats.factualPremiumRub - stats.factualCargoBonusRub - stats.factualFulfillmentPremiumRub)} ₽`}
+            />
             <BreakdownRow label="Факт — бонус за карго" value={`${fmt(stats.factualCargoBonusRub)} ₽`} />
+            <BreakdownRow label="Факт — фулфилмент" value={`${fmt(stats.factualFulfillmentPremiumRub)} ₽`} />
             <BreakdownRow label="Итого фактическая премия" value={`${fmt(stats.factualPremiumRub)} ₽`} isTotal />
             <div className="pt-2 text-[11px] text-white/60">Ниже — то, что ещё не подтверждено (потенциал):</div>
             <BreakdownRow label="Потенциал — премия за услуги" value={`${fmt(stats.estimatedPremiumRub - stats.potentialCargoBonusRub)} ₽`} />
@@ -507,6 +515,11 @@ function ManagerDashboard() {
             <span className="font-semibold text-text">Карго</span> — для лида компании фиксированная ставка $/кг или
             $/м³ (задаётся во вкладке «Тарифы»), для личного клиента — как раньше, 10% от суммы, которую клиент
             платит за карго. Начисляется автоматически при статусе «Выдан клиенту».
+          </p>
+          <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
+            <span className="font-semibold text-text">Фулфилмент</span> — 10% от суммы, выставленной клиенту за
+            складские услуги (вкладка «Фулфилмент»), независимо от того, личный клиент или нет. Начисляется сразу
+            при сохранении заказа.
           </p>
         </div>
 

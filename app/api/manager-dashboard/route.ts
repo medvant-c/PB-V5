@@ -41,6 +41,9 @@ const SELF_SOURCED_CARGO_BONUS_RATE_PERCENT = 10;
 // confirmed deal, regardless of lead source — computed once, company-wide,
 // not per-manager.
 const VLAD_SHARE_RATE_PERCENT = 10;
+// Фулфилмент — flat 10% of what was billed to the client, not tied to
+// self-sourced status (unlike Просчёт/Скидка above).
+const FULFILLMENT_PREMIUM_RATE_PERCENT = 10;
 
 interface QuoteForStats {
   managerId: string;
@@ -326,12 +329,34 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  const overall = summarize(quotes, cargoRates);
+  // Фулфилмент — a separate business line from Quote entirely (see PB-V5
+  // chat 2026-07-28), recognized immediately (no potential/factual split —
+  // it's a completed transaction the moment the order is saved, not a
+  // pending estimate). Manager gets a flat 10% of what was billed.
+  const fulfillmentOrders = await prisma.fulfillmentOrder.findMany({
+    where: visibleManagerIds === "all" ? undefined : { managerId: { in: visibleManagerIds } },
+    select: { managerId: true, totalRub: true },
+  });
+  const fulfillmentRubByManager = new Map<string, number>();
+  let fulfillmentTotalRub = 0;
+  for (const o of fulfillmentOrders) {
+    const rub = Number(o.totalRub);
+    fulfillmentTotalRub += rub;
+    fulfillmentRubByManager.set(o.managerId, (fulfillmentRubByManager.get(o.managerId) ?? 0) + rub);
+  }
+  function withFulfillmentPremium<T extends { factualPremiumRub: number }>(row: T, managerId: string | "all"): T & { factualFulfillmentPremiumRub: number } {
+    const rub = managerId === "all" ? fulfillmentTotalRub : (fulfillmentRubByManager.get(managerId) ?? 0);
+    const premium = rub * (FULFILLMENT_PREMIUM_RATE_PERCENT / 100);
+    return { ...row, factualFulfillmentPremiumRub: premium, factualPremiumRub: row.factualPremiumRub + premium };
+  }
+
+  const overall = withFulfillmentPremium(summarize(quotes, cargoRates), "all");
 
   // Per-manager breakdown — meaningful for owner (sees everyone) and senior
   // (sees their team); a plain manager only ever sees themself here, so
   // it's omitted for them (the overall numbers above already are theirs).
-  let perManager: (ReturnType<typeof summarize> & { managerId: string; managerName: string })[] | null = null;
+  let perManager: (ReturnType<typeof withFulfillmentPremium<ReturnType<typeof summarize>>> & { managerId: string; managerName: string })[] | null =
+    null;
   if (session.role === "owner" || session.role === "senior") {
     // Every manager in scope, including ones with zero quotes so far —
     // that's exactly what a "who isn't pulling their weight" view needs to
@@ -349,7 +374,7 @@ export async function GET(req: NextRequest) {
     perManager = managers.map((m) => ({
       managerId: m.id,
       managerName: m.name,
-      ...summarize(byManager.get(m.id) ?? [], cargoRates),
+      ...withFulfillmentPremium(summarize(byManager.get(m.id) ?? [], cargoRates), m.id),
     }));
   }
 
@@ -408,15 +433,18 @@ export async function GET(req: NextRequest) {
     searchFeeRub = overall.pipelineSearchFeeRub;
     buyoutCommissionRub = overall.pipelineBuyoutCommissionRub;
 
-    const totalConfirmedProfitRub = quotes
+    const totalConfirmedQuoteProfitRub = quotes
       .filter((q) => q.buyoutFactConfirmed)
       .reduce((sum, q) => {
         const { proscetRub, buyoutRub, discountRub } = factualSourceProfits(q);
         const perQuoteTotal = proscetRub + buyoutRub + discountRub + fxProfitRub(q) + cargoProfitRub(q);
         return sum + Math.max(0, perQuoteTotal);
       }, 0);
-    vladShareRub = totalConfirmedProfitRub * (VLAD_SHARE_RATE_PERCENT / 100);
-    founderShareRub = (totalConfirmedProfitRub - vladShareRub - totalManagerFactualPremiumsRub) / 2;
+    // Фулфилмент has no tracked cost — its full billed amount counts as
+    // profit for this pool, same treatment as Просчёт.
+    const totalProfitPoolRub = totalConfirmedQuoteProfitRub + fulfillmentTotalRub;
+    vladShareRub = totalProfitPoolRub * (VLAD_SHARE_RATE_PERCENT / 100);
+    founderShareRub = (totalProfitPoolRub - vladShareRub - totalManagerFactualPremiumsRub) / 2;
   }
 
   // Owner-confidential cargo-margin signal — never leaves the server for
