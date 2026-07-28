@@ -72,6 +72,13 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     cargoBonusRatePercent = isSelfSourced ? 10 : 0;
   }
 
+  // The client-payment CashOrder was created BECAUSE of this confirmation
+  // — reverting the confirmation removes it too, rather than leaving an
+  // orphaned cash-ledger entry with no backing quote confirmation.
+  if (revertingPastBuyout && existing.clientPaymentCashOrderId) {
+    await prisma.cashOrder.delete({ where: { id: existing.clientPaymentCashOrderId } });
+  }
+
   const quote = await prisma.quote.update({
     where: { id },
     data: {
@@ -85,6 +92,9 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
             buyoutConfirmedByManagerId: null,
             buyoutConfirmedAt: null,
             buyoutPremiumRatePercent: null,
+            actualClientPaymentRub: null,
+            actualClientPaymentRateUsed: null,
+            clientPaymentCashOrderId: null,
           }
         : {}),
       ...(revertingPastCargoActualization

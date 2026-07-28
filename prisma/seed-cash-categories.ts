@@ -22,14 +22,19 @@ const INCOME_CATEGORIES = [
 
 const EXPENSE_CATEGORIES = ["Выплата Саше", "Выплата Владу", "Выплата менеджеру", "Закупка товара"];
 
+// The first income category is the auto-target for confirm-buyout's
+// client-payment entries (see CashCategory.isBuyoutIncomeDefault in the
+// schema) — flagged here so a fresh install already has the link wired up
+// without a separate manual step.
 async function seed(type: "income" | "expense", names: string[]) {
-  for (const name of names) {
+  for (const [index, name] of names.entries()) {
     const existing = await prisma.cashCategory.findUnique({ where: { type_name: { type, name } } });
     if (existing) {
       console.log(`Skipping "${name}" (${type}) — already exists.`);
       continue;
     }
-    await prisma.cashCategory.create({ data: { type, name } });
+    const isBuyoutIncomeDefault = type === "income" && index === 0;
+    await prisma.cashCategory.create({ data: { type, name, isBuyoutIncomeDefault } });
     console.log(`Created "${name}" (${type}).`);
   }
 }

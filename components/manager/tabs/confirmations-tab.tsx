@@ -11,6 +11,7 @@ interface PendingBuyout {
   status: string;
   statusChangedAt: string;
   totalPriceCny: string;
+  totalRub: string;
   manager: { id: string; name: string };
   client: { name: string; company: string | null };
 }
@@ -40,7 +41,7 @@ function ManagerConfirmationsTab() {
   const [pendingClients, setPendingClients] = useState<PendingClient[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [drafts, setDrafts] = useState<Record<string, { cny: string; rate: string }>>({});
+  const [drafts, setDrafts] = useState<Record<string, { cny: string; rate: string; rub: string; rateRub: string }>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,17 +61,25 @@ function ManagerConfirmationsTab() {
   }, []);
 
   async function handleConfirmBuyout(quoteId: string) {
-    const draft = drafts[quoteId] ?? { cny: "", rate: "" };
+    const draft = drafts[quoteId] ?? { cny: "", rate: "", rub: "", rateRub: "" };
     const cny = Number(draft.cny);
     const rate = Number(draft.rate);
+    const rub = Number(draft.rub);
+    const rateRub = Number(draft.rateRub);
     if (!Number.isFinite(cny) || cny <= 0 || !Number.isFinite(rate) || rate <= 0) return;
+    if (!Number.isFinite(rub) || rub <= 0 || !Number.isFinite(rateRub) || rateRub <= 0) return;
     setBusyId(quoteId);
     setError(null);
     try {
       const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-buyout`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actualBuyoutCny: cny, actualBuyoutRateUsed: rate }),
+        body: JSON.stringify({
+          actualBuyoutCny: cny,
+          actualBuyoutRateUsed: rate,
+          actualClientPaymentRub: rub,
+          actualClientPaymentRateUsed: rateRub,
+        }),
       });
       if (res.ok) {
         await load();
@@ -124,9 +133,12 @@ function ManagerConfirmationsTab() {
               <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
                 <Wallet className="h-3.5 w-3.5" /> Факт по выкупу ({pendingBuyouts.length})
               </h3>
+              <p className="mt-1 text-xs text-text-secondary">
+                Поступление от клиента автоматически добавится приходным ордером в «Отчёты по дням».
+              </p>
               <ul className="mt-2 space-y-2">
                 {pendingBuyouts.map((quote) => {
-                  const draft = drafts[quote.id] ?? { cny: "", rate: "" };
+                  const draft = drafts[quote.id] ?? { cny: "", rate: "", rub: "", rateRub: "" };
                   const days = daysWaiting(quote.statusChangedAt);
                   return (
                     <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
@@ -144,24 +156,48 @@ function ManagerConfirmationsTab() {
                           ждёт {days} {days === 1 ? "день" : "дн."}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-text-secondary">По плану: {quote.totalPriceCny}¥</p>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="¥ потрачено"
-                          value={draft.cny}
-                          onChange={(e) => setDrafts((current) => ({ ...current, [quote.id]: { ...draft, cny: e.target.value } }))}
-                          className="w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="курс ¥→₽"
-                          value={draft.rate}
-                          onChange={(e) => setDrafts((current) => ({ ...current, [quote.id]: { ...draft, rate: e.target.value } }))}
-                          className="w-28 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
+                      <p className="mt-1 text-xs text-text-secondary">
+                        По плану: {quote.totalPriceCny}¥ · {Number(quote.totalRub).toLocaleString("ru-RU")}₽
+                      </p>
+                      <div className="mt-2 space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="w-44 shrink-0 text-xs text-text-secondary">Потрачено на выкуп:</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="¥ потрачено"
+                            value={draft.cny}
+                            onChange={(e) => setDrafts((current) => ({ ...current, [quote.id]: { ...draft, cny: e.target.value } }))}
+                            className="w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="курс ¥→₽"
+                            value={draft.rate}
+                            onChange={(e) => setDrafts((current) => ({ ...current, [quote.id]: { ...draft, rate: e.target.value } }))}
+                            className="w-28 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="w-44 shrink-0 text-xs text-text-secondary">Поступило от клиента:</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="₽ получено"
+                            value={draft.rub}
+                            onChange={(e) => setDrafts((current) => ({ ...current, [quote.id]: { ...draft, rub: e.target.value } }))}
+                            className="w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="1¥ = ?₽"
+                            value={draft.rateRub}
+                            onChange={(e) => setDrafts((current) => ({ ...current, [quote.id]: { ...draft, rateRub: e.target.value } }))}
+                            className="w-28 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
                         <button
                           type="button"
                           onClick={() => handleConfirmBuyout(quote.id)}

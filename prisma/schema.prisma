@@ -461,6 +461,19 @@ model Quote {
   // reassignment via /api/manager-quotes/[id]/reassign.
   buyoutPremiumRatePercent Decimal?
 
+  // Real payment actually RECEIVED from the client for buyout+services —
+  // the mirror of actualBuyoutCny above (that one is the real COST of
+  // buying from the factory; this is the real INCOME side). Entered in RUB
+  // with its own "1¥=X₽" rate (same convention as CashOrder.cnyToCurrencyRate)
+  // so confirming it can create/update a linked income CashOrder in the
+  // owner's cash ledger automatically — see confirm-buyout route — instead
+  // of the manager having to separately re-enter the same payment by hand
+  // in Отчёты по дням.
+  actualClientPaymentRub       Decimal?
+  actualClientPaymentRateUsed  Decimal?
+  clientPaymentCashOrderId     String?    @unique
+  clientPaymentCashOrder       CashOrder? @relation(fields: [clientPaymentCashOrderId], references: [id], onDelete: SetNull)
+
   // Real cargo weight/volume from the warehouse's shipping note, entered
   // (by anyone — no self-report/conflict-of-interest risk here, the price
   // comes from the frozen cargoRateUsd, not something typed in) before the
@@ -624,6 +637,11 @@ model CashCategory {
   id        String        @id @default(cuid())
   type      CashOrderType
   name      String
+  // Set on exactly one income category — the target for entries
+  // auto-created by confirm-buyout (see Quote.clientPaymentCashOrderId).
+  // Tracked by id (this flag), not by name, so the owner can freely rename
+  // this статья without breaking the link.
+  isBuyoutIncomeDefault Boolean @default(false)
   createdAt DateTime      @default(now())
   orders    CashOrder[]
 
@@ -665,6 +683,10 @@ model CashOrder {
   createdByManager   Manager @relation(fields: [createdByManagerId], references: [id])
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
+
+  // Back-relation for Quote.clientPaymentCashOrder — a quote's confirmed
+  // client-payment fact auto-creates/updates exactly one CashOrder.
+  linkedQuote Quote?
 
   @@index([date])
   @@index([categoryId])

@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
         status: true,
         statusChangedAt: true,
         totalPriceCny: true,
+        totalRub: true,
         manager: { select: { id: true, name: true } },
         client: { select: { name: true, company: true } },
       },
