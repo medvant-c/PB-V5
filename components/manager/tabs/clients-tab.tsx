@@ -1487,7 +1487,7 @@ function ManagerClientsTab() {
                       )
                     )}
                     {client.selfSourcedConfirmed ? (
-                      <p className="text-xs font-medium text-success">✓ Личный клиент менеджера — премия 35% с даты подтверждения</p>
+                      <p className="text-xs font-medium text-success">✓ Личный клиент менеджера — повышенная премия с даты подтверждения</p>
                     ) : client.selfSourcedClaimed ? (
                       <p className="flex flex-wrap items-center gap-2 text-xs text-warning">
                         Заявлен как личный, ждёт подтверждения
@@ -1511,7 +1511,7 @@ function ManagerClientsTab() {
                         className="text-xs font-medium text-text-secondary underline decoration-dotted underline-offset-2 transition-colors hover:text-primary disabled:opacity-50"
                       >
                         {selfSourcedBusyId === client.id && <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />}
-                        Заявить как личного клиента (премия 35%)
+                        Заявить как личного клиента (повышенная премия)
                       </button>
                     )}
                     {selfSourcedError && <p className="text-xs text-error">{selfSourcedError}</p>}

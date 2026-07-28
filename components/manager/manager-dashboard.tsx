@@ -49,8 +49,8 @@ interface StatSummary {
 }
 
 // Purely informational now — conversion no longer decides the premium rate
-// (flat 10%, or 35% for a confirmed self-sourced client; see
-// app/api/manager-dashboard/route.ts) — kept only as a "is this a healthy
+// (see the per-source rates in app/api/manager-dashboard/route.ts) — kept
+// only as a "is this a healthy
 // close rate" color threshold for the ring below.
 const CONVERSION_HEALTHY_THRESHOLD_PERCENT = 60;
 
@@ -262,8 +262,8 @@ function StatCardsRow({
         tooltip={
           <p>
             Общая конверсия по всем сотрудникам вместе: выкупленные просчёты ÷ просчёты без учёта отказов. Не среднее
-            арифметическое процентов по сотрудникам — просчёты считаются все вместе, в одном пуле. Ставка премии
-            теперь не зависит от неё — 10% от прибыли всегда, 35% для подтверждённых личных клиентов.
+            арифметическое процентов по сотрудникам — просчёты считаются все вместе, в одном пуле. Ставка премии от
+            неё не зависит — подробнее в блоке «Как считается премия» ниже.
           </p>
         }
         trailing={<ConversionRing percent={stats.conversionPercent} size={48} />}
