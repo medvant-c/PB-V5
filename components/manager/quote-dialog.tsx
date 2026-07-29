@@ -465,24 +465,28 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   }, [catalog]);
 
   async function handleSubmit(shouldExport: boolean) {
-    if (submitting || !productName.trim()) return;
+    if (submitting || !productDescription.trim()) return;
     setSubmitting(true);
     setError(null);
     try {
       const formData = new FormData();
       formData.append("clientId", client.id);
       formData.append("quoteType", quoteType);
-      formData.append("productName", productName.trim());
+      if (productName.trim()) formData.append("productName", productName.trim());
       if (productLink.trim()) formData.append("productLink", productLink.trim());
       if (productDescription.trim()) formData.append("productDescription", productDescription.trim());
       if (color.trim()) formData.append("color", color.trim());
       if (dimensions.trim()) formData.append("dimensions", dimensions.trim());
 
-      // Draft path — only the product name was filled in (manager hasn't
+      // Draft path — only the description was filled in (manager hasn't
       // received supplier numbers yet). Fall back to safe placeholder
       // values that pass server validation and compute to a ~0 total,
       // rather than blocking quote creation entirely; the manager fills in
-      // the real numbers later via "Редактировать".
+      // the real numbers later via "Редактировать". cargoCategoryKey must
+      // still be a real category — computeQuote hard-requires one even for
+      // this placeholder total, so this reuses whatever category is
+      // currently selected (or the first available "по объёму" one if
+      // nothing was picked yet) instead of leaving it empty.
       if (!preview) {
         formData.append("quantity", quantity.trim() || "1");
         formData.append("priceCnyPerUnit", priceCnyPerUnit.trim() || "0");
@@ -491,6 +495,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         formData.append("volumeInputMode", "manual_total");
         formData.append("manualTotalVolumeM3", manualTotalVolumeM3.trim() || "0.01");
         formData.append("deliveryPricingMode", "volume");
+        const draftCargoCategoryKey = cargoCategoryKey || volumeCategories[0]?.[0] || "";
+        if (draftCargoCategoryKey) formData.append("cargoCategoryKey", draftCargoCategoryKey);
       } else {
         formData.append("quantity", quantity);
         formData.append("priceCnyPerUnit", priceCnyPerUnit);
@@ -645,8 +651,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="product-name">Название товара</Label>
-                <Input id="product-name" value={productName} onChange={(e) => setProductName(e.target.value)} required />
+                <Label htmlFor="product-name">Название товара (необязательно)</Label>
+                <Input id="product-name" value={productName} onChange={(e) => setProductName(e.target.value)} />
               </div>
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="product-link">Ссылка на товар (не показывается клиенту)</Label>
@@ -654,7 +660,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               </div>
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="product-description">Описание товара</Label>
-                <Textarea id="product-description" value={productDescription} onChange={(e) => setProductDescription(e.target.value)} />
+                <Textarea id="product-description" value={productDescription} onChange={(e) => setProductDescription(e.target.value)} required />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="product-color">Цвет</Label>
@@ -891,7 +897,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                 type="button"
                 variant="outline"
                 onClick={() => handleSubmit(false)}
-                disabled={submitting || !productName.trim()}
+                disabled={submitting || !productDescription.trim()}
                 className="flex-1"
               >
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Сохранить и закрыть"}
@@ -899,7 +905,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               <Button
                 type="button"
                 onClick={() => handleSubmit(true)}
-                disabled={submitting || !productName.trim()}
+                disabled={submitting || !productDescription.trim()}
                 className="flex-1"
               >
                 {submitting ? (

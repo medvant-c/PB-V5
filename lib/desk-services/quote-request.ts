@@ -68,7 +68,13 @@ interface ParsedQuoteFields {
 function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } | { error: string } {
   const clientId = requiredString(formData.get("clientId"));
   const quoteType = requiredString(formData.get("quoteType"));
-  const productName = requiredString(formData.get("productName"));
+  const productDescription = requiredString(formData.get("productDescription"));
+  // Description is the only truly required field now — a draft quote
+  // ("менеджер получил только описание от клиента, без названия и цифр от
+  // поставщика") must be saveable with nothing else filled in. productName
+  // falls back to a truncated productDescription instead of blocking
+  // creation. See PB-V5 chat 2026-07-29.
+  const productName = requiredString(formData.get("productName")) ?? productDescription?.slice(0, 60) ?? null;
   const quantity = requiredNumber(formData.get("quantity"));
   const priceCnyPerUnit = requiredNumber(formData.get("priceCnyPerUnit"));
   const weightPerUnitKg = requiredNumber(formData.get("weightPerUnitKg"));
@@ -79,7 +85,11 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
   if (quoteType !== "standard" && quoteType !== "expert" && quoteType !== "pro") {
     return { error: "Выберите тип просчёта." };
   }
-  if (!productName) return { error: "Укажите название товара." };
+  if (!productDescription) return { error: "Укажите описание товара." };
+  // Unreachable in practice (productName always derives from
+  // productDescription above once that check passes) — kept only so
+  // TypeScript narrows productName to `string` below.
+  if (!productName) return { error: "Укажите описание товара." };
   if (quantity === null || quantity <= 0) return { error: "Укажите количество." };
   if (priceCnyPerUnit === null || priceCnyPerUnit < 0) {
     return { error: "Укажите цену за единицу в юанях." };
@@ -100,7 +110,7 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
       quoteType,
       productName,
       productLink: requiredString(formData.get("productLink")),
-      productDescription: requiredString(formData.get("productDescription")),
+      productDescription,
       color: requiredString(formData.get("color")),
       dimensions: requiredString(formData.get("dimensions")),
       quantity,
