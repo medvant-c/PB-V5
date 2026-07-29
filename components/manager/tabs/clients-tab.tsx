@@ -61,6 +61,12 @@ import {
 } from "@/lib/quote-statuses";
 import { cn } from "@/lib/utils";
 
+const BULK_QUOTE_TYPES = [
+  { value: "standard", label: "Standart" },
+  { value: "expert", label: "Expert" },
+  { value: "pro", label: "Pro" },
+] as const;
+
 const SOURCE_LABELS: Record<string, string> = {
   instagram: "Instagram",
   telegram: "Telegram",
@@ -418,8 +424,13 @@ function ClientQuotes({
   const [cargoModalBusy, setCargoModalBusy] = useState(false);
   const [cargoModalError, setCargoModalError] = useState<string | null>(null);
   const [recalculatingId, setRecalculatingId] = useState<string | null>(null);
-  const [bulkBusy, setBulkBusy] = useState<"recalculate" | "duplicate" | "status" | null>(null);
+  const [bulkBusy, setBulkBusy] = useState<"recalculate" | "duplicate" | "status" | "quoteType" | "reassign" | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
+  // Filters the visible list only — "Выбрать все" and every bulk action
+  // below operate on whatever's currently visible, not the client's full
+  // quote history, matching what the manager is actually looking at.
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const filteredQuotes = statusFilter === "all" ? quotes : quotes.filter((q) => q.status === statusFilter);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -524,7 +535,7 @@ function ClientQuotes({
   }
 
   function toggleSelectAll() {
-    setSelectedIds((current) => (current.length === quotes.length ? [] : quotes.map((q) => q.id)));
+    setSelectedIds((current) => (current.length === filteredQuotes.length ? [] : filteredQuotes.map((q) => q.id)));
   }
 
   async function handleRecalculate(quoteId: string) {
@@ -589,6 +600,53 @@ function ClientQuotes({
       );
       if (results.some((r) => !r.ok)) setBulkError("Часть статусов не удалось изменить.");
       await load();
+    } catch {
+      setBulkError("Не удалось связаться с сервером.");
+    } finally {
+      setBulkBusy(null);
+    }
+  }
+
+  async function handleBulkQuoteType(quoteType: string) {
+    if (selectedIds.length === 0 || bulkBusy) return;
+    setBulkBusy("quoteType");
+    setBulkError(null);
+    try {
+      const results = await Promise.all(
+        selectedIds.map((id) =>
+          fetch(`/api/manager-quotes/${id}/quote-type`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ quoteType }),
+          }),
+        ),
+      );
+      if (results.some((r) => !r.ok)) setBulkError("Часть просчётов не удалось изменить.");
+      await load();
+    } catch {
+      setBulkError("Не удалось связаться с сервером.");
+    } finally {
+      setBulkBusy(null);
+    }
+  }
+
+  async function handleBulkReassign(managerId: string) {
+    if (selectedIds.length === 0 || bulkBusy) return;
+    setBulkBusy("reassign");
+    setBulkError(null);
+    try {
+      const results = await Promise.all(
+        selectedIds.map((id) =>
+          fetch(`/api/manager-quotes/${id}/reassign`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ managerId }),
+          }),
+        ),
+      );
+      if (results.some((r) => !r.ok)) setBulkError("Часть просчётов не удалось передать.");
+      await load();
+      onChanged();
     } catch {
       setBulkError("Не удалось связаться с сервером.");
     } finally {
@@ -776,10 +834,24 @@ function ClientQuotes({
     <TooltipProvider>
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
+        <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setSelectedIds([]); }}>
+          <SelectTrigger className="h-8 w-44 text-xs">
+            <SelectValue placeholder="Фильтр по статусу" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Все статусы</SelectItem>
+            {QUOTE_STATUSES.map((status) => (
+              <SelectItem key={status} value={status}>
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: QUOTE_STATUS_DOT_COLOR[status] }} />
+                {QUOTE_STATUS_LABEL[status]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <label className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary">
           <input
             type="checkbox"
-            checked={selectedIds.length > 0 && selectedIds.length === quotes.length}
+            checked={selectedIds.length > 0 && selectedIds.length === filteredQuotes.length}
             onChange={toggleSelectAll}
             aria-label="Выбрать все просчёты"
           />
@@ -871,13 +943,52 @@ function ClientQuotes({
             ))}
           </SelectContent>
         </Select>
+
+        <Select value="" onValueChange={handleBulkQuoteType} disabled={selectedIds.length === 0 || bulkBusy !== null}>
+          <SelectTrigger className="h-8 w-52 text-xs">
+            {bulkBusy === "quoteType" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <SelectValue placeholder={`Присвоить тип поиска${selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}`} />
+            )}
+          </SelectTrigger>
+          <SelectContent>
+            {BULK_QUOTE_TYPES.map((t) => (
+              <SelectItem key={t.value} value={t.value}>
+                {t.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {allManagers && (
+          <Select value="" onValueChange={handleBulkReassign} disabled={selectedIds.length === 0 || bulkBusy !== null}>
+            <SelectTrigger className="h-8 w-52 text-xs">
+              {bulkBusy === "reassign" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <SelectValue placeholder={`Передать менеджеру${selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}`} />
+              )}
+            </SelectTrigger>
+            <SelectContent>
+              {allManagers.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
       {bulkError && <p className="text-xs text-error">{bulkError}</p>}
       {exportError && <p className="text-xs text-error">{exportError}</p>}
       {pdfBundleError && <p className="text-xs text-error">{pdfBundleError}</p>}
       {invoiceError && <p className="text-xs text-error">{invoiceError}</p>}
+      {filteredQuotes.length === 0 ? (
+        <p className="text-xs text-text-secondary">Нет просчётов с этим статусом.</p>
+      ) : (
       <ul className="space-y-1.5">
-        {quotes.map((quote) => (
+        {filteredQuotes.map((quote) => (
           <li key={quote.id} className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
             <div className="flex items-center gap-3">
               <input
@@ -1106,6 +1217,7 @@ function ClientQuotes({
                 onClick={() => onEdit(quote.id)}
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary"
                 aria-label="Редактировать просчёт"
+                title="Редактировать просчёт"
               >
                 <Pencil className="h-4 w-4" />
               </button>
@@ -1131,6 +1243,7 @@ function ClientQuotes({
                     type="button"
                     className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-error/10 hover:text-error"
                     aria-label="Удалить просчёт"
+                    title="Удалить просчёт"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -1271,6 +1384,7 @@ function ClientQuotes({
           </li>
         ))}
       </ul>
+      )}
 
       <Dialog open={cargoModalQuoteId !== null} onOpenChange={(open) => !open && setCargoModalQuoteId(null)}>
         <DialogContent>

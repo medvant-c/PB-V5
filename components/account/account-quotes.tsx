@@ -1,17 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
+  CheckCircle2,
   ChevronDown,
   Download,
   FileSpreadsheet,
   FileStack,
   FileText,
   ImageOff,
+  Info,
   Loader2,
   MessageSquare,
   PackageSearch,
+  Search,
 } from "lucide-react";
 import { QUOTE_STATUS_BADGE_CLASSES, QUOTE_STATUS_LABEL, type QuoteStatus } from "@/lib/quote-statuses";
 import { CLIENT_STATUS_EXPLANATION } from "@/lib/client-status-copy";
@@ -71,6 +75,22 @@ function formatDate(value: string): string {
   return new Date(value).toLocaleDateString("ru-RU");
 }
 
+// Small "hover for a one-line explanation" affordance — used wherever a
+// cost-breakdown label isn't self-explanatory to a client (see PB-V5 chat
+// 2026-07-29: "везде должны быть подсказки, где бы он ни навёл курсор").
+function InfoHint({ children }: { children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Info className="h-3.5 w-3.5 shrink-0 cursor-help text-text-secondary/70" />
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-56">
+        {children}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 async function downloadBlob(res: Response, fallbackName: string) {
   const disposition = res.headers.get("content-disposition") ?? "";
   const fileNameMatch = disposition.match(/filename\*=UTF-8''([^;]+)/);
@@ -86,9 +106,29 @@ async function downloadBlob(res: Response, fallbackName: string) {
 }
 
 function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
+  const router = useRouter();
   const [expandedId, setExpandedId] = useState<string | null>(quotes[0]?.id ?? null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [busy, setBusy] = useState<"pdf" | "excel" | "all" | string | null>(null);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+
+  async function handleApprove(quoteId: string) {
+    setApprovingId(quoteId);
+    try {
+      const res = await fetch(`/api/account-quotes/${quoteId}/approve`, { method: "PATCH" });
+      if (!res.ok) {
+        const data = await res.json();
+        toast.error(data.error ?? "Не удалось согласовать просчёт.");
+        return;
+      }
+      toast.success("Просчёт согласован! Менеджер свяжется с вами по оплате.");
+      router.refresh();
+    } catch {
+      toast.error("Не удалось связаться с сервером.");
+    } finally {
+      setApprovingId(null);
+    }
+  }
 
   const [clientComments, setClientComments] = useState<Record<string, string>>(() =>
     Object.fromEntries(quotes.map((q) => [q.id, q.clientComment])),
@@ -325,6 +365,24 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
 
               {isOpen && (
                 <div className="space-y-4 border-t border-border p-4">
+                  {quote.status === "new_request" && (
+                    <div className="flex items-center gap-2 rounded-xl border border-success/30 bg-success/10 px-4 py-3 text-sm font-medium text-success">
+                      <Search className="h-4 w-4 shrink-0" />К поиску не приступили, но уже совсем скоро начнём :)
+                    </div>
+                  )}
+
+                  {quote.status === "pending_approval" && (
+                    <button
+                      type="button"
+                      onClick={() => handleApprove(quote.id)}
+                      disabled={approvingId === quote.id}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl bg-success p-4 text-base font-bold text-white shadow-lg shadow-success/25 transition-transform hover:scale-[1.01] disabled:opacity-60"
+                    >
+                      {approvingId === quote.id ? <Loader2 className="h-5 w-5 animate-spin" /> : <CheckCircle2 className="h-5 w-5" />}
+                      Согласовать просчёт
+                    </button>
+                  )}
+
                   {quote.photoIds.length > 1 && (
                     <div className="flex flex-wrap gap-2">
                       {quote.photoIds.map((photoId) => (
@@ -371,19 +429,26 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
                     </div>
                     <div className="divide-y divide-border">
                       <div className="flex items-center justify-between px-3 py-2 text-sm">
-                        <span className="text-text-secondary">
+                        <span className="flex items-center gap-1.5 text-text-secondary">
                           Товар ({quote.priceCnyPerUnit}¥ × {quote.quantity})
+                          <InfoHint>Стоимость самого товара у поставщика, по курсу на дату расчёта.</InfoHint>
                         </span>
                         <span className="font-semibold text-text">
                           {fmt(quote.totalPriceCny)}¥ / {fmt(quote.totalPriceRub)}₽
                         </span>
                       </div>
                       <div className="flex items-center justify-between px-3 py-2 text-sm">
-                        <span className="text-text-secondary">Доставка по Китаю</span>
+                        <span className="flex items-center gap-1.5 text-text-secondary">
+                          Доставка по Китаю
+                          <InfoHint>Доставка от поставщика до нашего склада в Китае.</InfoHint>
+                        </span>
                         <span className="font-semibold text-text">{fmt(quote.chinaDeliveryRub)}₽</span>
                       </div>
                       <div className="flex items-center justify-between px-3 py-2 text-sm">
-                        <span className="text-text-secondary">Услуга поиска товара ({QUOTE_TYPE_LABEL[quote.quoteType] ?? quote.quoteType})</span>
+                        <span className="flex items-center gap-1.5 text-text-secondary">
+                          Услуга поиска товара ({QUOTE_TYPE_LABEL[quote.quoteType] ?? quote.quoteType})
+                          <InfoHint>Оплата за подбор поставщика и расчёт стоимости — по тарифу выбранного уровня.</InfoHint>
+                        </span>
                         {quote.searchFeeWaived ? (
                           <span className="font-semibold text-success">БЕСПЛАТНО</span>
                         ) : (
@@ -391,13 +456,17 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
                         )}
                       </div>
                       <div className="flex items-center justify-between px-3 py-2 text-sm">
-                        <span className="text-text-secondary">Организация выкупа ({quote.buyoutCommissionPercent}%)</span>
+                        <span className="flex items-center gap-1.5 text-text-secondary">
+                          Организация выкупа ({quote.buyoutCommissionPercent}%)
+                          <InfoHint>Комиссия за выкуп товара у поставщика и контроль перед отправкой.</InfoHint>
+                        </span>
                         <span className="font-semibold text-text">{fmt(quote.buyoutCommissionRub)}₽</span>
                       </div>
                       <div className="flex items-center justify-between px-3 py-2 text-sm">
-                        <span className="text-text-secondary">
+                        <span className="flex items-center gap-1.5 text-text-secondary">
                           Доставка карго ({quote.totalWeightKg.toFixed(1)} кг, {quote.totalVolumeM3.toFixed(3)} м³, плотность{" "}
                           {fmt(quote.densityKgM3)} кг/м³)
+                          <InfoHint>Международная доставка со склада в Китае до вас — цена зависит от веса и объёма груза.</InfoHint>
                         </span>
                         <span className="font-semibold text-text">
                           {quote.cargoDeliveryUsd.toFixed(1)}$ / {fmt(quote.cargoDeliveryRub)}₽

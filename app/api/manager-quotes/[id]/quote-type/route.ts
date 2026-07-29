@@ -1,0 +1,72 @@
+import { NextRequest } from "next/server";
+import { getManagerSessionFromRequest } from "@/lib/manager-auth";
+import { canAccessManagerQuote } from "@/lib/manager-scope";
+import { prisma } from "@/lib/prisma";
+import { stripCargoCostForNonOwner } from "@/lib/desk-services/quote-request";
+
+interface RouteParams {
+  params: Promise<{ id: string }>;
+}
+
+const QUOTE_TYPES = ["standard", "expert", "pro"] as const;
+
+// Narrow, single-purpose endpoint for the "присвоить тип поиска выбранным"
+// bulk action in clients-tab.tsx — changes just the search tier and the
+// search-service fee it drives, leaving every other frozen/quoted figure
+// (goods price, cargo, buyout commission %, FX rates) untouched. totalRub
+// is adjusted by the fee delta rather than fully recomputed, same
+// reasoning as actualize-cargo's totalRub adjustment — this route isn't
+// meant to re-price against today's tariffs (see /recalculate for that).
+export async function PATCH(req: NextRequest, { params }: RouteParams) {
+  const session = await getManagerSessionFromRequest(req);
+  if (!session) {
+    return Response.json({ error: "Не авторизовано." }, { status: 401 });
+  }
+
+  const { id } = await params;
+  const existing = await prisma.quote.findUnique({ where: { id } });
+  if (!existing) return Response.json({ error: "Просчёт не найден." }, { status: 404 });
+  if (!(await canAccessManagerQuote(session, existing.managerId))) {
+    return Response.json({ error: "Нет доступа к этому просчёту." }, { status: 403 });
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "Некорректный запрос." }, { status: 400 });
+  }
+  const { quoteType } = (body as { quoteType?: unknown }) ?? {};
+  if (typeof quoteType !== "string" || !QUOTE_TYPES.includes(quoteType as (typeof QUOTE_TYPES)[number])) {
+    return Response.json({ error: "Выберите тип просчёта." }, { status: 400 });
+  }
+
+  if (quoteType === existing.quoteType) {
+    return Response.json({ quote: stripCargoCostForNonOwner(existing, session) });
+  }
+
+  const tariffSettings = await prisma.tariffSettings.findFirst({ orderBy: { createdAt: "desc" } });
+  if (!tariffSettings) {
+    return Response.json({ error: "Тарифы не заданы — заполните вкладку «Тарифы»." }, { status: 400 });
+  }
+
+  const newSearchServiceFeeRub = existing.searchFeeWaived
+    ? 0
+    : ({
+        standard: Number(tariffSettings.standardPriceRub),
+        expert: Number(tariffSettings.expertPriceRub),
+        pro: Number(tariffSettings.proPriceRub),
+      }[quoteType] ?? 0);
+  const feeDeltaRub = newSearchServiceFeeRub - Number(existing.searchServiceFeeRub);
+
+  const quote = await prisma.quote.update({
+    where: { id },
+    data: {
+      quoteType: quoteType as (typeof QUOTE_TYPES)[number],
+      searchServiceFeeRub: newSearchServiceFeeRub,
+      totalRub: Number(existing.totalRub) + feeDeltaRub,
+    },
+  });
+
+  return Response.json({ quote: stripCargoCostForNonOwner(quote, session) });
+}
