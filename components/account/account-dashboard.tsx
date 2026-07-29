@@ -18,6 +18,7 @@ import {
   type AccountQuote,
 } from "@/components/account/account-quotes";
 import { ServicePriceList } from "@/components/account/service-price-list";
+import { AccountQuoteDraftForm } from "@/components/account/account-quote-draft-form";
 
 interface AccountOrderEvent {
   id: string;
@@ -157,6 +158,10 @@ function AccountDashboard({
         </aside>
 
         <div className="min-w-0">
+          <div className="mb-6">
+            <AccountQuoteDraftForm onSubmitted={() => router.refresh()} />
+          </div>
+
           <div>
             <h2 className="text-base font-bold text-text">Мои просчёты</h2>
             <p className="mb-3 text-sm text-text-secondary">

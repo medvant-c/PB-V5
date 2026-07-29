@@ -35,7 +35,24 @@ export async function GET(req: NextRequest) {
     include: { manager: { select: { id: true, name: true } }, client: { select: { id: true, name: true, company: true } } },
   });
 
-  return Response.json({ drafts });
+  // Reference photos/spec files the client attached at submission — see
+  // account-quote-drafts/route.ts. Batched by relatedId (DeskFile has no
+  // direct relation to QuoteDraftRequest, same polymorphic pattern as
+  // every other DeskFile attachment) rather than N+1 queries.
+  const files = await prisma.deskFile.findMany({
+    where: { tab: "quote_draft_request", relatedId: { in: drafts.map((d) => d.id) } },
+    select: { id: true, relatedId: true, originalName: true, mimeType: true, size: true },
+  });
+  const filesByDraftId = new Map<string, typeof files>();
+  for (const file of files) {
+    const list = filesByDraftId.get(file.relatedId!) ?? [];
+    list.push(file);
+    filesByDraftId.set(file.relatedId!, list);
+  }
+
+  return Response.json({
+    drafts: drafts.map((d) => ({ ...d, files: filesByDraftId.get(d.id) ?? [] })),
+  });
 }
 
 export async function POST(req: NextRequest) {

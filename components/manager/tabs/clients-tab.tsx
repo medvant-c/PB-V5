@@ -189,13 +189,25 @@ function isStale(quote: QuoteRecord): boolean {
   return Date.now() - new Date(quote.statusChangedAt).getTime() > STALE_IN_PROGRESS_MS;
 }
 
+interface DraftRequestFile {
+  id: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+}
+
 interface DraftRequestRecord {
   id: string;
   displayId: number;
   note: string;
+  quantity: number | null;
   done: boolean;
   createdAt: string;
-  manager: { id: string; name: string };
+  // Null exactly when the client submitted this themselves from /account
+  // (see schema comment on QuoteDraftRequest.managerId) — the discriminator
+  // the "создано клиентом" badge below keys off of.
+  manager: { id: string; name: string } | null;
+  files: DraftRequestFile[];
 }
 
 // "Черновики" — lightweight reminders ("клиент попросил X, есть только фото
@@ -298,10 +310,30 @@ function ClientDraftRequests({
                 <span className="mr-1.5 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
                   к выполнению
                 </span>
+                {!draft.manager && (
+                  <span className="mr-1.5 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                    создано клиентом
+                  </span>
+                )}
                 <span className="text-text">{draft.note}</span>
+                {draft.quantity != null && <span className="ml-1.5 text-text-secondary">· {draft.quantity} шт</span>}
                 <div className="mt-0.5 text-xs text-text-secondary">
-                  {new Date(draft.createdAt).toLocaleDateString("ru-RU")} · {draft.manager.name}
+                  {new Date(draft.createdAt).toLocaleDateString("ru-RU")}
+                  {draft.manager ? ` · ${draft.manager.name}` : ""}
                 </div>
+                {draft.files.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {draft.files.map((file) => (
+                      <a
+                        key={file.id}
+                        href={`/api/quote-draft-files/${file.id}`}
+                        className="flex items-center gap-1 rounded-full border border-border bg-bg px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
+                      >
+                        <Download className="h-3 w-3" /> {file.originalName}
+                      </a>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <button

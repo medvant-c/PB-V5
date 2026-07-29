@@ -14,6 +14,8 @@ import {
   PackageSearch,
 } from "lucide-react";
 import { QUOTE_STATUS_BADGE_CLASSES, QUOTE_STATUS_LABEL, type QuoteStatus } from "@/lib/quote-statuses";
+import { CLIENT_STATUS_EXPLANATION } from "@/lib/client-status-copy";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 interface AccountQuoteService {
@@ -200,6 +202,7 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
   }
 
   return (
+    <TooltipProvider>
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary">
@@ -298,9 +301,21 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
                   </div>
 
                   <div className="flex shrink-0 flex-col items-end gap-1.5">
-                    <span className={cn("rounded-full px-3 py-1 text-xs font-medium", QUOTE_STATUS_BADGE_CLASSES[quote.status])}>
-                      {QUOTE_STATUS_LABEL[quote.status]}
-                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className={cn(
+                            "cursor-help rounded-full px-3 py-1 text-xs font-medium underline decoration-dotted underline-offset-2",
+                            QUOTE_STATUS_BADGE_CLASSES[quote.status],
+                          )}
+                        >
+                          {QUOTE_STATUS_LABEL[quote.status]}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-64">
+                        {CLIENT_STATUS_EXPLANATION[quote.status]}
+                      </TooltipContent>
+                    </Tooltip>
                     <span className="text-sm font-bold text-text">{fmt(quote.totalRub)} ₽</span>
                   </div>
 
@@ -460,6 +475,7 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
         })}
       </div>
     </div>
+    </TooltipProvider>
   );
 }
 

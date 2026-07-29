@@ -31,6 +31,10 @@ enum DeskFileTab {
   // Manager cabinet's per-client document store — contracts, invoice scans,
   // client-provided specs, etc. relatedId is the Client id.
   manager_client_files
+  // Reference photo / spec file(s) a client attached when submitting their
+  // own draft quote request from /account. relatedId is the
+  // QuoteDraftRequest id. See PB-V5 chat 2026-07-29.
+  quote_draft_request
 }
 
 model DeskFile {
@@ -813,17 +817,28 @@ model FulfillmentOrderItem {
 // there isn't yet enough to build a real Quote (price, weight, dimensions
 // etc.). Deliberately minimal (just free text, no structured fields) —
 // this is a reminder/inbox item, not a quote in progress; see PB-V5 chat
-// 2026-07-28 ("план по поиску что бы не забыть"). Reference photos, if
-// any, go through the existing per-client DeskFile uploader, not a
-// dedicated field here.
+// 2026-07-28 ("план по поиску что бы не забыть").
+// Two authors are possible now (see PB-V5 chat 2026-07-29): a manager
+// creating a note on the client's behalf (managerId set), or the client
+// submitting their own "ТЗ на просчёт" from /account (managerId null —
+// that's the discriminator, no separate boolean to keep in sync). Photos/
+// spec files, if any, attach via DeskFile (tab: quote_draft_request,
+// relatedId: this row's id) — same polymorphic pattern as every other
+// DeskFile-backed attachment in this schema.
 model QuoteDraftRequest {
   id        String   @id @default(cuid())
   displayId Int      @unique
   clientId  String
   client    Client   @relation(fields: [clientId], references: [id])
-  managerId String
-  manager   Manager  @relation(fields: [managerId], references: [id])
+  // Null means the client authored this themselves — see model comment.
+  managerId String?
+  manager   Manager? @relation(fields: [managerId], references: [id])
   note      String
+  // Only ever set on a client-authored request (the client's own "сколько
+  // штук" at submission time) — a manager creating a note on the client's
+  // behalf has no equivalent field, they just build the real Quote once
+  // they pick it up.
+  quantity  Int?
   // Marked done once a real Quote has been built for it (or it turned out
   // not to be needed) — done items drop out of the default list rather
   // than accumulating as clutter once handled.

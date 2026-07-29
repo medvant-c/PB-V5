@@ -251,11 +251,25 @@ function StatCardsRow({
   expectedIncomeRub,
   actualIncomeRub,
   cnyRateRub,
+  potentialProscetRub,
+  potentialBuyoutRub,
+  potentialCargoProfitRub,
+  factualProscetRub,
+  factualBuyoutRub,
+  factualDiscountRub,
+  factualCargoProfitRub,
 }: {
   stats: StatSummary;
   expectedIncomeRub: number | null;
   actualIncomeRub: number | null;
   cnyRateRub: number;
+  potentialProscetRub: number | null;
+  potentialBuyoutRub: number | null;
+  potentialCargoProfitRub: number | null;
+  factualProscetRub: number | null;
+  factualBuyoutRub: number | null;
+  factualDiscountRub: number | null;
+  factualCargoProfitRub: number | null;
 }) {
   const isHighConversion = stats.conversionPercent >= CONVERSION_HEALTHY_THRESHOLD_PERCENT;
   const m = (rub: number) => fmtBoth(rub, cnyRateRub);
@@ -330,6 +344,16 @@ function StatCardsRow({
             value={`${m(actualIncomeRub)}`}
             valueClassName="text-success"
             subtitle="Уже подтверждено"
+            tooltip={
+              <>
+                <BreakdownRow label="Просчёт (факт)" value={m(factualProscetRub ?? 0)} />
+                <BreakdownRow label="Выкуп (факт)" value={m(factualBuyoutRub ?? 0)} />
+                <BreakdownRow label="Скидка поставщика (факт)" value={m(factualDiscountRub ?? 0)} />
+                <BreakdownRow label="Карго (факт)" value={m(factualCargoProfitRub ?? 0)} />
+                <BreakdownRow label="Премии менеджерам" value={`−${m(stats.factualPremiumRub)}`} />
+                <BreakdownRow label="Итого доход (факт)" value={m(actualIncomeRub)} isTotal />
+              </>
+            }
           />
           <StatCard
             icon={Wallet}
@@ -337,6 +361,15 @@ function StatCardsRow({
             value={`${m(expectedIncomeRub)}`}
             valueClassName="text-success"
             subtitle="Если всё в работе будет куплено"
+            tooltip={
+              <>
+                <BreakdownRow label="Просчёт (потенциал)" value={m(potentialProscetRub ?? 0)} />
+                <BreakdownRow label="Выкуп (потенциал)" value={m(potentialBuyoutRub ?? 0)} />
+                <BreakdownRow label="Карго (потенциал)" value={m(potentialCargoProfitRub ?? 0)} />
+                <BreakdownRow label="Премии менеджерам" value={`−${m(stats.estimatedPremiumRub)}`} />
+                <BreakdownRow label="Итого доход (потенциал)" value={m(expectedIncomeRub)} isTotal />
+              </>
+            }
           />
         </>
       )}
@@ -525,7 +558,9 @@ function TodayPill() {
 interface QuoteDraftItem {
   id: string;
   note: string;
+  quantity: number | null;
   createdAt: string;
+  manager: { id: string; name: string } | null;
   client: { id: string; name: string; company: string | null };
 }
 
@@ -559,13 +594,21 @@ function SearchDraftsWidget() {
           {drafts.map((draft) => (
             <li key={draft.id} className="rounded-lg border border-warning/20 bg-surface p-2.5 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-medium text-text">
+                <span className="flex items-center gap-1.5 font-medium text-text">
                   {draft.client.name}
                   {draft.client.company ? ` · ${draft.client.company}` : ""}
+                  {!draft.manager && (
+                    <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                      создано клиентом
+                    </span>
+                  )}
                 </span>
                 <span className="text-xs text-text-secondary">{new Date(draft.createdAt).toLocaleDateString("ru-RU")}</span>
               </div>
-              <p className="mt-0.5 text-text-secondary">{draft.note}</p>
+              <p className="mt-0.5 text-text-secondary">
+                {draft.note}
+                {draft.quantity != null && ` · ${draft.quantity} шт`}
+              </p>
             </li>
           ))}
         </ul>
@@ -772,6 +815,13 @@ function ManagerDashboard() {
           expectedIncomeRub={data.expectedIncomeRub}
           actualIncomeRub={data.actualIncomeRub}
           cnyRateRub={data.cnyRateRub}
+          potentialProscetRub={data.potentialProscetRub}
+          potentialBuyoutRub={data.potentialBuyoutRub}
+          potentialCargoProfitRub={data.potentialCargoProfitRub}
+          factualProscetRub={data.factualProscetRub}
+          factualBuyoutRub={data.factualBuyoutRub}
+          factualDiscountRub={data.factualDiscountRub}
+          factualCargoProfitRub={data.factualCargoProfitRub}
         />
         <StatusPillsRow
           stats={data.overall}
