@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowLeftRight,
@@ -832,11 +832,11 @@ function ClientQuotes({
                   </div>
                 )}
               </div>
-              <a
-                href={`/api/manager-quotes/${quote.id}/pdf`}
-                className="flex min-w-0 flex-1 items-center gap-3 hover:opacity-80"
+              <button
+                type="button"
+                onClick={() => onEdit(quote.id)}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left hover:opacity-80"
               >
-                <Download className="h-4 w-4 shrink-0 text-text-secondary" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium text-text">
                     №{quote.displayId} · {quote.productName}
@@ -900,6 +900,15 @@ function ClientQuotes({
                     · {quote.manager.name}
                   </span>
                 </span>
+              </button>
+
+              <a
+                href={`/api/manager-quotes/${quote.id}/pdf`}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary"
+                aria-label="Скачать PDF"
+                title="Скачать PDF"
+              >
+                <Download className="h-4 w-4" />
               </a>
 
               <Select
@@ -1404,6 +1413,8 @@ function ManagerClientsTab() {
   const [error, setError] = useState<string | null>(null);
 
   const [showArchived, setShowArchived] = useState(false);
+  const [search, setSearch] = useState("");
+  const [managerFilter, setManagerFilter] = useState("all");
   const [editingClientId, setEditingClientId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState({ name: "", company: "", phone: "", messenger: "", email: "", source: "other" });
   const [editSaving, setEditSaving] = useState(false);
@@ -1541,11 +1552,29 @@ function ManagerClientsTab() {
 
   const quoteDialogClient = clients.find((c) => c.id === quoteDialogClientId) ?? null;
 
+  // Free-text search over name/company/phone/email/messenger, plus an
+  // optional manager filter — client-side over the already-scoped
+  // `clients` list (loadClients already applies role-based visibility and
+  // the archived toggle), same "filter what's already loaded" approach as
+  // manager-dashboard.tsx's status pills.
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredClients = useMemo(() => {
+    return clients.filter((client) => {
+      if (managerFilter !== "all" && client.createdByManagerId !== managerFilter) return false;
+      if (!normalizedSearch) return true;
+      const haystack = [client.name, client.company, client.phone, client.email, client.messenger]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(normalizedSearch);
+    });
+  }, [clients, managerFilter, normalizedSearch]);
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-sm font-bold text-text">Клиенты</h2>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-1.5 text-xs text-text-secondary">
             <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
             Показывать архивные
@@ -1556,6 +1585,30 @@ function ManagerClientsTab() {
             </Button>
           )}
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          placeholder="Поиск по имени, компании, телефону, email…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full sm:max-w-xs"
+        />
+        {teamManagers && teamManagers.length > 1 && (
+          <Select value={managerFilter} onValueChange={setManagerFilter}>
+            <SelectTrigger className="w-48">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все менеджеры</SelectItem>
+              {teamManagers.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       {showNewForm && (
@@ -1618,9 +1671,11 @@ function ManagerClientsTab() {
         <p className="text-sm text-text-secondary">Загрузка…</p>
       ) : clients.length === 0 ? (
         <EmptyState icon={UserRound} message="Клиентов пока нет — добавьте первого кнопкой выше." />
+      ) : filteredClients.length === 0 ? (
+        <EmptyState icon={UserRound} message="Ничего не найдено — измените поиск или фильтр." />
       ) : (
         <div className="space-y-2">
-          {clients.map((client) => {
+          {filteredClients.map((client) => {
             const isOpen = expandedClientId === client.id;
             const isEditing = editingClientId === client.id;
             return (

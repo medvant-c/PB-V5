@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Loader2, UserCheck, Wallet } from "lucide-react";
+import { Archive, CheckCircle2, ChevronDown, Loader2, UserCheck, Wallet } from "lucide-react";
 import { EmptyState } from "@/components/desk/empty-state";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 interface PendingBuyout {
   id: string;
@@ -62,6 +65,170 @@ function previewDiscountCny(
   const paymentAmountCny = paymentRub / paymentRate;
   const servicesAndCommissionCny = (Number(quote.searchServiceFeeRub) + Number(quote.buyoutCommissionRub)) / Number(quote.cnyRateUsed);
   return paymentAmountCny - servicesAndCommissionCny - buyoutCny;
+}
+
+function fmt(value: number): string {
+  return Number.isFinite(value) ? Math.round(value).toLocaleString("ru-RU") : "—";
+}
+
+interface ArchivedBuyout {
+  id: string;
+  displayId: number;
+  productName: string;
+  totalRub: string;
+  totalPriceCny: string;
+  actualBuyoutCny: string | null;
+  actualBuyoutRateUsed: string | null;
+  actualSupplierDiscountCny: string | null;
+  actualClientPaymentRub: string | null;
+  actualClientPaymentRateUsed: string | null;
+  buyoutConfirmedAt: string | null;
+  confirmedByManagerName: string | null;
+  manager: { id: string; name: string };
+  client: { id: string; name: string; company: string | null };
+}
+
+interface ClientOption {
+  id: string;
+  name: string;
+  company: string | null;
+}
+
+// Archive of already-confirmed buyouts — the "history" counterpart to the
+// pending queue above, filterable by manager/client/date so a руководитель
+// can audit what's already been confirmed without reopening every client's
+// quote list one by one. Collapsed by default (closed <details>-style
+// section) since it's a browse/audit tool, not something checked every
+// visit the way the pending queue is. See PB-V5 chat 2026-07-29.
+function BuyoutArchive() {
+  const [open, setOpen] = useState(false);
+  const [buyouts, setBuyouts] = useState<ArchivedBuyout[]>([]);
+  const [teamManagers, setTeamManagers] = useState<{ id: string; name: string }[]>([]);
+  const [clients, setClients] = useState<ClientOption[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const [managerFilter, setManagerFilter] = useState("all");
+  const [clientFilter, setClientFilter] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  useEffect(() => {
+    fetch("/api/manager-clients")
+      .then((res) => res.json())
+      .then((data) => setClients(data.clients ?? []));
+  }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (managerFilter !== "all") params.set("managerId", managerFilter);
+    if (clientFilter !== "all") params.set("clientId", clientFilter);
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+    fetch(`/api/manager-buyout-archive?${params.toString()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setBuyouts(data.buyouts ?? []);
+        setTeamManagers(data.teamManagers ?? []);
+      })
+      .finally(() => setLoading(false));
+  }, [managerFilter, clientFilter, dateFrom, dateTo]);
+
+  return (
+    <div className="rounded-xl border border-border bg-surface">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 p-3 text-left"
+      >
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
+          <Archive className="h-3.5 w-3.5" /> Архив подтверждённых выкупов{buyouts.length > 0 ? ` (${buyouts.length})` : ""}
+        </span>
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-text-secondary transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="space-y-3 border-t border-border p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {teamManagers.length > 1 && (
+              <Select value={managerFilter} onValueChange={setManagerFilter}>
+                <SelectTrigger className="w-44">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все менеджеры</SelectItem>
+                  {teamManagers.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Select value={clientFilter} onValueChange={setClientFilter}>
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все клиенты</SelectItem>
+                {clients.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name}
+                    {c.company ? ` (${c.company})` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-40" placeholder="С даты" />
+            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" placeholder="По дату" />
+          </div>
+
+          {loading ? (
+            <p className="text-xs text-text-secondary">Загрузка…</p>
+          ) : buyouts.length === 0 ? (
+            <p className="text-xs text-text-secondary">Ничего не найдено по этим фильтрам.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-175 border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs text-text-secondary">
+                    <th className="py-1.5 pr-3 font-medium">Просчёт</th>
+                    <th className="py-1.5 pr-3 font-medium">Клиент</th>
+                    <th className="py-1.5 pr-3 font-medium">Менеджер</th>
+                    <th className="py-1.5 pr-3 font-medium">Подтверждён</th>
+                    <th className="py-1.5 pr-3 font-medium">Кем</th>
+                    <th className="py-1.5 pr-3 font-medium">Выкуп факт, ¥</th>
+                    <th className="py-1.5 pr-3 font-medium">Скидка, ¥</th>
+                    <th className="py-1.5 font-medium">Оплата, ₽</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {buyouts.map((b) => (
+                    <tr key={b.id} className="border-b border-border last:border-0">
+                      <td className="py-1.5 pr-3 text-text">
+                        №{b.displayId} · {b.productName}
+                      </td>
+                      <td className="py-1.5 pr-3 text-text-secondary">
+                        {b.client.name}
+                        {b.client.company ? ` · ${b.client.company}` : ""}
+                      </td>
+                      <td className="py-1.5 pr-3 text-text-secondary">{b.manager.name}</td>
+                      <td className="py-1.5 pr-3 text-text-secondary">{b.buyoutConfirmedAt ? formatDate(b.buyoutConfirmedAt) : "—"}</td>
+                      <td className="py-1.5 pr-3 text-text-secondary">{b.confirmedByManagerName ?? "—"}</td>
+                      <td className="py-1.5 pr-3 text-text-secondary">{b.actualBuyoutCny ? fmt(Number(b.actualBuyoutCny)) : "—"}</td>
+                      <td className="py-1.5 pr-3 text-text-secondary">
+                        {b.actualSupplierDiscountCny ? fmt(Number(b.actualSupplierDiscountCny)) : "—"}
+                      </td>
+                      <td className="py-1.5 text-text-secondary">{b.actualClientPaymentRub ? fmt(Number(b.actualClientPaymentRub)) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ManagerConfirmationsTab() {
@@ -347,6 +514,8 @@ function ManagerConfirmationsTab() {
           )}
         </>
       )}
+
+      <BuyoutArchive />
     </div>
   );
 }
