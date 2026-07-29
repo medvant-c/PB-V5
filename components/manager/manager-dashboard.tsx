@@ -522,6 +522,53 @@ function SearchDraftsWidget() {
   );
 }
 
+// Same pattern as SearchDraftsWidget above, one status over — a quote the
+// client rejected and that needs a fresh calculation is exactly as
+// actionable as an unprocessed search request, so it gets the same
+// glanceable, always-collapsible treatment right next to it rather than
+// staying buried in the status-pill row. Fetches independently (not from
+// the pill row's allQuotes, which stays lazy until a pill is first
+// clicked) so this widget's count is visible immediately on load. See
+// PB-V5 chat 2026-07-29.
+function NeedsReplacementWidget() {
+  const [items, setItems] = useState<QuoteListItem[] | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/manager-quotes")
+      .then((res) => res.json())
+      .then((d) => setItems((d.quotes ?? []).filter((q: QuoteListItem) => q.status === "needs_replacement")));
+  }, []);
+
+  if (!items || items.length === 0) return null;
+
+  return (
+    <div className="rounded-2xl border border-error/30 bg-error/5 p-4 sm:p-5">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between gap-2 text-left">
+        <span className="flex items-center gap-1.5 text-sm font-bold text-error">
+          <AlertTriangle className="h-4 w-4" /> Нужна замена — просчётов: {items.length}
+        </span>
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-error transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <ul className="mt-3 space-y-1.5">
+          {items.map((quote) => (
+            <li key={quote.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/20 bg-surface p-2.5 text-sm">
+              <span className="font-medium text-text">
+                №{quote.displayId} · {quote.productName}
+              </span>
+              <span className="text-xs text-text-secondary">
+                {quote.client.name}
+                {quote.client.company ? ` · ${quote.client.company}` : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function ManagerDashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -577,6 +624,7 @@ function ManagerDashboard() {
         </div>
 
         <SearchDraftsWidget />
+        <NeedsReplacementWidget />
 
         <StatCardsRow
           stats={data.overall}

@@ -128,6 +128,21 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
+/* Manager cabinet (/desk/manager) only — the public site's --color-bg
+   (#fafbff) sits 1% off pure white, which is deliberately minimal there
+   but reads as "everything is white, no zones" in the cabinet's much
+   denser, card-in-card UI (see PB-V5 chat 2026-07-29). Scoped to this one
+   class (applied on manager-workspace.tsx's root) via a CSS custom
+   property override rather than touching --color-bg/--color-border
+   globally, so the marketing site's look is untouched. Every bg-bg /
+   border-border utility already used throughout the manager components
+   (card-in-card panels, table zebra rows, badges) picks this up for free
+   through normal CSS custom-property inheritance. */
+.manager-cabinet-theme {
+  --color-bg: #eef1f7;
+  --color-border: #dbe1ea;
+}
+
 @keyframes float-card {
   0%,
   100% {

@@ -1456,6 +1456,23 @@ function ManagerClientsTab() {
     loadDraftCounts();
   }, [loadDraftCounts]);
 
+  // Same "count visible before expanding" treatment as draftCounts above,
+  // one status over — a quote the client rejected needs just as much
+  // attention as an unprocessed search request. See PB-V5 chat 2026-07-29.
+  const [needsReplacementCounts, setNeedsReplacementCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    fetch("/api/manager-quotes")
+      .then((res) => res.json())
+      .then((data) => {
+        const counts: Record<string, number> = {};
+        for (const quote of data.quotes ?? []) {
+          if (quote.status !== "needs_replacement") continue;
+          counts[quote.clientId] = (counts[quote.clientId] ?? 0) + 1;
+        }
+        setNeedsReplacementCounts(counts);
+      });
+  }, [quotesRefreshKey]);
+
   function startEditing(client: ClientRecord) {
     setEditingClientId(client.id);
     setEditError(null);
@@ -1709,6 +1726,11 @@ function ManagerClientsTab() {
                         {draftCounts[client.id] > 0 && (
                           <span className="flex items-center gap-1 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
                             <AlertTriangle className="h-3 w-3" /> заявки на поиск не обработаны: {draftCounts[client.id]}
+                          </span>
+                        )}
+                        {needsReplacementCounts[client.id] > 0 && (
+                          <span className="flex items-center gap-1 rounded-full bg-error/15 px-1.5 py-0.5 text-[10px] font-semibold text-error">
+                            <AlertTriangle className="h-3 w-3" /> нужна замена: {needsReplacementCounts[client.id]}
                           </span>
                         )}
                         {client.archivedAt && <span className="text-xs font-normal text-error">архив</span>}

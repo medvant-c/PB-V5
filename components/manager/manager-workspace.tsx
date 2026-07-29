@@ -108,7 +108,8 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
   const ActiveComponent = active.Component;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10">
+    <div className="manager-cabinet-theme min-h-screen bg-bg">
+      <div className="mx-auto max-w-6xl px-4 py-10">
       <div className="sticky top-0 z-30 space-y-2">
         {impersonatedByName && (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-warning/30 bg-warning/10 px-4 py-2.5 text-sm backdrop-blur-md">
@@ -183,6 +184,7 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
           <ActiveComponent />
         </Card>
       </div>
+    </div>
     </div>
   );
 }

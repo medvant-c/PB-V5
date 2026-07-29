@@ -4,10 +4,17 @@ import { getVisibleManagerIds } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { nextQuoteDraftRequestDisplayId } from "@/lib/display-ids";
 
-// Scoped the same as everything else — a plain manager sees only their own
-// drafts, senior also sees their team's. Done drafts are hidden by default
-// (once handled — built into a real quote or turned out unnecessary —
-// there's no reason for them to keep cluttering the "к выполнению" list).
+// Scoped by the CLIENT's current manager (client.createdByManagerId), not
+// by whoever happened to author the draft note — same reasoning as every
+// other credit/visibility rule in this app (a reassigned client moves all
+// of its associated data with it, see the quote-reassignment comments in
+// app/api/manager-quotes/[id]/reassign). Scoping by draft.managerId
+// instead would silently drop a draft off its now-current manager's
+// dashboard the moment the client changed hands, or if the owner/a
+// colleague created the note on that manager's behalf. See PB-V5 chat
+// 2026-07-29. Done drafts are hidden by default (once handled — built
+// into a real quote or turned out unnecessary — there's no reason for
+// them to keep cluttering the "к выполнению" list).
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
@@ -20,7 +27,7 @@ export async function GET(req: NextRequest) {
 
   const drafts = await prisma.quoteDraftRequest.findMany({
     where: {
-      ...(visibleManagerIds === "all" ? {} : { managerId: { in: visibleManagerIds } }),
+      ...(visibleManagerIds === "all" ? {} : { client: { createdByManagerId: { in: visibleManagerIds } } }),
       ...(clientId ? { clientId } : {}),
       ...(includeDone ? {} : { done: false }),
     },

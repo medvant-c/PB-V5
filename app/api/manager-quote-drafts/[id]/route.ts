@@ -7,9 +7,13 @@ interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-async function canAccessDraft(session: { role: string; managerId: string }, managerId: string): Promise<boolean> {
+// Scoped by the CLIENT's current manager, not the draft's original author
+// — same reasoning as the GET route above. A manager who just inherited a
+// reassigned client must be able to mark/delete that client's existing
+// draft requests, even if a different manager (or the owner) created them.
+async function canAccessDraft(session: { role: string; managerId: string }, clientManagerId: string | null): Promise<boolean> {
   const visibleManagerIds = await getVisibleManagerIds(session as never);
-  return visibleManagerIds === "all" || visibleManagerIds.includes(managerId);
+  return visibleManagerIds === "all" || (clientManagerId !== null && visibleManagerIds.includes(clientManagerId));
 }
 
 // Mark done (a real Quote was built, or it's no longer needed) or edit the
@@ -21,9 +25,9 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   }
 
   const { id } = await params;
-  const existing = await prisma.quoteDraftRequest.findUnique({ where: { id } });
+  const existing = await prisma.quoteDraftRequest.findUnique({ where: { id }, include: { client: { select: { createdByManagerId: true } } } });
   if (!existing) return Response.json({ error: "Черновик не найден." }, { status: 404 });
-  if (!(await canAccessDraft(session, existing.managerId))) {
+  if (!(await canAccessDraft(session, existing.client.createdByManagerId))) {
     return Response.json({ error: "Нет доступа к этому черновику." }, { status: 403 });
   }
 
@@ -53,9 +57,9 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
   }
 
   const { id } = await params;
-  const existing = await prisma.quoteDraftRequest.findUnique({ where: { id } });
+  const existing = await prisma.quoteDraftRequest.findUnique({ where: { id }, include: { client: { select: { createdByManagerId: true } } } });
   if (!existing) return Response.json({ error: "Черновик не найден." }, { status: 404 });
-  if (!(await canAccessDraft(session, existing.managerId))) {
+  if (!(await canAccessDraft(session, existing.client.createdByManagerId))) {
     return Response.json({ error: "Нет доступа к этому черновику." }, { status: 403 });
   }
 
