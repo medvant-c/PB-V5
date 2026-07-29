@@ -54,6 +54,9 @@ export async function GET(req: NextRequest) {
       actualSupplierDiscountCny: true,
       actualClientPaymentRub: true,
       actualClientPaymentRateUsed: true,
+      searchServiceFeeRub: true,
+      buyoutCommissionRub: true,
+      cnyRateUsed: true,
       buyoutConfirmedAt: true,
       buyoutConfirmedByManagerId: true,
       manager: { select: { id: true, name: true } },
@@ -82,6 +85,16 @@ export async function GET(req: NextRequest) {
     buyouts: buyouts.map((b) => ({
       ...b,
       confirmedByManagerName: b.buyoutConfirmedByManagerId ? (confirmedByNameById.get(b.buyoutConfirmedByManagerId) ?? null) : null,
+      // Same reconciliation figures shown live in confirmations-tab.tsx's
+      // confirm-buyout form — reproduced here from the same stored fields
+      // (actualClientPaymentRateUsed is the real ¥→₽ rate at the moment of
+      // that payment, not today's rate) so the archive row is self-
+      // contained without the reader having to redo the math.
+      actualClientPaymentCny:
+        b.actualClientPaymentRub && b.actualClientPaymentRateUsed
+          ? Number(b.actualClientPaymentRub) / Number(b.actualClientPaymentRateUsed)
+          : null,
+      servicesAndCommissionCny: (Number(b.searchServiceFeeRub) + Number(b.buyoutCommissionRub)) / Number(b.cnyRateUsed),
     })),
     teamManagers,
   });

@@ -17,6 +17,7 @@ import {
   ImageOff,
   Download,
   AlertTriangle,
+  Inbox,
 } from "lucide-react";
 import { QUOTE_STATUSES, QUOTE_STATUS_LABEL, QUOTE_STATUS_BADGE_CLASSES, QUOTE_STATUS_DOT_COLOR } from "@/lib/quote-statuses";
 import { cn } from "@/lib/utils";
@@ -569,6 +570,50 @@ function NeedsReplacementWidget() {
   );
 }
 
+// Same self-fetching, always-collapsible pattern as the two widgets above,
+// one status earlier in the pipeline — a freshly-arrived request nobody's
+// picked up yet. Primary (not warning/error) color, distinguishing "new,
+// needs a first look" from "unprocessed" (amber) and "rejected, needs
+// rework" (red). See PB-V5 chat 2026-07-29.
+function NewRequestsWidget() {
+  const [items, setItems] = useState<QuoteListItem[] | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/manager-quotes")
+      .then((res) => res.json())
+      .then((d) => setItems((d.quotes ?? []).filter((q: QuoteListItem) => q.status === "new_request")));
+  }, []);
+
+  if (!items || items.length === 0) return null;
+
+  return (
+    <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 sm:p-5">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between gap-2 text-left">
+        <span className="flex items-center gap-1.5 text-sm font-bold text-primary">
+          <Inbox className="h-4 w-4" /> Новые заявки — не взяты в работу: {items.length}
+        </span>
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-primary transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <ul className="mt-3 space-y-1.5">
+          {items.map((quote) => (
+            <li key={quote.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/20 bg-surface p-2.5 text-sm">
+              <span className="font-medium text-text">
+                №{quote.displayId} · {quote.productName}
+              </span>
+              <span className="text-xs text-text-secondary">
+                {quote.client.name}
+                {quote.client.company ? ` · ${quote.client.company}` : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function ManagerDashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -623,6 +668,7 @@ function ManagerDashboard() {
           <TodayPill />
         </div>
 
+        <NewRequestsWidget />
         <SearchDraftsWidget />
         <NeedsReplacementWidget />
 

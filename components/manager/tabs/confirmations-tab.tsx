@@ -82,6 +82,8 @@ interface ArchivedBuyout {
   actualSupplierDiscountCny: string | null;
   actualClientPaymentRub: string | null;
   actualClientPaymentRateUsed: string | null;
+  actualClientPaymentCny: number | null;
+  servicesAndCommissionCny: number;
   buyoutConfirmedAt: string | null;
   confirmedByManagerName: string | null;
   manager: { id: string; name: string };
@@ -188,7 +190,7 @@ function BuyoutArchive() {
             <p className="text-xs text-text-secondary">Ничего не найдено по этим фильтрам.</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-175 border-collapse text-sm">
+              <table className="w-full min-w-275 border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-text-secondary">
                     <th className="py-1.5 pr-3 font-medium">Просчёт</th>
@@ -198,6 +200,9 @@ function BuyoutArchive() {
                     <th className="py-1.5 pr-3 font-medium">Кем</th>
                     <th className="py-1.5 pr-3 font-medium">Выкуп факт, ¥</th>
                     <th className="py-1.5 pr-3 font-medium">Скидка, ¥</th>
+                    <th className="py-1.5 pr-3 font-medium">Услуги и комиссия, ¥</th>
+                    <th className="py-1.5 pr-3 font-medium">Курс на оплате</th>
+                    <th className="py-1.5 pr-3 font-medium">Оплата, ¥</th>
                     <th className="py-1.5 font-medium">Оплата, ₽</th>
                   </tr>
                 </thead>
@@ -217,6 +222,13 @@ function BuyoutArchive() {
                       <td className="py-1.5 pr-3 text-text-secondary">{b.actualBuyoutCny ? fmt(Number(b.actualBuyoutCny)) : "—"}</td>
                       <td className="py-1.5 pr-3 text-text-secondary">
                         {b.actualSupplierDiscountCny ? fmt(Number(b.actualSupplierDiscountCny)) : "—"}
+                      </td>
+                      <td className="py-1.5 pr-3 text-text-secondary">{fmt(b.servicesAndCommissionCny)}</td>
+                      <td className="py-1.5 pr-3 text-text-secondary">
+                        {b.actualClientPaymentRateUsed ? `1¥ = ${Number(b.actualClientPaymentRateUsed).toFixed(2)}₽` : "—"}
+                      </td>
+                      <td className="py-1.5 pr-3 text-text-secondary">
+                        {b.actualClientPaymentCny !== null ? fmt(b.actualClientPaymentCny) : "—"}
                       </td>
                       <td className="py-1.5 text-text-secondary">{b.actualClientPaymentRub ? fmt(Number(b.actualClientPaymentRub)) : "—"}</td>
                     </tr>

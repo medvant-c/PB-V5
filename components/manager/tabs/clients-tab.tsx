@@ -13,6 +13,7 @@ import {
   FileStack,
   FileText,
   ImageOff,
+  Inbox,
   Loader2,
   MessageSquare,
   Package,
@@ -1457,19 +1458,25 @@ function ManagerClientsTab() {
   }, [loadDraftCounts]);
 
   // Same "count visible before expanding" treatment as draftCounts above,
-  // one status over — a quote the client rejected needs just as much
-  // attention as an unprocessed search request. See PB-V5 chat 2026-07-29.
+  // for two more statuses — a quote the client rejected needs just as much
+  // attention as an unprocessed search request, and a quote nobody's
+  // picked up yet needs a first look. One shared fetch of /api/manager-
+  // quotes rather than two, since both counts come from the same list.
+  // See PB-V5 chat 2026-07-29.
   const [needsReplacementCounts, setNeedsReplacementCounts] = useState<Record<string, number>>({});
+  const [newRequestCounts, setNewRequestCounts] = useState<Record<string, number>>({});
   useEffect(() => {
     fetch("/api/manager-quotes")
       .then((res) => res.json())
       .then((data) => {
-        const counts: Record<string, number> = {};
+        const replacementCounts: Record<string, number> = {};
+        const requestCounts: Record<string, number> = {};
         for (const quote of data.quotes ?? []) {
-          if (quote.status !== "needs_replacement") continue;
-          counts[quote.clientId] = (counts[quote.clientId] ?? 0) + 1;
+          if (quote.status === "needs_replacement") replacementCounts[quote.clientId] = (replacementCounts[quote.clientId] ?? 0) + 1;
+          if (quote.status === "new_request") requestCounts[quote.clientId] = (requestCounts[quote.clientId] ?? 0) + 1;
         }
-        setNeedsReplacementCounts(counts);
+        setNeedsReplacementCounts(replacementCounts);
+        setNewRequestCounts(requestCounts);
       });
   }, [quotesRefreshKey]);
 
@@ -1723,6 +1730,11 @@ function ManagerClientsTab() {
                         >
                           {client.selfSourcedClaimed ? "свой клиент" : "клиент компании"}
                         </span>
+                        {newRequestCounts[client.id] > 0 && (
+                          <span className="flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                            <Inbox className="h-3 w-3" /> новые заявки: {newRequestCounts[client.id]}
+                          </span>
+                        )}
                         {draftCounts[client.id] > 0 && (
                           <span className="flex items-center gap-1 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
                             <AlertTriangle className="h-3 w-3" /> заявки на поиск не обработаны: {draftCounts[client.id]}
