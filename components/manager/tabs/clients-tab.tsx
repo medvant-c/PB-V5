@@ -19,6 +19,7 @@ import {
   Package,
   Pencil,
   Plus,
+  Receipt,
   RefreshCw,
   Trash2,
   UserRound,
@@ -363,6 +364,8 @@ function ClientQuotes({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportingInvoice, setExportingInvoice] = useState(false);
+  const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [exportingPdfBundle, setExportingPdfBundle] = useState(false);
   const [pdfBundleError, setPdfBundleError] = useState<string | null>(null);
   const [expandedCommentId, setExpandedCommentId] = useState<string | null>(null);
@@ -594,6 +597,43 @@ function ClientQuotes({
     }
   }
 
+  // "Счёт на услуги" — bills specifically for the Просчёт service fee per
+  // selected quote (not the full order total), for the manager to hand the
+  // client after doing the calculation work. Same request/download shape
+  // as handleExportExcel above, different endpoint.
+  async function handleExportInvoice() {
+    if (exportingInvoice || selectedIds.length === 0) return;
+    setExportingInvoice(true);
+    setInvoiceError(null);
+    try {
+      const res = await fetch(`/api/manager-clients/${clientId}/invoice-excel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quoteIds: selectedIds }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setInvoiceError(data.error ?? "Не удалось сформировать счёт.");
+        return;
+      }
+      const disposition = res.headers.get("content-disposition") ?? "";
+      const fileNameMatch = disposition.match(/filename\*=UTF-8''([^;]+)/);
+      const fileName = fileNameMatch ? decodeURIComponent(fileNameMatch[1]) : "Счёт на услуги.xlsx";
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setInvoiceError("Не удалось связаться с сервером.");
+    } finally {
+      setExportingInvoice(false);
+    }
+  }
+
   // Merges each selected quote's full detail page (photo, breakdown,
   // disclaimer — same layout as one quote's own PDF) into a single file, in
   // creation order — "по порядку" — instead of downloading N separate PDFs.
@@ -739,6 +779,15 @@ function ClientQuotes({
           {exportingPdfBundle ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
           Скачать PDF {selectedIds.length > 0 && `(${selectedIds.length})`}
         </button>
+        <button
+          type="button"
+          onClick={handleExportInvoice}
+          disabled={selectedIds.length === 0 || exportingInvoice}
+          className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {exportingInvoice ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Receipt className="h-3.5 w-3.5" />}
+          Счёт на услуги {selectedIds.length > 0 && `(${selectedIds.length})`}
+        </button>
 
         <AlertDialog>
           <AlertDialogTrigger asChild>
@@ -794,6 +843,7 @@ function ClientQuotes({
       {bulkError && <p className="text-xs text-error">{bulkError}</p>}
       {exportError && <p className="text-xs text-error">{exportError}</p>}
       {pdfBundleError && <p className="text-xs text-error">{pdfBundleError}</p>}
+      {invoiceError && <p className="text-xs text-error">{invoiceError}</p>}
       <ul className="space-y-1.5">
         {quotes.map((quote) => (
           <li key={quote.id} className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">

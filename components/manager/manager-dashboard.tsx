@@ -18,9 +18,11 @@ import {
   Download,
   AlertTriangle,
   Inbox,
+  Clock,
 } from "lucide-react";
 import { QUOTE_STATUSES, QUOTE_STATUS_LABEL, QUOTE_STATUS_BADGE_CLASSES, QUOTE_STATUS_DOT_COLOR } from "@/lib/quote-statuses";
 import { cn } from "@/lib/utils";
+import { QuoteDialog } from "@/components/manager/quote-dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface StatSummary {
@@ -105,6 +107,7 @@ interface PerManagerRow extends StatSummary {
 // the status pills — a subset of what GET /api/manager-quotes returns.
 interface QuoteListItem {
   id: string;
+  clientId: string;
   displayId: number;
   productName: string;
   status: string;
@@ -157,6 +160,13 @@ function fmt(value: number): string {
 // priced in), converted here purely for display.
 function fmtCny(rub: number, cnyRateRub: number): string {
   return fmt(rub / cnyRateRub);
+}
+
+// "X ¥ (Y ₽)" — every dashboard money figure shows both at once (see PB-V5
+// chat 2026-07-29): ¥ is what the business actually thinks in, ₽ alongside
+// it since that's still what's stored/quoted internally.
+function fmtBoth(rub: number, cnyRateRub: number): string {
+  return `${fmtCny(rub, cnyRateRub)} ¥ (${fmt(rub)} ₽)`;
 }
 
 // One row inside a hover breakdown — label left, ₽ value right, an
@@ -248,7 +258,7 @@ function StatCardsRow({
   cnyRateRub: number;
 }) {
   const isHighConversion = stats.conversionPercent >= CONVERSION_HEALTHY_THRESHOLD_PERCENT;
-  const m = (rub: number) => fmtCny(rub, cnyRateRub);
+  const m = (rub: number) => fmtBoth(rub, cnyRateRub);
 
   // Residual, not a tracked field — guarantees the four rows always sum to
   // exactly pipelineRub instead of drifting from a separately-summed value.
@@ -260,15 +270,15 @@ function StatCardsRow({
         featured
         icon={TrendingUp}
         label="В работе (потенциал)"
-        value={`${m(stats.pipelineRub)} ¥`}
+        value={`${m(stats.pipelineRub)}`}
         subtitle={`${stats.totalQuotes} просчётов`}
         tooltip={
           <>
-            <BreakdownRow label="Товар" value={`${m(stats.pipelineGoodsRub)} ¥`} />
-            <BreakdownRow label="Доставка по Китаю" value={`${m(stats.pipelineChinaDeliveryRub)} ¥`} />
-            <BreakdownRow label="Доставка карго" value={`${m(stats.pipelineCargoRub)} ¥`} />
-            <BreakdownRow label="Услуги и комиссии" value={`${m(pipelineServicesRub)} ¥`} />
-            <BreakdownRow label="Итого в работе" value={`${m(stats.pipelineRub)} ¥`} isTotal />
+            <BreakdownRow label="Товар" value={`${m(stats.pipelineGoodsRub)}`} />
+            <BreakdownRow label="Доставка по Китаю" value={`${m(stats.pipelineChinaDeliveryRub)}`} />
+            <BreakdownRow label="Доставка карго" value={`${m(stats.pipelineCargoRub)}`} />
+            <BreakdownRow label="Услуги и комиссии" value={`${m(pipelineServicesRub)}`} />
+            <BreakdownRow label="Итого в работе" value={`${m(stats.pipelineRub)}`} isTotal />
           </>
         }
       />
@@ -290,25 +300,25 @@ function StatCardsRow({
       <StatCard
         icon={Gift}
         label="Премия менеджерам"
-        value={`${m(stats.factualPremiumRub)} ¥`}
+        value={`${m(stats.factualPremiumRub)}`}
         valueClassName="text-success"
-        subtitle={`ожидается ещё ${m(stats.estimatedPremiumRub)} ¥`}
+        subtitle={`ожидается ещё ${m(stats.estimatedPremiumRub)}`}
         tooltip={
           <>
-            <BreakdownRow label="Факт — просчёт" value={`${m(Math.max(0, stats.factualProscetRub))} ¥ прибыли`} />
-            <BreakdownRow label="Факт — выкуп" value={`${m(Math.max(0, stats.factualBuyoutRub))} ¥ прибыли`} />
-            <BreakdownRow label="Факт — скидка поставщика" value={`${m(Math.max(0, stats.factualDiscountRub))} ¥ прибыли`} />
+            <BreakdownRow label="Факт — просчёт" value={`${m(Math.max(0, stats.factualProscetRub))} прибыли`} />
+            <BreakdownRow label="Факт — выкуп" value={`${m(Math.max(0, stats.factualBuyoutRub))} прибыли`} />
+            <BreakdownRow label="Факт — скидка поставщика" value={`${m(Math.max(0, stats.factualDiscountRub))} прибыли`} />
             <BreakdownRow
               label="Факт — премия"
-              value={`${m(stats.factualPremiumRub - stats.factualCargoBonusRub - stats.factualFulfillmentPremiumRub)} ¥`}
+              value={`${m(stats.factualPremiumRub - stats.factualCargoBonusRub - stats.factualFulfillmentPremiumRub)}`}
             />
-            <BreakdownRow label="Факт — бонус за карго" value={`${m(stats.factualCargoBonusRub)} ¥`} />
-            <BreakdownRow label="Факт — фулфилмент" value={`${m(stats.factualFulfillmentPremiumRub)} ¥`} />
-            <BreakdownRow label="Итого фактическая премия" value={`${m(stats.factualPremiumRub)} ¥`} isTotal />
+            <BreakdownRow label="Факт — бонус за карго" value={`${m(stats.factualCargoBonusRub)}`} />
+            <BreakdownRow label="Факт — фулфилмент" value={`${m(stats.factualFulfillmentPremiumRub)}`} />
+            <BreakdownRow label="Итого фактическая премия" value={`${m(stats.factualPremiumRub)}`} isTotal />
             <div className="pt-2 text-[11px] text-white/60">Ниже — то, что ещё не подтверждено (потенциал):</div>
-            <BreakdownRow label="Потенциал — премия за услуги" value={`${m(stats.estimatedPremiumRub - stats.potentialCargoBonusRub)} ¥`} />
-            <BreakdownRow label="Потенциал — бонус за карго" value={`${m(stats.potentialCargoBonusRub)} ¥`} />
-            <BreakdownRow label="Итого ожидаемая премия" value={`${m(stats.estimatedPremiumRub)} ¥`} isTotal />
+            <BreakdownRow label="Потенциал — премия за услуги" value={`${m(stats.estimatedPremiumRub - stats.potentialCargoBonusRub)}`} />
+            <BreakdownRow label="Потенциал — бонус за карго" value={`${m(stats.potentialCargoBonusRub)}`} />
+            <BreakdownRow label="Итого ожидаемая премия" value={`${m(stats.estimatedPremiumRub)}`} isTotal />
           </>
         }
       />
@@ -317,14 +327,14 @@ function StatCardsRow({
           <StatCard
             icon={Wallet}
             label="Доход компании (факт)"
-            value={`${m(actualIncomeRub)} ¥`}
+            value={`${m(actualIncomeRub)}`}
             valueClassName="text-success"
             subtitle="Уже подтверждено"
           />
           <StatCard
             icon={Wallet}
             label="Доход компании (потенциал)"
-            value={`${m(expectedIncomeRub)} ¥`}
+            value={`${m(expectedIncomeRub)}`}
             valueClassName="text-success"
             subtitle="Если всё в работе будет куплено"
           />
@@ -375,14 +385,14 @@ function StatusPillsRow({
         onClick={() => onSelect({ key: "bought", statuses: BOUGHT_STATUSES })}
         className={pillClass("bought", "border border-border bg-surface text-text-secondary")}
       >
-        <Wallet className="h-3.5 w-3.5" /> Выкуплено · {fmtCny(stats.boughtRub, cnyRateRub)} ¥
+        <Wallet className="h-3.5 w-3.5" /> Выкуплено · {fmtBoth(stats.boughtRub, cnyRateRub)}
       </button>
       <button
         type="button"
         onClick={() => onSelect({ key: "handed_to_client", statuses: ["handed_to_client"] })}
         className={pillClass("handed_to_client", "border border-border bg-surface text-text-secondary")}
       >
-        <PackageCheck className="h-3.5 w-3.5" /> Выдано · {fmtCny(stats.handedRub, cnyRateRub)} ¥
+        <PackageCheck className="h-3.5 w-3.5" /> Выдано · {fmtBoth(stats.handedRub, cnyRateRub)}
       </button>
 
       {QUOTE_STATUSES.map((status) => {
@@ -448,8 +458,49 @@ function QuoteListPanel({
           <span className={cn("shrink-0 rounded-full px-2.5 py-1 text-xs font-medium", QUOTE_STATUS_BADGE_CLASSES[quote.status as keyof typeof QUOTE_STATUS_BADGE_CLASSES])}>
             {QUOTE_STATUS_LABEL[quote.status as keyof typeof QUOTE_STATUS_LABEL] ?? quote.status}
           </span>
-          <span className="w-28 shrink-0 text-right font-bold text-text">{fmtCny(Number(quote.totalRub), cnyRateRub)} ¥</span>
+          <span className="w-28 shrink-0 text-right font-bold text-text">{fmtBoth(Number(quote.totalRub), cnyRateRub)}</span>
         </a>
+      ))}
+    </div>
+  );
+}
+
+// Guangzhou/Moscow are where the two sides of the business actually sit;
+// Bishkek/Almaty are added per explicit request (see PB-V5 chat
+// 2026-07-29) — everyone on the team benefits from a shared, always-live
+// read of what time it is in every city that matters to a deal, without
+// doing the UTC math by hand.
+const WORLD_CLOCK_CITIES = [
+  { label: "Гуанчжоу", timeZone: "Asia/Shanghai" },
+  { label: "Москва", timeZone: "Europe/Moscow" },
+  { label: "Бишкек", timeZone: "Asia/Bishkek" },
+  { label: "Алматы", timeZone: "Asia/Almaty" },
+] as const;
+
+function WorldClockWidget() {
+  const [now, setNow] = useState<Date | null>(null);
+  // Same "compute client-side only" reasoning as TodayPill below — a
+  // ticking clock can never match between server and client anyway, and
+  // it isn't meaningful until the browser paints it.
+  useEffect(() => {
+    setNow(new Date());
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {WORLD_CLOCK_CITIES.map((city) => (
+        <div
+          key={city.timeZone}
+          className="flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-text-secondary"
+        >
+          <Clock className="h-3.5 w-3.5" />
+          {city.label}
+          <span className="font-mono text-sm font-bold tabular-nums text-text">
+            {now ? now.toLocaleTimeString("ru-RU", { timeZone: city.timeZone, hour12: false }) : "--:--:--"}
+          </span>
+        </div>
       ))}
     </div>
   );
@@ -523,15 +574,22 @@ function SearchDraftsWidget() {
   );
 }
 
+interface QuoteWidgetProps {
+  refreshKey: number;
+  onOpenQuote: (quote: QuoteListItem) => void;
+}
+
 // Same pattern as SearchDraftsWidget above, one status over — a quote the
 // client rejected and that needs a fresh calculation is exactly as
 // actionable as an unprocessed search request, so it gets the same
 // glanceable, always-collapsible treatment right next to it rather than
 // staying buried in the status-pill row. Fetches independently (not from
 // the pill row's allQuotes, which stays lazy until a pill is first
-// clicked) so this widget's count is visible immediately on load. See
-// PB-V5 chat 2026-07-29.
-function NeedsReplacementWidget() {
+// clicked) so this widget's count is visible immediately on load. Rows
+// are clickable — opens the quote straight into edit, same as clicking a
+// quote row in Клиенты, rather than making the manager hunt for it via
+// the client list. See PB-V5 chat 2026-07-29.
+function NeedsReplacementWidget({ refreshKey, onOpenQuote }: QuoteWidgetProps) {
   const [items, setItems] = useState<QuoteListItem[] | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -539,7 +597,7 @@ function NeedsReplacementWidget() {
     fetch("/api/manager-quotes")
       .then((res) => res.json())
       .then((d) => setItems((d.quotes ?? []).filter((q: QuoteListItem) => q.status === "needs_replacement")));
-  }, []);
+  }, [refreshKey]);
 
   if (!items || items.length === 0) return null;
 
@@ -554,14 +612,20 @@ function NeedsReplacementWidget() {
       {open && (
         <ul className="mt-3 space-y-1.5">
           {items.map((quote) => (
-            <li key={quote.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/20 bg-surface p-2.5 text-sm">
-              <span className="font-medium text-text">
-                №{quote.displayId} · {quote.productName}
-              </span>
-              <span className="text-xs text-text-secondary">
-                {quote.client.name}
-                {quote.client.company ? ` · ${quote.client.company}` : ""}
-              </span>
+            <li key={quote.id}>
+              <button
+                type="button"
+                onClick={() => onOpenQuote(quote)}
+                className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border border-error/20 bg-surface p-2.5 text-left text-sm transition-colors hover:border-error/40"
+              >
+                <span className="font-medium text-text">
+                  №{quote.displayId} · {quote.productName}
+                </span>
+                <span className="text-xs text-text-secondary">
+                  {quote.client.name}
+                  {quote.client.company ? ` · ${quote.client.company}` : ""}
+                </span>
+              </button>
             </li>
           ))}
         </ul>
@@ -575,7 +639,7 @@ function NeedsReplacementWidget() {
 // picked up yet. Primary (not warning/error) color, distinguishing "new,
 // needs a first look" from "unprocessed" (amber) and "rejected, needs
 // rework" (red). See PB-V5 chat 2026-07-29.
-function NewRequestsWidget() {
+function NewRequestsWidget({ refreshKey, onOpenQuote }: QuoteWidgetProps) {
   const [items, setItems] = useState<QuoteListItem[] | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -583,7 +647,7 @@ function NewRequestsWidget() {
     fetch("/api/manager-quotes")
       .then((res) => res.json())
       .then((d) => setItems((d.quotes ?? []).filter((q: QuoteListItem) => q.status === "new_request")));
-  }, []);
+  }, [refreshKey]);
 
   if (!items || items.length === 0) return null;
 
@@ -598,14 +662,20 @@ function NewRequestsWidget() {
       {open && (
         <ul className="mt-3 space-y-1.5">
           {items.map((quote) => (
-            <li key={quote.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/20 bg-surface p-2.5 text-sm">
-              <span className="font-medium text-text">
-                №{quote.displayId} · {quote.productName}
-              </span>
-              <span className="text-xs text-text-secondary">
-                {quote.client.name}
-                {quote.client.company ? ` · ${quote.client.company}` : ""}
-              </span>
+            <li key={quote.id}>
+              <button
+                type="button"
+                onClick={() => onOpenQuote(quote)}
+                className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/20 bg-surface p-2.5 text-left text-sm transition-colors hover:border-primary/40"
+              >
+                <span className="font-medium text-text">
+                  №{quote.displayId} · {quote.productName}
+                </span>
+                <span className="text-xs text-text-secondary">
+                  {quote.client.name}
+                  {quote.client.company ? ` · ${quote.client.company}` : ""}
+                </span>
+              </button>
             </li>
           ))}
         </ul>
@@ -626,12 +696,28 @@ function ManagerDashboard() {
   const [allQuotes, setAllQuotes] = useState<QuoteListItem[] | null>(null);
   const [loadingQuotes, setLoadingQuotes] = useState(false);
 
+  // Clicking a row in NewRequestsWidget/NeedsReplacementWidget opens this
+  // quote straight into edit via the same QuoteDialog used in Клиенты,
+  // instead of forcing a switch-tab-then-find-the-client detour.
+  // quotesRefreshKey bumps on save so both widgets (and the pill row's own
+  // list, via allQuotes below) drop the quote the moment its status
+  // changes and it no longer belongs in that bucket.
+  const [editingQuote, setEditingQuote] = useState<{ clientId: string; clientName: string; quoteId: string } | null>(null);
+  const [quotesRefreshKey, setQuotesRefreshKey] = useState(0);
+
   useEffect(() => {
     fetch("/api/manager-dashboard")
       .then((res) => res.json())
       .then((d) => setData(d))
       .finally(() => setLoading(false));
-  }, []);
+  }, [quotesRefreshKey]);
+
+  // Drop the pill row's own cached quote list on save too, so it re-fetches
+  // fresh data next time a pill is clicked instead of showing a quote
+  // under its old status.
+  useEffect(() => {
+    setAllQuotes(null);
+  }, [quotesRefreshKey]);
 
   function handlePillSelect(filter: PillFilter) {
     setActiveFilter((current) => (current?.key === filter.key ? null : filter));
@@ -665,12 +751,21 @@ function ManagerDashboard() {
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-2xl font-extrabold tracking-tight text-text">Дашборд</h2>
-          <TodayPill />
+          <div className="flex flex-wrap items-center gap-2">
+            <WorldClockWidget />
+            <TodayPill />
+          </div>
         </div>
 
-        <NewRequestsWidget />
+        <NewRequestsWidget
+          refreshKey={quotesRefreshKey}
+          onOpenQuote={(quote) => setEditingQuote({ clientId: quote.clientId, clientName: quote.client.name, quoteId: quote.id })}
+        />
         <SearchDraftsWidget />
-        <NeedsReplacementWidget />
+        <NeedsReplacementWidget
+          refreshKey={quotesRefreshKey}
+          onOpenQuote={(quote) => setEditingQuote({ clientId: quote.clientId, clientName: quote.client.name, quoteId: quote.id })}
+        />
 
         <StatCardsRow
           stats={data.overall}
@@ -727,7 +822,7 @@ function ManagerDashboard() {
                     <Handshake className="h-3.5 w-3.5" /> Просчёт + Выкуп — потенциал
                   </div>
                   <div className="mt-1 text-lg font-bold text-text">
-                    {fmtCny(data.potentialProscetRub + data.potentialBuyoutRub, data.cnyRateRub)} ¥
+                    {fmtBoth(data.potentialProscetRub + data.potentialBuyoutRub, data.cnyRateRub)}
                   </div>
                 </div>
                 <div className="rounded-xl border border-border bg-surface p-3.5">
@@ -735,7 +830,7 @@ function ManagerDashboard() {
                     <Handshake className="h-3.5 w-3.5" /> Просчёт + Выкуп — факт
                   </div>
                   <div className="mt-1 text-lg font-bold text-success">
-                    {fmtCny(data.factualProscetRub + data.factualBuyoutRub, data.cnyRateRub)} ¥
+                    {fmtBoth(data.factualProscetRub + data.factualBuyoutRub, data.cnyRateRub)}
                   </div>
                 </div>
                 <div className="rounded-xl border border-border bg-surface p-3.5">
@@ -743,7 +838,7 @@ function ManagerDashboard() {
                     <Ship className="h-3.5 w-3.5" /> Карго — потенциал
                   </div>
                   <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    <span className="text-lg font-bold text-text">{fmtCny(data.potentialCargoProfitRub, data.cnyRateRub)} ¥</span>
+                    <span className="text-lg font-bold text-text">{fmtBoth(data.potentialCargoProfitRub, data.cnyRateRub)}</span>
                     {data.cargoVolumeM3 != null && data.cargoWeightKg != null && (
                       <span className="text-xs text-text-secondary">
                         {data.cargoVolumeM3.toFixed(1)} м³ · {fmt(data.cargoWeightKg)} кг
@@ -755,13 +850,13 @@ function ManagerDashboard() {
                   <div className="flex items-center gap-1.5 text-xs text-text-secondary">
                     <Ship className="h-3.5 w-3.5" /> Карго — факт
                   </div>
-                  <div className="mt-1 text-lg font-bold text-success">{fmtCny(data.factualCargoProfitRub, data.cnyRateRub)} ¥</div>
+                  <div className="mt-1 text-lg font-bold text-success">{fmtBoth(data.factualCargoProfitRub, data.cnyRateRub)}</div>
                 </div>
                 <div className="rounded-xl border border-border bg-surface p-3.5 sm:col-span-2">
                   <div className="flex items-center gap-1.5 text-xs text-text-secondary">
                     <Handshake className="h-3.5 w-3.5" /> Скидка поставщика — факт
                   </div>
-                  <div className="mt-1 text-lg font-bold text-success">{fmtCny(data.factualDiscountRub, data.cnyRateRub)} ¥</div>
+                  <div className="mt-1 text-lg font-bold text-success">{fmtBoth(data.factualDiscountRub, data.cnyRateRub)}</div>
                 </div>
               </div>
 
@@ -818,15 +913,15 @@ function ManagerDashboard() {
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <div className="rounded-xl border border-border bg-surface p-3.5">
                 <div className="text-xs text-text-secondary">Влад (Партнёр) — 10%</div>
-                <div className="mt-1 text-lg font-bold text-text">{fmtCny(data.vladShareRub, data.cnyRateRub)} ¥</div>
+                <div className="mt-1 text-lg font-bold text-text">{fmtBoth(data.vladShareRub, data.cnyRateRub)}</div>
               </div>
               <div className="rounded-xl border border-border bg-surface p-3.5">
                 <div className="text-xs text-text-secondary">Александр (Основатель/Инвестор)</div>
-                <div className="mt-1 text-lg font-bold text-text">{fmtCny(data.founderShareRub, data.cnyRateRub)} ¥</div>
+                <div className="mt-1 text-lg font-bold text-text">{fmtBoth(data.founderShareRub, data.cnyRateRub)}</div>
               </div>
               <div className="rounded-xl border border-border bg-surface p-3.5">
                 <div className="text-xs text-text-secondary">Антон</div>
-                <div className="mt-1 text-lg font-bold text-text">{fmtCny(data.founderShareRub, data.cnyRateRub)} ¥</div>
+                <div className="mt-1 text-lg font-bold text-text">{fmtBoth(data.founderShareRub, data.cnyRateRub)}</div>
               </div>
             </div>
           </div>
@@ -836,16 +931,16 @@ function ManagerDashboard() {
           <div className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
             <h3 className="text-sm font-bold text-text">KPI по сотрудникам</h3>
             <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-150 border-collapse text-sm">
+              <table className="w-full min-w-250 border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-text-secondary">
                     <th className="py-1.5 font-medium">Менеджер</th>
                     <th className="py-1.5 font-medium">Просчётов</th>
-                    <th className="py-1.5 font-medium">Выкуплено, ¥</th>
-                    <th className="py-1.5 font-medium">Выдано, ¥</th>
-                    <th className="py-1.5 font-medium">В работе, ¥</th>
-                    <th className="py-1.5 font-medium">Премия факт, ¥</th>
-                    <th className="py-1.5 font-medium">Премия потенциал, ¥</th>
+                    <th className="py-1.5 font-medium">Выкуплено</th>
+                    <th className="py-1.5 font-medium">Выдано</th>
+                    <th className="py-1.5 font-medium">В работе</th>
+                    <th className="py-1.5 font-medium">Премия факт</th>
+                    <th className="py-1.5 font-medium">Премия потенциал</th>
                     <th className="py-1.5 font-medium">Конверсия</th>
                   </tr>
                 </thead>
@@ -854,11 +949,11 @@ function ManagerDashboard() {
                     <tr key={row.managerId} className="border-b border-border last:border-0">
                       <td className="py-1.5 font-medium text-text">{row.managerName}</td>
                       <td className="py-1.5 text-text-secondary">{row.totalQuotes}</td>
-                      <td className="py-1.5 text-text-secondary">{fmtCny(row.boughtRub, data.cnyRateRub)}</td>
-                      <td className="py-1.5 text-text-secondary">{fmtCny(row.handedRub, data.cnyRateRub)}</td>
-                      <td className="py-1.5 text-text-secondary">{fmtCny(row.pipelineRub, data.cnyRateRub)}</td>
-                      <td className="py-1.5 font-semibold text-success">{fmtCny(row.factualPremiumRub, data.cnyRateRub)}</td>
-                      <td className="py-1.5 text-text-secondary">{fmtCny(row.estimatedPremiumRub, data.cnyRateRub)}</td>
+                      <td className="py-1.5 whitespace-nowrap text-text-secondary">{fmtBoth(row.boughtRub, data.cnyRateRub)}</td>
+                      <td className="py-1.5 whitespace-nowrap text-text-secondary">{fmtBoth(row.handedRub, data.cnyRateRub)}</td>
+                      <td className="py-1.5 whitespace-nowrap text-text-secondary">{fmtBoth(row.pipelineRub, data.cnyRateRub)}</td>
+                      <td className="py-1.5 whitespace-nowrap font-semibold text-success">{fmtBoth(row.factualPremiumRub, data.cnyRateRub)}</td>
+                      <td className="py-1.5 whitespace-nowrap text-text-secondary">{fmtBoth(row.estimatedPremiumRub, data.cnyRateRub)}</td>
                       <td className="py-1.5">
                         <ConversionRing percent={row.conversionPercent} size={32} />
                       </td>
@@ -902,6 +997,19 @@ function ManagerDashboard() {
           </div>
         )}
       </div>
+
+      {editingQuote && (
+        <QuoteDialog
+          client={{ id: editingQuote.clientId, name: editingQuote.clientName }}
+          open={true}
+          onOpenChange={(open) => !open && setEditingQuote(null)}
+          onSaved={() => {
+            setEditingQuote(null);
+            setQuotesRefreshKey((k) => k + 1);
+          }}
+          editingQuoteId={editingQuote.quoteId}
+        />
+      )}
     </TooltipProvider>
   );
 }
