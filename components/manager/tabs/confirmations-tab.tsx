@@ -39,6 +39,14 @@ function daysWaiting(value: string): number {
   return Math.floor((Date.now() - new Date(value).getTime()) / (24 * 60 * 60 * 1000));
 }
 
+// Some mobile keyboards (Russian locale) insert a comma as the decimal
+// separator into a type="number" input instead of a period — Number()
+// silently returns NaN for "12,8", which then fails validation with no
+// visible explanation. Normalized at every read site, not just on submit.
+function parseNum(value: string): number {
+  return Number(value.replace(",", "."));
+}
+
 // Live client-side mirror of the server formula in confirm-buyout/route.ts —
 // purely a preview so the person confirming sees «Скидка» update as they
 // type, before it's actually computed and stored server-side on submit.
@@ -46,9 +54,9 @@ function previewDiscountCny(
   quote: PendingBuyout,
   draft: { cny: string; rate: string; rub: string; rateRub: string },
 ): number | null {
-  const buyoutCny = Number(draft.cny);
-  const paymentRub = Number(draft.rub);
-  const paymentRate = Number(draft.rateRub);
+  const buyoutCny = parseNum(draft.cny);
+  const paymentRub = parseNum(draft.rub);
+  const paymentRate = parseNum(draft.rateRub);
   if (!Number.isFinite(buyoutCny) || buyoutCny <= 0) return null;
   if (!Number.isFinite(paymentRub) || paymentRub <= 0 || !Number.isFinite(paymentRate) || paymentRate <= 0) return null;
   const paymentAmountCny = paymentRub / paymentRate;
@@ -82,12 +90,26 @@ function ManagerConfirmationsTab() {
 
   async function handleConfirmBuyout(quoteId: string) {
     const draft = drafts[quoteId] ?? { cny: "", rate: "", rub: "", rateRub: "" };
-    const cny = Number(draft.cny);
-    const rate = Number(draft.rate);
-    const rub = Number(draft.rub);
-    const rateRub = Number(draft.rateRub);
-    if (!Number.isFinite(cny) || cny <= 0 || !Number.isFinite(rate) || rate <= 0) return;
-    if (!Number.isFinite(rub) || rub <= 0 || !Number.isFinite(rateRub) || rateRub <= 0) return;
+    const cny = parseNum(draft.cny);
+    const rate = parseNum(draft.rate);
+    const rub = parseNum(draft.rub);
+    const rateRub = parseNum(draft.rateRub);
+    if (!Number.isFinite(cny) || cny <= 0) {
+      setError("Заполните «Выкуп факт».");
+      return;
+    }
+    if (!Number.isFinite(rate) || rate <= 0) {
+      setError("Заполните курс ¥→₽ рядом с «Выкуп факт».");
+      return;
+    }
+    if (!Number.isFinite(rub) || rub <= 0) {
+      setError("Заполните «Оплата от клиента».");
+      return;
+    }
+    if (!Number.isFinite(rateRub) || rateRub <= 0) {
+      setError("Заполните курс ¥→₽ рядом с «Оплата от клиента».");
+      return;
+    }
     setBusyId(quoteId);
     setError(null);
     try {
@@ -175,7 +197,10 @@ function ManagerConfirmationsTab() {
               </p>
               <ul className="mt-2 space-y-2">
                 {pendingBuyouts.map((quote) => {
-                  const draft = drafts[quote.id] ?? { cny: "", rate: "", rub: "", rateRub: "" };
+                  // Курс по умолчанию — снапшот с самого просчёта (quote.cnyRateUsed),
+                  // а не пустое поле: пока курс не отличался от планового, менеджеру
+                  // не нужно ничего вводить руками, только поправить при расхождении.
+                  const draft = drafts[quote.id] ?? { cny: "", rate: quote.cnyRateUsed, rub: "", rateRub: quote.cnyRateUsed };
                   const days = daysWaiting(quote.statusChangedAt);
                   const servicesAndCommissionCny = (Number(quote.searchServiceFeeRub) + Number(quote.buyoutCommissionRub)) / Number(quote.cnyRateUsed);
                   const discountPreview = previewDiscountCny(quote, draft);
