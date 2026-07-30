@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { parseLocaleNumber } from "@/lib/number";
 import type { ManagerSession } from "@/lib/manager-auth";
 import type {
   DensityTierInput,
@@ -36,13 +37,13 @@ function requiredString(value: FormDataEntryValue | null): string | null {
 
 function requiredNumber(value: FormDataEntryValue | null): number | null {
   if (typeof value !== "string" || !value.trim()) return null;
-  const num = Number(value);
+  const num = parseLocaleNumber(value);
   return Number.isFinite(num) ? num : null;
 }
 
 function optionalNumber(value: FormDataEntryValue | null): number | undefined {
   if (typeof value !== "string" || !value.trim()) return undefined;
-  const num = Number(value);
+  const num = parseLocaleNumber(value);
   return Number.isFinite(num) ? num : undefined;
 }
 

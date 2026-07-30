@@ -19,6 +19,7 @@ import {
   type VolumeInputMode,
 } from "@/lib/quote-engine";
 import { SEARCH_TIER_INFO } from "@/lib/desk-services/search-tier-info";
+import { parseLocaleNumber } from "@/lib/number";
 import { cn } from "@/lib/utils";
 
 interface TariffSettingsRecord {
@@ -405,7 +406,16 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     if (!categories.some(([key]) => key === cargoCategoryKey)) setCargoCategoryKey(categories[0][0]);
   }, [categories, cargoCategoryKey]);
 
-  const num = (value: string) => (value.trim() ? Number(value) : undefined);
+  // parseLocaleNumber handles a comma decimal separator; the NaN check
+  // covers anything else unparseable, so a bad value falls through to
+  // "not entered" everywhere else in this file treats undefined that way
+  // (e.g. cnyRateRub's `num(cnyRateRubOverride) ?? ...` fallback) instead
+  // of silently propagating NaN into computeQuote — see lib/number.ts.
+  const num = (value: string) => {
+    if (!value.trim()) return undefined;
+    const parsed = parseLocaleNumber(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  };
 
   const attachedServicesTotalRub = useMemo(
     () => attachedServices.reduce((sum, s) => sum + (Number(s.priceRub) || 0), 0),

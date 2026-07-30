@@ -193,6 +193,19 @@ function lookupBuyoutCommissionRate(tiers: BuyoutCommissionTierInput[], amountRu
 // density-tariff lookup — a silent $0 cargo rate is a worse failure mode
 // than a loud error the manager has to fix before quoting a real client.
 function computeQuote(inputs: QuoteEngineInputs): QuoteEngineOutputs {
+  // A zero/negative/NaN FX rate silently zeroes out (or NaNs) every ¥- and
+  // $-priced field on the quote while leaving it looking superficially
+  // saved and valid — this exact failure hit a real client quote (см. PB-V5
+  // chat 2026-07-30, просчёт №57: cnyRateUsed ended up 0 with no override
+  // set, source never conclusively identified). Loud and immediate beats
+  // silently persisting a broken invoice, same reasoning as every other
+  // throw in this function.
+  if (!Number.isFinite(inputs.cnyRateRub) || inputs.cnyRateRub <= 0) {
+    throw new Error("Курс юаня не задан или некорректен — проверьте вкладку «Тарифы» или ручной курс в просчёте.");
+  }
+  if (!Number.isFinite(inputs.usdRateRub) || inputs.usdRateRub <= 0) {
+    throw new Error("Курс доллара не задан или некорректен — проверьте вкладку «Тарифы».");
+  }
   const priceRubPerUnit = inputs.priceCnyPerUnit * inputs.cnyRateRub;
   const totalPriceCny = inputs.priceCnyPerUnit * inputs.quantity;
   const totalPriceRub = totalPriceCny * inputs.cnyRateRub;
