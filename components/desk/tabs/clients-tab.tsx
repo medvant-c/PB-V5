@@ -759,7 +759,7 @@ function ClientsTab() {
               <Input
                 placeholder="+7 (___) ___-__-__"
                 value={newClientPhone}
-                onChange={(e) => setNewClientPhone(formatPhoneMask(e.target.value))}
+                onChange={(e) => setNewClientPhone(formatPhoneMask(e.target.value, newClientPhone))}
                 required
               />
               <Input placeholder="Страна" value={newClientCountry} onChange={(e) => setNewClientCountry(e.target.value)} required />
@@ -902,7 +902,7 @@ function ClientsTab() {
                     <Input
                       placeholder="+7 (___) ___-__-__"
                       value={editPhone}
-                      onChange={(e) => setEditPhone(formatPhoneMask(e.target.value))}
+                      onChange={(e) => setEditPhone(formatPhoneMask(e.target.value, editPhone))}
                     />
                     <Input placeholder="Страна" value={editCountry} onChange={(e) => setEditCountry(e.target.value)} />
                     <Input placeholder="Город" value={editCity} onChange={(e) => setEditCity(e.target.value)} />

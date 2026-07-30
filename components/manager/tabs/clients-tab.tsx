@@ -1914,7 +1914,7 @@ function ManagerClientsTab() {
             <Input
               placeholder="+7 (___) ___-__-__ (необязательно)"
               value={phone}
-              onChange={(e) => setPhone(formatPhoneMask(e.target.value))}
+              onChange={(e) => setPhone(formatPhoneMask(e.target.value, phone))}
             />
             <Input placeholder="Telegram / WeChat" value={messenger} onChange={(e) => setMessenger(e.target.value)} />
             <Input type="email" placeholder="Email (необязательно)" value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -2164,7 +2164,7 @@ function ManagerClientsTab() {
                               <Input
                                 placeholder="+7 (___) ___-__-__"
                                 value={editDraft.phone}
-                                onChange={(e) => setEditDraft((d) => ({ ...d, phone: formatPhoneMask(e.target.value) }))}
+                                onChange={(e) => setEditDraft((d) => ({ ...d, phone: formatPhoneMask(e.target.value, d.phone) }))}
                               />
                               <Input
                                 placeholder="Telegram / WeChat"

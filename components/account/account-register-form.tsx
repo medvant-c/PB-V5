@@ -92,7 +92,7 @@ function AccountRegisterForm() {
               id="register-phone"
               placeholder="+7 (___) ___-__-__"
               value={phone}
-              onChange={(e) => setPhone(formatPhoneMask(e.target.value))}
+              onChange={(e) => setPhone(formatPhoneMask(e.target.value, phone))}
             />
           </div>
           <div className="space-y-1.5">
