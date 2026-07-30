@@ -220,6 +220,7 @@ model Manager {
   cashOrders     CashOrder[]
   cashOpeningBalanceUpdates CashOpeningBalance[]
   fulfillmentOrders FulfillmentOrder[]
+  completedFulfillmentServices FulfillmentOrderItemService[]
   quoteDraftRequests QuoteDraftRequest[]
 }
 
@@ -845,16 +846,23 @@ model CashOpeningBalance {
 
 // Фулфилмент — warehouse services billed directly to a client (goods
 // inspection/repackaging/labelling), a separate business line from the
-// Quote-based buyout/cargo flow (see PB-V5 chat 2026-07-28). Deliberately
-// simple per the owner's request ("пока этот блок расширенным делать не
-// будем") — no status/workflow, just recording which services were done
-// and the total billed.
+// Quote-based buyout/cargo flow (see PB-V5 chat 2026-07-28).
+//
+// Two-level structure (see PB-V5 chat 2026-07-30 — replaces the original
+// flat "order → service quantities" shape, which had no concept of a
+// physical item at all): an order holds one or more FulfillmentOrderItem
+// (a physical product the client dropped off — name/sku/dimensions), each
+// of which holds its own FulfillmentOrderItemService lines (which catalog
+// services apply to THAT item, and whether the warehouse has done them
+// yet). Deliberately still no order-level status/workflow beyond that —
+// per-service completion is the one atomic unit of physical work that
+// matters (see FulfillmentOrderItemService below).
 model FulfillmentServiceItem {
-  id         String                   @id @default(cuid())
-  name       String
-  priceRub   Decimal
-  createdAt  DateTime                 @default(now())
-  orderItems FulfillmentOrderItem[]
+  id            String                        @id @default(cuid())
+  name          String
+  priceRub      Decimal
+  createdAt     DateTime                      @default(now())
+  itemServices  FulfillmentOrderItemService[]
 }
 
 model FulfillmentOrder {
@@ -868,8 +876,11 @@ model FulfillmentOrder {
   quote     Quote?   @relation(fields: [quoteId], references: [id])
   managerId String
   manager   Manager  @relation(fields: [managerId], references: [id])
-  // Sum of items' priceRub × quantity — snapshotted at creation, not
-  // recomputed from items later.
+  // Sum of every item's services' priceRub × quantity — snapshotted at
+  // creation, not recomputed later. This is the ONLY field the fulfillment
+  // premium calc in app/api/manager-dashboard/route.ts reads — item/service
+  // detail below is for the warehouse and the order's own record, not
+  // anything the premium math depends on.
   totalRub  Decimal
   createdAt DateTime @default(now())
   items     FulfillmentOrderItem[]
@@ -878,20 +889,52 @@ model FulfillmentOrder {
   @@index([managerId])
 }
 
-// Snapshotted (name/priceRub), not a live reference — same reasoning as
-// QuoteAttachedService — so a later price change or deleted service never
-// alters an already-billed order.
+// One physical product/SKU dropped off as part of the order — what the
+// warehouse is actually handling. Deliberately order-scoped only, NOT a
+// persistent product/SKU catalog: the same SKU showing up in a later order
+// creates an entirely new, unrelated row (no cross-order inventory
+// tracking — see PB-V5 chat 2026-07-30). sku/dimensions are optional,
+// free-text — same "not every field is always known" reasoning as Quote's
+// own optional productLink/dimensions.
 model FulfillmentOrderItem {
-  id            String                  @id @default(cuid())
-  orderId       String
-  order         FulfillmentOrder        @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  serviceItemId String?
-  serviceItem   FulfillmentServiceItem? @relation(fields: [serviceItemId], references: [id], onDelete: SetNull)
-  name          String
-  priceRub      Decimal
-  quantity      Int
+  id         String   @id @default(cuid())
+  orderId    String
+  order      FulfillmentOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  name       String
+  sku        String?
+  dimensions String?
+  createdAt  DateTime @default(now())
+  services   FulfillmentOrderItemService[]
 
   @@index([orderId])
+}
+
+// One warehouse task (one catalog service) on one item — the atomic unit
+// of both billing and physical work. name/priceRub snapshotted, not a live
+// reference — same reasoning as QuoteAttachedService, so a later catalog
+// price change or deleted service never alters an already-billed order.
+//
+// completedAt/completedByManagerId is the physical-execution side — null
+// means not done yet, a timestamp means done and by whom, same
+// "timestamp doubles as boolean + audit trail" pattern as
+// Quote.buyoutConfirmedAt/buyoutConfirmedByManagerId. Any manager with
+// access to the order can mark a line done — no separate "warehouse" role
+// exists in this system, same "day-to-day work, no sign-off needed"
+// reasoning already applied to who can create the order at all.
+model FulfillmentOrderItemService {
+  id                    String                  @id @default(cuid())
+  itemId                String
+  item                  FulfillmentOrderItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  serviceItemId         String?
+  serviceItem           FulfillmentServiceItem? @relation(fields: [serviceItemId], references: [id], onDelete: SetNull)
+  name                  String
+  priceRub              Decimal
+  quantity              Int
+  completedAt           DateTime?
+  completedByManagerId  String?
+  completedByManager    Manager?                @relation(fields: [completedByManagerId], references: [id])
+
+  @@index([itemId])
 }
 
 // A lightweight "don't forget to build this quote" note — the client asked

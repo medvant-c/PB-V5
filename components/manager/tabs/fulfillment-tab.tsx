@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, Loader2, Package, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Download, Loader2, Package, Plus, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 interface ServiceItemRecord {
   id: string;
@@ -26,6 +27,23 @@ interface QuoteOption {
   productName: string;
 }
 
+interface OrderServiceRecord {
+  id: string;
+  name: string;
+  priceRub: string;
+  quantity: number;
+  completedAt: string | null;
+  completedByManager: { id: string; name: string } | null;
+}
+
+interface OrderItemRecord {
+  id: string;
+  name: string;
+  sku: string | null;
+  dimensions: string | null;
+  services: OrderServiceRecord[];
+}
+
 interface FulfillmentOrderRecord {
   id: string;
   displayId: number;
@@ -34,11 +52,26 @@ interface FulfillmentOrderRecord {
   client: { id: string; name: string; company: string | null };
   manager: { id: string; name: string };
   quote: { id: string; displayId: number; productName: string } | null;
-  items: { id: string; name: string; priceRub: string; quantity: number }[];
+  items: OrderItemRecord[];
+}
+
+// One draft товар block in the "Новый заказ" form — services keyed by
+// FulfillmentServiceItem.id, same "quantity string, 0/blank = not
+// selected" convention the flat pre-товар form already used.
+interface DraftItem {
+  key: string;
+  name: string;
+  sku: string;
+  dimensions: string;
+  quantities: Record<string, string>;
 }
 
 function money(value: number): string {
   return Math.round(value).toLocaleString("ru-RU");
+}
+
+function blankDraftItem(): DraftItem {
+  return { key: crypto.randomUUID(), name: "", sku: "", dimensions: "", quantities: {} };
 }
 
 function ManagerFulfillmentTab() {
@@ -46,11 +79,13 @@ function ManagerFulfillmentTab() {
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [orders, setOrders] = useState<FulfillmentOrderRecord[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [busyServiceCompletionId, setBusyServiceCompletionId] = useState<string | null>(null);
 
   const [clientId, setClientId] = useState("");
   const [quoteId, setQuoteId] = useState("");
   const [clientQuotes, setClientQuotes] = useState<QuoteOption[]>([]);
-  const [quantities, setQuantities] = useState<Record<string, string>>({});
+  const [draftItems, setDraftItems] = useState<DraftItem[]>([blankDraftItem()]);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -99,10 +134,37 @@ function ManagerFulfillmentTab() {
       .then((data) => setClientQuotes(data?.quotes ?? []));
   }, [clientId]);
 
+  function itemTotal(item: DraftItem): number {
+    return services.reduce((sum, s) => sum + Number(s.priceRub) * (Number(item.quantities[s.id]) || 0), 0);
+  }
+
   const total = useMemo(
-    () => services.reduce((sum, s) => sum + Number(s.priceRub) * (Number(quantities[s.id]) || 0), 0),
-    [services, quantities],
+    () =>
+      draftItems.reduce(
+        (orderSum, item) =>
+          orderSum + services.reduce((itemSum, s) => itemSum + Number(s.priceRub) * (Number(item.quantities[s.id]) || 0), 0),
+        0,
+      ),
+    [draftItems, services],
   );
+
+  function updateDraftItem(key: string, patch: Partial<DraftItem>) {
+    setDraftItems((current) => current.map((item) => (item.key === key ? { ...item, ...patch } : item)));
+  }
+
+  function updateDraftItemQuantity(key: string, serviceId: string, value: string) {
+    setDraftItems((current) =>
+      current.map((item) => (item.key === key ? { ...item, quantities: { ...item.quantities, [serviceId]: value } } : item)),
+    );
+  }
+
+  function addDraftItem() {
+    setDraftItems((current) => [...current, blankDraftItem()]);
+  }
+
+  function removeDraftItem(key: string) {
+    setDraftItems((current) => (current.length > 1 ? current.filter((item) => item.key !== key) : current));
+  }
 
   async function handleCreateClient() {
     if (!newClientName.trim() || !newClientPhone.trim()) return;
@@ -133,11 +195,23 @@ function ManagerFulfillmentTab() {
       setFormError("Выберите клиента.");
       return;
     }
-    const items = services
-      .map((s) => ({ serviceItemId: s.id, name: s.name, priceRub: Number(s.priceRub), quantity: Number(quantities[s.id]) || 0 }))
-      .filter((item) => item.quantity > 0);
+    const items = draftItems
+      .filter((item) => item.name.trim())
+      .map((item) => ({
+        name: item.name.trim(),
+        sku: item.sku.trim() || undefined,
+        dimensions: item.dimensions.trim() || undefined,
+        services: services
+          .map((s) => ({ serviceItemId: s.id, name: s.name, priceRub: Number(s.priceRub), quantity: Number(item.quantities[s.id]) || 0 }))
+          .filter((service) => service.quantity > 0),
+      }));
     if (items.length === 0) {
-      setFormError("Отметьте количество хотя бы для одной услуги.");
+      setFormError("Укажите название хотя бы одного товара.");
+      return;
+    }
+    const emptyItem = items.find((item) => item.services.length === 0);
+    if (emptyItem) {
+      setFormError(`У товара «${emptyItem.name}» не выбрано ни одной услуги.`);
       return;
     }
     setSaving(true);
@@ -153,7 +227,7 @@ function ManagerFulfillmentTab() {
         setFormError(data.error ?? "Не удалось сохранить заказ.");
         return;
       }
-      setQuantities({});
+      setDraftItems([blankDraftItem()]);
       setClientId("");
       setQuoteId("");
       await loadOrders();
@@ -161,6 +235,20 @@ function ManagerFulfillmentTab() {
       setFormError("Не удалось связаться с сервером.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleToggleServiceCompleted(serviceId: string, completed: boolean) {
+    setBusyServiceCompletionId(serviceId);
+    try {
+      const res = await fetch(`/api/manager-fulfillment-order-services/${serviceId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ completed }),
+      });
+      if (res.ok) await loadOrders();
+    } finally {
+      setBusyServiceCompletionId(null);
     }
   }
 
@@ -232,7 +320,7 @@ function ManagerFulfillmentTab() {
         </p>
       </div>
 
-      <Card className="p-4 space-y-3">
+      <Card className="p-4 space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
@@ -292,23 +380,64 @@ function ManagerFulfillmentTab() {
           </div>
         </div>
 
-        <div className="space-y-1.5">
-          {services.map((s) => (
-            <div key={s.id} className="flex items-center gap-3 rounded-lg border border-border bg-bg px-3 py-2">
-              <span className="min-w-0 flex-1 text-sm text-text">{s.name}</span>
-              <span className="shrink-0 text-xs text-text-secondary">{s.priceRub} ₽/ед.</span>
-              <Input
-                type="number"
-                min={0}
-                step="1"
-                placeholder="0"
-                value={quantities[s.id] ?? ""}
-                onChange={(e) => setQuantities((c) => ({ ...c, [s.id]: e.target.value }))}
-                className="h-8 w-20 shrink-0 text-sm"
-              />
+        <div className="space-y-3">
+          {draftItems.map((item, index) => (
+            <div key={item.key} className="rounded-lg border border-border bg-bg p-3 space-y-2.5">
+              <div className="flex items-start gap-2">
+                <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-3">
+                  <Input
+                    placeholder={`Название товара ${draftItems.length > 1 ? `№${index + 1}` : ""}`}
+                    value={item.name}
+                    onChange={(e) => updateDraftItem(item.key, { name: e.target.value })}
+                  />
+                  <Input
+                    placeholder="Артикул (необязательно)"
+                    value={item.sku}
+                    onChange={(e) => updateDraftItem(item.key, { sku: e.target.value })}
+                  />
+                  <Input
+                    placeholder="Габариты (необязательно)"
+                    value={item.dimensions}
+                    onChange={(e) => updateDraftItem(item.key, { dimensions: e.target.value })}
+                  />
+                </div>
+                {draftItems.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeDraftItem(item.key)}
+                    className="shrink-0 rounded-md p-2 text-text-secondary transition-colors hover:bg-error/10 hover:text-error"
+                    aria-label="Удалить товар"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                {services.map((s) => (
+                  <div key={s.id} className="flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2">
+                    <span className="min-w-0 flex-1 text-sm text-text">{s.name}</span>
+                    <span className="shrink-0 text-xs text-text-secondary">{s.priceRub} ₽/ед.</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="1"
+                      placeholder="0"
+                      value={item.quantities[s.id] ?? ""}
+                      onChange={(e) => updateDraftItemQuantity(item.key, s.id, e.target.value)}
+                      className="h-8 w-20 shrink-0 text-sm"
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className="text-right text-xs text-text-secondary">Товар: {money(itemTotal(item))} ₽</p>
             </div>
           ))}
         </div>
+
+        <Button type="button" variant="outline" size="sm" onClick={addDraftItem}>
+          <Plus className="h-4 w-4" /> Добавить товар
+        </Button>
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
           <p className="text-sm font-bold text-text">Итого: {money(total)} ₽</p>
@@ -324,38 +453,88 @@ function ManagerFulfillmentTab() {
       ) : orders.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border p-4 text-sm text-text-secondary">Заказов пока нет.</p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="w-full min-w-3xl border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-border bg-bg text-left text-xs text-text-secondary">
-                <th className="px-3 py-1.5 font-medium">Дата</th>
-                <th className="px-3 py-1.5 font-medium">Клиент</th>
-                <th className="px-3 py-1.5 font-medium">Просчёт</th>
-                <th className="px-3 py-1.5 font-medium">Услуги</th>
-                <th className="px-3 py-1.5 font-medium">Менеджер</th>
-                <th className="px-3 py-1.5 font-medium">Сумма, ₽</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((order) => (
-                <tr key={order.id} className="border-b border-border last:border-0">
-                  <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">
-                    {new Date(order.createdAt).toLocaleDateString("ru-RU")}
-                  </td>
-                  <td className="px-3 py-1.5 text-text">
-                    {order.client.name}
+        <div className="space-y-2">
+          {orders.map((order) => {
+            const isOpen = expandedOrderId === order.id;
+            const totalServices = order.items.reduce((sum, item) => sum + item.services.length, 0);
+            const completedServices = order.items.reduce(
+              (sum, item) => sum + item.services.filter((s) => s.completedAt).length,
+              0,
+            );
+            return (
+              <div key={order.id} className="rounded-xl border border-border bg-surface">
+                <button
+                  type="button"
+                  onClick={() => setExpandedOrderId(isOpen ? null : order.id)}
+                  className="flex w-full flex-wrap items-center gap-3 p-3 text-left"
+                >
+                  <span className="text-xs text-text-secondary">{new Date(order.createdAt).toLocaleDateString("ru-RU")}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-text">
+                    №{order.displayId} · {order.client.name}
                     {order.client.company ? ` (${order.client.company})` : ""}
-                  </td>
-                  <td className="px-3 py-1.5 text-text-secondary">{order.quote ? `№${order.quote.displayId}` : "—"}</td>
-                  <td className="px-3 py-1.5 text-text-secondary">
-                    {order.items.map((i) => `${i.name} ×${i.quantity}`).join(", ")}
-                  </td>
-                  <td className="px-3 py-1.5 text-text-secondary">{order.manager.name}</td>
-                  <td className="px-3 py-1.5 whitespace-nowrap font-medium text-text">{money(Number(order.totalRub))} ₽</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </span>
+                  {order.quote && <span className="shrink-0 text-xs text-text-secondary">Просчёт №{order.quote.displayId}</span>}
+                  <span className="shrink-0 text-xs text-text-secondary">
+                    {order.items.length} тов. · {completedServices}/{totalServices} услуг
+                  </span>
+                  <span className="shrink-0 text-sm font-bold text-text">{money(Number(order.totalRub))} ₽</span>
+                  <ChevronDown className={cn("h-4 w-4 shrink-0 text-text-secondary transition-transform", isOpen && "rotate-180")} />
+                </button>
+
+                {isOpen && (
+                  <div className="space-y-3 border-t border-border p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-text-secondary">Менеджер: {order.manager.name}</span>
+                      <a
+                        href={`/api/manager-fulfillment-orders/${order.id}/pdf`}
+                        className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
+                      >
+                        <Download className="h-3.5 w-3.5" /> Скачать наряд для склада
+                      </a>
+                    </div>
+                    {order.items.map((item) => (
+                      <div key={item.id} className="rounded-lg border border-border bg-bg p-2.5">
+                        <div className="text-sm font-medium text-text">{item.name}</div>
+                        {(item.sku || item.dimensions) && (
+                          <div className="text-xs text-text-secondary">
+                            {item.sku ? `Артикул: ${item.sku}` : ""}
+                            {item.sku && item.dimensions ? " · " : ""}
+                            {item.dimensions ? `Габариты: ${item.dimensions}` : ""}
+                          </div>
+                        )}
+                        <div className="mt-1.5 space-y-1">
+                          {item.services.map((service) => (
+                            <label
+                              key={service.id}
+                              className="flex items-center gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-surface"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={Boolean(service.completedAt)}
+                                disabled={busyServiceCompletionId === service.id}
+                                onChange={(e) => handleToggleServiceCompleted(service.id, e.target.checked)}
+                              />
+                              <span
+                                className={cn("min-w-0 flex-1 truncate", service.completedAt && "text-text-secondary line-through")}
+                              >
+                                {service.name} ×{service.quantity}
+                              </span>
+                              <span className="shrink-0 text-xs text-text-secondary">
+                                {money(Number(service.priceRub) * service.quantity)} ₽
+                              </span>
+                              {service.completedAt && (
+                                <span className="shrink-0 text-[11px] text-text-secondary">{service.completedByManager?.name}</span>
+                              )}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

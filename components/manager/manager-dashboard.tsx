@@ -814,11 +814,7 @@ function ManagerDashboard() {
       : null;
 
   if (loading) {
-    return (
-      <div className="rounded-3xl border border-border bg-surface p-5">
-        <p className="text-sm text-text-secondary">Загрузка дашборда…</p>
-      </div>
-    );
+    return <p className="text-sm text-text-secondary">Загрузка дашборда…</p>;
   }
   if (!data) return null;
 
@@ -826,7 +822,7 @@ function ManagerDashboard() {
     <TooltipProvider>
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-2xl font-extrabold tracking-tight text-text">Дашборд</h2>
+          <h2 className="text-sm font-bold text-text">Дашборд</h2>
           <div className="flex flex-wrap items-center gap-2">
             <WorldClockWidget />
             <TodayPill />

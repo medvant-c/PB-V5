@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, Calculator, CheckSquare, Database, LogOut, Package, Settings, Tag, UserCog, Users, UsersRound, Wallet } from "lucide-react";
+import { Briefcase, Calculator, CheckSquare, Database, Home, LogOut, Package, Settings, Tag, UserCog, Users, UsersRound, Wallet } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ManagerClientsTab } from "@/components/manager/tabs/clients-tab";
@@ -36,6 +36,10 @@ const ROLE_LABEL: Record<ManagerWorkspaceProps["role"], string> = {
 // owner-only — same array-of-{id,label,icon,Component} pattern as
 // components/desk/desk-workspace.tsx, filtered by role below.
 const ALL_SECTIONS = [
+  // Own tab now, not a permanent fixture above every other tab (see PB-V5
+  // chat 2026-07-30) — it was pushing every tab's actual content down the
+  // page regardless of whether the manager wanted to see it right then.
+  { id: "home", label: "Главная", icon: Home, Component: ManagerDashboard, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "clients", label: "Клиенты", icon: Users, Component: ManagerClientsTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "tariffs", label: "Тарифы", icon: Calculator, Component: ManagerTariffsTab, ownerOnly: false, seniorOrOwnerOnly: false },
@@ -57,7 +61,7 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
   const [exitingImpersonation, setExitingImpersonation] = useState(false);
-  const [activeSection, setActiveSection] = useState<(typeof ALL_SECTIONS)[number]["id"]>("clients");
+  const [activeSection, setActiveSection] = useState<(typeof ALL_SECTIONS)[number]["id"]>("home");
   const contentRef = useRef<HTMLDivElement>(null);
 
   // Badge on the "Подтверждения" nav tab — how many buyout facts and
@@ -200,13 +204,9 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
       </div>
       </div>
 
-      <div className="mt-6">
-        <ManagerDashboard />
-      </div>
-
       {/* Card doesn't forward refs (plain function component, not
           forwardRef) — wrapping div carries the scroll target instead. */}
-      <div ref={contentRef} className="scroll-mt-4">
+      <div ref={contentRef} className="mt-6 scroll-mt-4">
         <Card className="p-6 sm:p-8">
           <ActiveComponent />
         </Card>

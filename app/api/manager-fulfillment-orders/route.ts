@@ -24,11 +24,68 @@ export async function GET(req: NextRequest) {
       client: { select: { id: true, name: true, company: true } },
       manager: { select: { id: true, name: true } },
       quote: { select: { id: true, displayId: true, productName: true } },
-      items: true,
+      items: {
+        orderBy: { createdAt: "asc" },
+        include: {
+          services: { include: { completedByManager: { select: { id: true, name: true } } } },
+        },
+      },
     },
   });
 
   return Response.json({ orders });
+}
+
+interface ParsedServiceInput {
+  serviceItemId: string | null;
+  name: string;
+  priceRub: number;
+  quantity: number;
+}
+
+interface ParsedItemInput {
+  name: string;
+  sku: string | null;
+  dimensions: string | null;
+  services: ParsedServiceInput[];
+}
+
+function parseItems(raw: unknown): ParsedItemInput[] | { error: string } {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { error: "Добавьте хотя бы один товар." };
+  }
+  const items: ParsedItemInput[] = [];
+  for (const rawItem of raw) {
+    const item = rawItem as { name?: unknown; sku?: unknown; dimensions?: unknown; services?: unknown };
+    const name = typeof item.name === "string" ? item.name.trim() : "";
+    if (!name) return { error: "Укажите название товара." };
+    if (!Array.isArray(item.services) || item.services.length === 0) {
+      return { error: `У товара «${name}» не выбрано ни одной услуги.` };
+    }
+    const services: ParsedServiceInput[] = [];
+    for (const rawService of item.services) {
+      const service = rawService as { serviceItemId?: unknown; name?: unknown; priceRub?: unknown; quantity?: unknown };
+      const serviceName = typeof service.name === "string" ? service.name.trim() : "";
+      const priceRub = Number(service.priceRub);
+      const quantity = Number(service.quantity);
+      if (!serviceName || !Number.isFinite(priceRub) || priceRub < 0 || !Number.isInteger(quantity) || quantity <= 0) {
+        return { error: `Некорректная услуга у товара «${name}».` };
+      }
+      services.push({
+        serviceItemId: typeof service.serviceItemId === "string" && service.serviceItemId ? service.serviceItemId : null,
+        name: serviceName,
+        priceRub,
+        quantity,
+      });
+    }
+    items.push({
+      name,
+      sku: typeof item.sku === "string" && item.sku.trim() ? item.sku.trim() : null,
+      dimensions: typeof item.dimensions === "string" && item.dimensions.trim() ? item.dimensions.trim() : null,
+      services,
+    });
+  }
+  return items;
 }
 
 // Any manager can create one — this is day-to-day warehouse work, not
@@ -46,8 +103,7 @@ export async function POST(req: NextRequest) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { clientId, quoteId, items } =
-    (body as { clientId?: unknown; quoteId?: unknown; items?: unknown }) ?? {};
+  const { clientId, quoteId, items: rawItems } = (body as { clientId?: unknown; quoteId?: unknown; items?: unknown }) ?? {};
 
   if (typeof clientId !== "string" || !clientId) {
     return Response.json({ error: "Укажите клиента." }, { status: 400 });
@@ -64,26 +120,15 @@ export async function POST(req: NextRequest) {
     resolvedQuoteId = quoteId;
   }
 
-  if (!Array.isArray(items) || items.length === 0) {
-    return Response.json({ error: "Выберите хотя бы одну услугу." }, { status: 400 });
+  const items = parseItems(rawItems);
+  if ("error" in items) {
+    return Response.json({ error: items.error }, { status: 400 });
   }
-  const parsedItems: { serviceItemId: string | null; name: string; priceRub: number; quantity: number }[] = [];
-  for (const raw of items) {
-    const item = raw as { serviceItemId?: unknown; name?: unknown; priceRub?: unknown; quantity?: unknown };
-    const name = typeof item.name === "string" ? item.name.trim() : "";
-    const priceRub = Number(item.priceRub);
-    const quantity = Number(item.quantity);
-    if (!name || !Number.isFinite(priceRub) || priceRub < 0 || !Number.isInteger(quantity) || quantity <= 0) {
-      return Response.json({ error: "Некорректная услуга в списке." }, { status: 400 });
-    }
-    parsedItems.push({
-      serviceItemId: typeof item.serviceItemId === "string" && item.serviceItemId ? item.serviceItemId : null,
-      name,
-      priceRub,
-      quantity,
-    });
-  }
-  const totalRub = parsedItems.reduce((sum, item) => sum + item.priceRub * item.quantity, 0);
+
+  const totalRub = items.reduce(
+    (orderSum, item) => orderSum + item.services.reduce((itemSum, s) => itemSum + s.priceRub * s.quantity, 0),
+    0,
+  );
 
   const order = await prisma.fulfillmentOrder.create({
     data: {
@@ -92,13 +137,20 @@ export async function POST(req: NextRequest) {
       quoteId: resolvedQuoteId,
       managerId: session.managerId,
       totalRub,
-      items: { create: parsedItems },
+      items: {
+        create: items.map((item) => ({
+          name: item.name,
+          sku: item.sku,
+          dimensions: item.dimensions,
+          services: { create: item.services },
+        })),
+      },
     },
     include: {
       client: { select: { id: true, name: true, company: true } },
       manager: { select: { id: true, name: true } },
       quote: { select: { id: true, displayId: true, productName: true } },
-      items: true,
+      items: { include: { services: true } },
     },
   });
 
