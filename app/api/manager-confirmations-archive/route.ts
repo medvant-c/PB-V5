@@ -1,0 +1,233 @@
+import { NextRequest } from "next/server";
+import { getManagerSessionFromRequest } from "@/lib/manager-auth";
+import { getVisibleManagerIds } from "@/lib/manager-scope";
+import { prisma } from "@/lib/prisma";
+
+// Owner/senior only, same gate as /api/manager-confirmations — the
+// "already handled" counterpart to that pending queue. Replaces the old
+// buyout-only /api/manager-buyout-archive: every confirmation type the
+// pending queue tracks (buyout fact, manual cargo rate, manual ¥→₽ rate,
+// self-sourced client) lands in ONE combined, filterable list instead of
+// four separate archives — see PB-V5 chat 2026-07-30 ("зачем велосипед
+// изобретать"). Each entry carries a `type` discriminator and a plain-text
+// `summary` instead of forcing every type's very different fields into
+// shared table columns.
+type ArchiveEntryType = "buyout" | "cargo_rate" | "cny_rate" | "self_sourced_client";
+
+interface ArchiveEntry {
+  type: ArchiveEntryType;
+  id: string;
+  displayId: number;
+  label: string;
+  summary: string;
+  confirmedAt: string;
+  confirmedByManagerName: string | null;
+  manager: { id: string; name: string };
+  client: { id: string; name: string; company: string | null };
+}
+
+function fmt(value: number): string {
+  return Number.isFinite(value) ? Math.round(value).toLocaleString("ru-RU") : "—";
+}
+
+export async function GET(req: NextRequest) {
+  const session = await getManagerSessionFromRequest(req);
+  if (!session) {
+    return Response.json({ error: "Не авторизовано." }, { status: 401 });
+  }
+  if (session.role !== "owner" && session.role !== "senior") {
+    return Response.json({ error: "Доступно только старшему менеджеру и руководителю." }, { status: 403 });
+  }
+
+  const visibleManagerIds = await getVisibleManagerIds(session);
+  const managerScopeFilter = visibleManagerIds === "all" ? {} : { managerId: { in: visibleManagerIds } };
+  const clientManagerScopeFilter = visibleManagerIds === "all" ? {} : { createdByManagerId: { in: visibleManagerIds } };
+
+  const typeParam = req.nextUrl.searchParams.get("type") as ArchiveEntryType | "all" | null;
+  const managerIdParam = req.nextUrl.searchParams.get("managerId");
+  const clientIdParam = req.nextUrl.searchParams.get("clientId");
+  const dateFromParam = req.nextUrl.searchParams.get("dateFrom");
+  const dateToParam = req.nextUrl.searchParams.get("dateTo");
+
+  const dateFrom = dateFromParam ? new Date(dateFromParam) : null;
+  const dateTo = dateToParam ? new Date(dateToParam) : null;
+  if (dateTo) dateTo.setHours(23, 59, 59, 999);
+  const dateFilter = (field: string) =>
+    dateFrom || dateTo ? { [field]: { ...(dateFrom ? { gte: dateFrom } : {}), ...(dateTo ? { lte: dateTo } : {}) } } : {};
+
+  const wantType = (t: ArchiveEntryType) => !typeParam || typeParam === "all" || typeParam === t;
+
+  const [buyouts, cargoRates, cnyRates, selfSourcedClients] = await Promise.all([
+    wantType("buyout")
+      ? prisma.quote.findMany({
+          where: {
+            buyoutFactConfirmed: true,
+            ...managerScopeFilter,
+            ...(managerIdParam ? { managerId: managerIdParam } : {}),
+            ...(clientIdParam ? { clientId: clientIdParam } : {}),
+            ...dateFilter("buyoutConfirmedAt"),
+          },
+          orderBy: { buyoutConfirmedAt: "desc" },
+          select: {
+            id: true,
+            displayId: true,
+            productName: true,
+            actualBuyoutCny: true,
+            actualBuyoutRateUsed: true,
+            actualClientPaymentRub: true,
+            buyoutConfirmedAt: true,
+            buyoutConfirmedByManagerId: true,
+            manager: { select: { id: true, name: true } },
+            client: { select: { id: true, name: true, company: true } },
+          },
+        })
+      : Promise.resolve([]),
+    wantType("cargo_rate")
+      ? prisma.quote.findMany({
+          where: {
+            cargoRateUsdOverride: { not: null },
+            cargoRateOverrideConfirmed: true,
+            ...managerScopeFilter,
+            ...(managerIdParam ? { managerId: managerIdParam } : {}),
+            ...(clientIdParam ? { clientId: clientIdParam } : {}),
+            ...dateFilter("cargoRateOverrideConfirmedAt"),
+          },
+          orderBy: { cargoRateOverrideConfirmedAt: "desc" },
+          select: {
+            id: true,
+            displayId: true,
+            productName: true,
+            cargoRateUsdOverride: true,
+            cargoRateOverrideCostUsd: true,
+            deliveryPricingMode: true,
+            cargoRateOverrideConfirmedAt: true,
+            cargoRateOverrideConfirmedByManagerId: true,
+            manager: { select: { id: true, name: true } },
+            client: { select: { id: true, name: true, company: true } },
+          },
+        })
+      : Promise.resolve([]),
+    wantType("cny_rate")
+      ? prisma.quote.findMany({
+          where: {
+            cnyRateRubOverride: { not: null },
+            cnyRateOverrideConfirmed: true,
+            ...managerScopeFilter,
+            ...(managerIdParam ? { managerId: managerIdParam } : {}),
+            ...(clientIdParam ? { clientId: clientIdParam } : {}),
+            ...dateFilter("cnyRateOverrideConfirmedAt"),
+          },
+          orderBy: { cnyRateOverrideConfirmedAt: "desc" },
+          select: {
+            id: true,
+            displayId: true,
+            productName: true,
+            cnyRateRubOverride: true,
+            cnyRateOverrideConfirmedAt: true,
+            cnyRateOverrideConfirmedByManagerId: true,
+            manager: { select: { id: true, name: true } },
+            client: { select: { id: true, name: true, company: true } },
+          },
+        })
+      : Promise.resolve([]),
+    wantType("self_sourced_client")
+      ? prisma.client.findMany({
+          where: {
+            selfSourcedConfirmed: true,
+            ...clientManagerScopeFilter,
+            ...(managerIdParam ? { createdByManagerId: managerIdParam } : {}),
+            ...(clientIdParam ? { id: clientIdParam } : {}),
+            ...dateFilter("selfSourcedConfirmedAt"),
+          },
+          orderBy: { selfSourcedConfirmedAt: "desc" },
+          select: {
+            id: true,
+            displayId: true,
+            name: true,
+            company: true,
+            selfSourcedConfirmedAt: true,
+            selfSourcedConfirmedByManagerId: true,
+            createdByManager: { select: { id: true, name: true } },
+          },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  // Every *ConfirmedByManagerId is a plain string field, no Prisma relation
+  // (see prisma/schema.prisma) — resolved with one batch lookup instead of
+  // an include per type.
+  const confirmedByIds = [
+    ...new Set(
+      [
+        ...buyouts.map((b) => b.buyoutConfirmedByManagerId),
+        ...cargoRates.map((q) => q.cargoRateOverrideConfirmedByManagerId),
+        ...cnyRates.map((q) => q.cnyRateOverrideConfirmedByManagerId),
+        ...selfSourcedClients.map((c) => c.selfSourcedConfirmedByManagerId),
+      ].filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const confirmedByManagers = confirmedByIds.length
+    ? await prisma.manager.findMany({ where: { id: { in: confirmedByIds } }, select: { id: true, name: true } })
+    : [];
+  const nameById = new Map(confirmedByManagers.map((m) => [m.id, m.name]));
+
+  const entries: ArchiveEntry[] = [
+    ...buyouts.map((b): ArchiveEntry => ({
+      type: "buyout",
+      id: b.id,
+      displayId: b.displayId,
+      label: b.productName,
+      summary: `Выкуп факт: ${fmt(Number(b.actualBuyoutCny))}¥ · курс ${Number(b.actualBuyoutRateUsed).toFixed(2)} · оплата ${fmt(Number(b.actualClientPaymentRub))}₽`,
+      confirmedAt: b.buyoutConfirmedAt!.toISOString(),
+      confirmedByManagerName: b.buyoutConfirmedByManagerId ? (nameById.get(b.buyoutConfirmedByManagerId) ?? null) : null,
+      manager: b.manager,
+      client: b.client,
+    })),
+    ...cargoRates.map((q): ArchiveEntry => {
+      const unit = q.deliveryPricingMode === "density" ? "кг" : "м³";
+      return {
+        type: "cargo_rate",
+        id: q.id,
+        displayId: q.displayId,
+        label: q.productName,
+        summary: `Ставка: $${Number(q.cargoRateUsdOverride).toFixed(2)}/${unit} · закупка: $${q.cargoRateOverrideCostUsd !== null ? Number(q.cargoRateOverrideCostUsd).toFixed(2) : "—"}/${unit}`,
+        confirmedAt: q.cargoRateOverrideConfirmedAt!.toISOString(),
+        confirmedByManagerName: q.cargoRateOverrideConfirmedByManagerId ? (nameById.get(q.cargoRateOverrideConfirmedByManagerId) ?? null) : null,
+        manager: q.manager,
+        client: q.client,
+      };
+    }),
+    ...cnyRates.map((q): ArchiveEntry => ({
+      type: "cny_rate",
+      id: q.id,
+      displayId: q.displayId,
+      label: q.productName,
+      summary: `Курс: 1¥ = ${Number(q.cnyRateRubOverride).toFixed(2)}₽`,
+      confirmedAt: q.cnyRateOverrideConfirmedAt!.toISOString(),
+      confirmedByManagerName: q.cnyRateOverrideConfirmedByManagerId ? (nameById.get(q.cnyRateOverrideConfirmedByManagerId) ?? null) : null,
+      manager: q.manager,
+      client: q.client,
+    })),
+    ...selfSourcedClients.map((c): ArchiveEntry => ({
+      type: "self_sourced_client",
+      id: c.id,
+      displayId: c.displayId,
+      label: c.name,
+      summary: "Личный клиент подтверждён — повышенная премия за сделки с ним.",
+      confirmedAt: c.selfSourcedConfirmedAt!.toISOString(),
+      confirmedByManagerName: c.selfSourcedConfirmedByManagerId ? (nameById.get(c.selfSourcedConfirmedByManagerId) ?? null) : null,
+      manager: c.createdByManager ?? { id: "", name: "—" },
+      client: { id: c.id, name: c.name, company: c.company },
+    })),
+  ].sort((a, b) => new Date(b.confirmedAt).getTime() - new Date(a.confirmedAt).getTime());
+
+  // Same manager-filter dropdown source as /api/manager-confirmations —
+  // owner sees everyone, senior sees themself + their own subordinates.
+  const teamManagers = await prisma.manager.findMany({
+    where: { active: true, ...(session.role === "owner" ? {} : { OR: [{ id: session.managerId }, { supervisorId: session.managerId }] }) },
+    orderBy: { displayId: "asc" },
+    select: { id: true, name: true },
+  });
+
+  return Response.json({ entries, teamManagers });
+}

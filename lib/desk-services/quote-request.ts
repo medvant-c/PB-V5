@@ -326,6 +326,28 @@ function findDensityTierCost(
   return match ? Number(match.costPerKgUsd) : null;
 }
 
+// Fields to null out when a buyout-fact confirmation is reverted — shared
+// by the status-change route (moving a quote's status back out of the
+// post-buyout set) and the confirmations-archive revert endpoint (owner/
+// senior manually undoing a mistaken confirmation, so it can be redone
+// with corrected numbers via the normal pending-queue form instead of a
+// separate edit UI — see PB-V5 chat 2026-07-30). Does NOT delete the
+// linked CashOrder itself — callers do that separately since it needs its
+// own existence check immediately before the delete.
+const BUYOUT_REVERT_DATA = {
+  actualBuyoutCny: null,
+  actualBuyoutRateUsed: null,
+  actualSupplierDiscountCny: null,
+  buyoutFactConfirmed: false,
+  buyoutConfirmedByManagerId: null,
+  buyoutConfirmedAt: null,
+  buyoutPremiumRatePercent: null,
+  buyoutSelfSourcedBoost: null,
+  actualClientPaymentRub: null,
+  actualClientPaymentRateUsed: null,
+  clientPaymentCashOrderId: null,
+} as const;
+
 export {
   parseQuoteFormData,
   buildEngineInputs,
@@ -333,6 +355,7 @@ export {
   densityTiersToEngineInput,
   volumeTariffsToEngineInput,
   buyoutCommissionTariffsToEngineInput,
+  BUYOUT_REVERT_DATA,
   findDensityTierCost,
   findVolumeTariffCost,
   parseAttachedServices,

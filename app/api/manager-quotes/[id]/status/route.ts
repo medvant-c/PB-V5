@@ -3,7 +3,7 @@ import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canAccessManagerQuote } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { isQuoteStatus } from "@/lib/quote-statuses";
-import { stripCargoCostForNonOwner } from "@/lib/desk-services/quote-request";
+import { BUYOUT_REVERT_DATA, stripCargoCostForNonOwner } from "@/lib/desk-services/quote-request";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -89,21 +89,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       // the dashboard (see PB-V5 chat 2026-07-28): the manager did the
       // calculation work the moment this was first true.
       ...(status === "pending_approval" && !existing.completedAt ? { completedAt: new Date() } : {}),
-      ...(revertingPastBuyout
-        ? {
-            actualBuyoutCny: null,
-            actualBuyoutRateUsed: null,
-            actualSupplierDiscountCny: null,
-            buyoutFactConfirmed: false,
-            buyoutConfirmedByManagerId: null,
-            buyoutConfirmedAt: null,
-            buyoutPremiumRatePercent: null,
-            buyoutSelfSourcedBoost: null,
-            actualClientPaymentRub: null,
-            actualClientPaymentRateUsed: null,
-            clientPaymentCashOrderId: null,
-          }
-        : {}),
+      ...(revertingPastBuyout ? BUYOUT_REVERT_DATA : {}),
       ...(revertingPastCargoActualization
         ? {
             // Restore every field actualize-cargo overwrote back to what

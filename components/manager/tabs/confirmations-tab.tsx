@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Archive, CheckCircle2, ChevronDown, Coins, Loader2, Ruler, UserCheck, Wallet } from "lucide-react";
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
@@ -93,48 +93,58 @@ function previewDiscountCny(
   return paymentAmountCny - servicesAndCommissionCny - buyoutCny;
 }
 
-function fmt(value: number): string {
-  return Number.isFinite(value) ? Math.round(value).toLocaleString("ru-RU") : "—";
-}
-
-interface ArchivedBuyout {
-  id: string;
-  displayId: number;
-  productName: string;
-  totalRub: string;
-  totalPriceCny: string;
-  actualBuyoutCny: string | null;
-  actualBuyoutRateUsed: string | null;
-  actualSupplierDiscountCny: string | null;
-  actualClientPaymentRub: string | null;
-  actualClientPaymentRateUsed: string | null;
-  actualClientPaymentCny: number | null;
-  servicesAndCommissionCny: number;
-  buyoutConfirmedAt: string | null;
-  confirmedByManagerName: string | null;
-  manager: { id: string; name: string };
-  client: { id: string; name: string; company: string | null };
-}
-
 interface ClientOption {
   id: string;
   name: string;
   company: string | null;
 }
 
-// Archive of already-confirmed buyouts — the "history" counterpart to the
-// pending queue above, filterable by manager/client/date so a руководитель
-// can audit what's already been confirmed without reopening every client's
-// quote list one by one. Collapsed by default (closed <details>-style
-// section) since it's a browse/audit tool, not something checked every
-// visit the way the pending queue is. See PB-V5 chat 2026-07-29.
-function BuyoutArchive() {
+type ArchiveEntryType = "buyout" | "cargo_rate" | "cny_rate" | "self_sourced_client";
+
+interface ArchiveEntry {
+  type: ArchiveEntryType;
+  id: string;
+  displayId: number;
+  label: string;
+  summary: string;
+  confirmedAt: string;
+  confirmedByManagerName: string | null;
+  manager: { id: string; name: string };
+  client: { id: string; name: string; company: string | null };
+}
+
+const ARCHIVE_TYPE_LABEL: Record<ArchiveEntryType, string> = {
+  buyout: "Выкуп",
+  cargo_rate: "Ставка карго",
+  cny_rate: "Курс юаня",
+  self_sourced_client: "Личный клиент",
+};
+
+// Combined archive of every already-confirmed item (buyout facts, manual
+// cargo rates, manual ¥→₽ rates, self-sourced clients) — the "already
+// handled" counterpart to the pending queue above, filterable by
+// type/manager/client/date so a руководитель can audit anything already
+// confirmed without reopening every client's quote list one by one.
+// Collapsed by default (closed <details>-style section) since it's a
+// browse/audit tool, not something checked every visit the way the
+// pending queue is. One list for every confirmation type, not four
+// separate archives — see PB-V5 chat 2026-07-30 ("зачем велосипед
+// изобретать — туда же переноси все подтверждения любые списком").
+// "Редактировать" and "Удалить" are the same underlying action here: revert
+// the confirmation back to pending, where it can be corrected and
+// re-confirmed through the exact same form that confirmed it originally
+// (or just left there, which is effectively deletion) — no separate edit
+// UI to build and keep in sync.
+function ConfirmationsArchive({ onReverted }: { onReverted: () => void }) {
   const [open, setOpen] = useState(false);
-  const [buyouts, setBuyouts] = useState<ArchivedBuyout[]>([]);
+  const [entries, setEntries] = useState<ArchiveEntry[]>([]);
   const [teamManagers, setTeamManagers] = useState<{ id: string; name: string }[]>([]);
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
+  const [typeFilter, setTypeFilter] = useState<ArchiveEntryType | "all">("all");
   const [managerFilter, setManagerFilter] = useState("all");
   const [clientFilter, setClientFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
@@ -146,21 +156,54 @@ function BuyoutArchive() {
       .then((data) => setClients(data.clients ?? []));
   }, []);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     setLoading(true);
     const params = new URLSearchParams();
+    if (typeFilter !== "all") params.set("type", typeFilter);
     if (managerFilter !== "all") params.set("managerId", managerFilter);
     if (clientFilter !== "all") params.set("clientId", clientFilter);
     if (dateFrom) params.set("dateFrom", dateFrom);
     if (dateTo) params.set("dateTo", dateTo);
-    fetch(`/api/manager-buyout-archive?${params.toString()}`)
+    return fetch(`/api/manager-confirmations-archive?${params.toString()}`)
       .then((res) => res.json())
       .then((data) => {
-        setBuyouts(data.buyouts ?? []);
+        setEntries(data.entries ?? []);
         setTeamManagers(data.teamManagers ?? []);
       })
       .finally(() => setLoading(false));
-  }, [managerFilter, clientFilter, dateFrom, dateTo]);
+  }, [typeFilter, managerFilter, clientFilter, dateFrom, dateTo]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleRevert(entry: ArchiveEntry) {
+    if (
+      !window.confirm(
+        "Отменить это подтверждение? Запись вернётся в очередь подтверждений — там её можно будет исправить и подтвердить заново или просто оставить неподтверждённой.",
+      )
+    ) {
+      return;
+    }
+    setBusyId(entry.id);
+    setError(null);
+    try {
+      const res = await fetch("/api/manager-confirmations-archive/revert", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: entry.type, id: entry.id }),
+      });
+      if (res.ok) {
+        await load();
+        onReverted();
+      } else {
+        const data = await res.json();
+        setError(data.error ?? "Не удалось отменить подтверждение.");
+      }
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <div className="rounded-xl border border-border bg-surface">
@@ -170,13 +213,26 @@ function BuyoutArchive() {
         className="flex w-full items-center justify-between gap-2 p-3 text-left"
       >
         <span className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
-          <Archive className="h-3.5 w-3.5" /> Архив подтверждённых выкупов{buyouts.length > 0 ? ` (${buyouts.length})` : ""}
+          <Archive className="h-3.5 w-3.5" /> Архив подтверждений{entries.length > 0 ? ` (${entries.length})` : ""}
         </span>
         <ChevronDown className={cn("h-4 w-4 shrink-0 text-text-secondary transition-transform", open && "rotate-180")} />
       </button>
       {open && (
         <div className="space-y-3 border-t border-border p-3">
           <div className="flex flex-wrap items-center gap-2">
+            <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as ArchiveEntryType | "all")}>
+              <SelectTrigger className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все типы</SelectItem>
+                {(Object.keys(ARCHIVE_TYPE_LABEL) as ArchiveEntryType[]).map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {ARCHIVE_TYPE_LABEL[t]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             {teamManagers.length > 1 && (
               <Select value={managerFilter} onValueChange={setManagerFilter}>
                 <SelectTrigger className="w-44">
@@ -210,58 +266,49 @@ function BuyoutArchive() {
             <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-40" placeholder="По дату" />
           </div>
 
+          {error && <p className="text-xs text-error">{error}</p>}
+
           {loading ? (
             <p className="text-xs text-text-secondary">Загрузка…</p>
-          ) : buyouts.length === 0 ? (
+          ) : entries.length === 0 ? (
             <p className="text-xs text-text-secondary">Ничего не найдено по этим фильтрам.</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-275 border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-text-secondary">
-                    <th className="py-1.5 pr-3 font-medium">Просчёт</th>
-                    <th className="py-1.5 pr-3 font-medium">Клиент</th>
-                    <th className="py-1.5 pr-3 font-medium">Менеджер</th>
-                    <th className="py-1.5 pr-3 font-medium">Подтверждён</th>
-                    <th className="py-1.5 pr-3 font-medium">Кем</th>
-                    <th className="py-1.5 pr-3 font-medium">Выкуп факт, ¥</th>
-                    <th className="py-1.5 pr-3 font-medium">Скидка, ¥</th>
-                    <th className="py-1.5 pr-3 font-medium">Услуги и комиссия, ¥</th>
-                    <th className="py-1.5 pr-3 font-medium">Курс на оплате</th>
-                    <th className="py-1.5 pr-3 font-medium">Оплата, ¥</th>
-                    <th className="py-1.5 font-medium">Оплата, ₽</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {buyouts.map((b) => (
-                    <tr key={b.id} className="border-b border-border last:border-0">
-                      <td className="py-1.5 pr-3 text-text">
-                        №{b.displayId} · {b.productName}
-                      </td>
-                      <td className="py-1.5 pr-3 text-text-secondary">
-                        {b.client.name}
-                        {b.client.company ? ` · ${b.client.company}` : ""}
-                      </td>
-                      <td className="py-1.5 pr-3 text-text-secondary">{b.manager.name}</td>
-                      <td className="py-1.5 pr-3 text-text-secondary">{b.buyoutConfirmedAt ? formatDate(b.buyoutConfirmedAt) : "—"}</td>
-                      <td className="py-1.5 pr-3 text-text-secondary">{b.confirmedByManagerName ?? "—"}</td>
-                      <td className="py-1.5 pr-3 text-text-secondary">{b.actualBuyoutCny ? fmt(Number(b.actualBuyoutCny)) : "—"}</td>
-                      <td className="py-1.5 pr-3 text-text-secondary">
-                        {b.actualSupplierDiscountCny ? fmt(Number(b.actualSupplierDiscountCny)) : "—"}
-                      </td>
-                      <td className="py-1.5 pr-3 text-text-secondary">{fmt(b.servicesAndCommissionCny)}</td>
-                      <td className="py-1.5 pr-3 text-text-secondary">
-                        {b.actualClientPaymentRateUsed ? `1¥ = ${Number(b.actualClientPaymentRateUsed).toFixed(2)}₽` : "—"}
-                      </td>
-                      <td className="py-1.5 pr-3 text-text-secondary">
-                        {b.actualClientPaymentCny !== null ? fmt(b.actualClientPaymentCny) : "—"}
-                      </td>
-                      <td className="py-1.5 text-text-secondary">{b.actualClientPaymentRub ? fmt(Number(b.actualClientPaymentRub)) : "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ul className="space-y-1.5">
+              {entries.map((entry) => (
+                <li
+                  key={`${entry.type}-${entry.id}`}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-bg p-2.5 text-sm"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                        {ARCHIVE_TYPE_LABEL[entry.type]}
+                      </span>
+                      <span className="font-medium text-text">
+                        №{entry.displayId} · {entry.label}
+                      </span>
+                      <span className="text-xs text-text-secondary">
+                        {entry.client.name}
+                        {entry.client.company ? ` · ${entry.client.company}` : ""} · менеджер {entry.manager.name}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-text-secondary">{entry.summary}</p>
+                    <p className="text-[11px] text-text-secondary">
+                      Подтвердил {entry.confirmedByManagerName ?? "—"} · {formatDate(entry.confirmedAt)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRevert(entry)}
+                    disabled={busyId === entry.id}
+                    className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-error/30 hover:text-error disabled:opacity-50"
+                  >
+                    {busyId === entry.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    Отменить подтверждение
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       )}
@@ -753,7 +800,7 @@ function ManagerConfirmationsTab() {
         </>
       )}
 
-      <BuyoutArchive />
+      <ConfirmationsArchive onReverted={load} />
     </div>
   );
 }
