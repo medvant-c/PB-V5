@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Info, Loader2, X } from "lucide-react";
+import { ChevronDown, Info, Loader2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -185,6 +185,10 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   const [tiers, setTiers] = useState<DensityTierRecord[]>([]);
   const [volumeTariffs, setVolumeTariffs] = useState<VolumeTariffRecord[]>([]);
   const [buyoutCommissionTariffs, setBuyoutCommissionTariffs] = useState<BuyoutCommissionTariffRecord[]>([]);
+  // Owner-editable from Настройки (see SystemSettings in
+  // prisma/schema.prisma) — only the one field this dialog's live preview
+  // actually needs.
+  const [lowDensityVolumeThresholdKgM3, setLowDensityVolumeThresholdKgM3] = useState(100);
   const [loadingTariffs, setLoadingTariffs] = useState(true);
   const [loadingQuote, setLoadingQuote] = useState(false);
   // Frozen at quote creation, re-derived by the server on every PATCH the
@@ -232,6 +236,12 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
 
   const [catalog, setCatalog] = useState<ServiceCatalogItemRecord[]>([]);
   const [attachedServices, setAttachedServices] = useState<AttachedServiceState[]>([]);
+  // Collapsed by default — the price-list checklist was pushing the total
+  // preview and submit buttons far down a form that's already long. Opens
+  // automatically when editing a quote that already has services attached,
+  // so nothing already selected is hidden from view. See PB-V5 chat
+  // 2026-07-30.
+  const [servicesOpen, setServicesOpen] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -245,13 +255,17 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       fetch("/api/manager-volume-tariffs").then((res) => res.json()),
       fetch("/api/manager-buyout-commission-tariffs").then((res) => res.json()),
       fetch("/api/manager-service-catalog").then((res) => res.json()),
+      fetch("/api/manager-settings").then((res) => res.json()),
     ])
-      .then(([settingsData, tiersData, volumeTariffsData, buyoutCommissionTariffsData, catalogData]) => {
+      .then(([settingsData, tiersData, volumeTariffsData, buyoutCommissionTariffsData, catalogData, systemSettingsData]) => {
         setTariffs(settingsData.settings ?? null);
         setTiers(tiersData.tiers ?? []);
         setVolumeTariffs(volumeTariffsData.tariffs ?? []);
         setBuyoutCommissionTariffs(buyoutCommissionTariffsData.tiers ?? []);
         setCatalog(catalogData.items ?? []);
+        if (systemSettingsData.settings?.lowDensityVolumeThresholdKgM3 !== undefined) {
+          setLowDensityVolumeThresholdKgM3(Number(systemSettingsData.settings.lowDensityVolumeThresholdKgM3));
+        }
       })
       .finally(() => setLoadingTariffs(false));
   }, [open]);
@@ -266,6 +280,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
 
     if (!editingQuoteId) {
       setAttachedServices([]);
+      setServicesOpen(false);
       setQuoteType(BLANK_FORM.quoteType);
       setIsCustomProduction(BLANK_FORM.isCustomProduction);
       setProductName(BLANK_FORM.productName);
@@ -341,6 +356,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               priceRub: s.priceRub,
             })),
           );
+          setServicesOpen((data.attachedServices ?? []).length > 0);
         },
       )
       .finally(() => setLoadingQuote(false));
@@ -450,6 +466,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         attachedServicesTotalRub,
         customProductionFeeRub,
         cargoDiscountUsd: num(cargoDiscountUsd),
+        lowDensityVolumeThresholdKgM3,
       });
     } catch {
       return null;
@@ -459,6 +476,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     tiers,
     volumeTariffs,
     buyoutCommissionTariffs,
+    lowDensityVolumeThresholdKgM3,
     quoteType,
     isCustomProduction,
     quantity,
@@ -895,13 +913,24 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label>Доп. услуги из прайс-листа Panda Bridge</Label>
-              {catalogByDirection.length === 0 ? (
-                <p className="text-xs text-text-secondary">Прайс-лист пуст.</p>
-              ) : (
-                <div className="max-h-48 space-y-3 overflow-y-auto rounded-lg border border-border p-2.5">
-                  {catalogByDirection.map(([direction, items]) => (
+            <div className="rounded-lg border border-border">
+              <button
+                type="button"
+                onClick={() => setServicesOpen((v) => !v)}
+                className="flex w-full items-center justify-between gap-2 p-2.5 text-left"
+              >
+                <span className="text-sm font-medium text-text">
+                  Доп. услуги из прайс-листа Panda Bridge
+                  {attachedServices.length > 0 ? ` (${attachedServices.length})` : ""}
+                </span>
+                <ChevronDown className={cn("h-4 w-4 shrink-0 text-text-secondary transition-transform", servicesOpen && "rotate-180")} />
+              </button>
+              {servicesOpen &&
+                (catalogByDirection.length === 0 ? (
+                  <p className="px-2.5 pb-2.5 text-xs text-text-secondary">Прайс-лист пуст.</p>
+                ) : (
+                  <div className="mx-2.5 mb-2.5 max-h-48 space-y-3 overflow-y-auto rounded-lg border border-border p-2.5">
+                    {catalogByDirection.map(([direction, items]) => (
                     <div key={direction}>
                       <div className="text-xs font-semibold text-text-secondary">
                         {DIRECTION_LABEL[direction] ?? direction}
@@ -937,9 +966,9 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                         })}
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                ))}
             </div>
 
             {preview && (

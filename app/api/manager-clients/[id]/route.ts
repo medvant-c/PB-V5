@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { getVisibleManagerIds } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
+import { normalizePhone } from "@/lib/phone";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -90,7 +91,13 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     data.contactsHiddenFromManager = contactsHiddenFromManager;
   }
   if (typeof name === "string" && name.trim()) data.name = name.trim();
-  if (typeof phone === "string" && phone.trim()) data.phone = phone.trim();
+  if (typeof phone === "string" && phone.trim()) {
+    const normalizedPhone = normalizePhone(phone);
+    if (!normalizedPhone) {
+      return Response.json({ error: "Укажите номер телефона полностью: +7 (XXX) XXX-XX-XX." }, { status: 400 });
+    }
+    data.phone = normalizedPhone;
+  }
   if (typeof company === "string") data.company = company.trim() || null;
   if (typeof messenger === "string") data.messenger = messenger.trim() || null;
   if (typeof source === "string") data.source = VALID_SOURCES.includes(source) ? source : null;

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { hasDeskSession } from "@/lib/desk-auth";
 import { prisma } from "@/lib/prisma";
+import { normalizePhone } from "@/lib/phone";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -49,7 +50,15 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     data.name = name.trim();
   }
   if (phone !== undefined) {
-    data.phone = typeof phone === "string" && phone.trim() ? phone.trim() : null;
+    if (typeof phone === "string" && phone.trim()) {
+      const normalizedPhone = normalizePhone(phone);
+      if (!normalizedPhone) {
+        return Response.json({ error: "Укажите номер телефона полностью: +7 (XXX) XXX-XX-XX." }, { status: 400 });
+      }
+      data.phone = normalizedPhone;
+    } else {
+      data.phone = null;
+    }
   }
   if (country !== undefined) {
     data.country = typeof country === "string" && country.trim() ? country.trim() : null;

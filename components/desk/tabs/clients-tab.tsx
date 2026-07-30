@@ -37,6 +37,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { DIRECTION_LABELS, ORDER_DIRECTIONS } from "@/lib/order-directions";
 import { STATUS_BADGE_CLASSES, STATUS_DOT_COLOR, STATUS_LABELS } from "@/lib/order-status";
 import { cn } from "@/lib/utils";
+import { formatPhoneMask } from "@/lib/phone";
 
 const ALL_DIRECTIONS_VALUE = "__all__";
 
@@ -755,7 +756,12 @@ function ClientsTab() {
                 onChange={(e) => setNewClientEmail(e.target.value)}
                 required
               />
-              <Input placeholder="Телефон" value={newClientPhone} onChange={(e) => setNewClientPhone(e.target.value)} required />
+              <Input
+                placeholder="+7 (___) ___-__-__"
+                value={newClientPhone}
+                onChange={(e) => setNewClientPhone(formatPhoneMask(e.target.value))}
+                required
+              />
               <Input placeholder="Страна" value={newClientCountry} onChange={(e) => setNewClientCountry(e.target.value)} required />
               <Input placeholder="Город" value={newClientCity} onChange={(e) => setNewClientCity(e.target.value)} required />
               {clientError && <p className="text-xs text-error">{clientError}</p>}
@@ -893,7 +899,11 @@ function ClientsTab() {
                   <div className="space-y-2 rounded-lg bg-bg p-3">
                     <p className="text-xs font-semibold text-text-secondary">Редактирование клиента</p>
                     <Input placeholder="Имя" value={editName} onChange={(e) => setEditName(e.target.value)} />
-                    <Input placeholder="Телефон" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} />
+                    <Input
+                      placeholder="+7 (___) ___-__-__"
+                      value={editPhone}
+                      onChange={(e) => setEditPhone(formatPhoneMask(e.target.value))}
+                    />
                     <Input placeholder="Страна" value={editCountry} onChange={(e) => setEditCountry(e.target.value)} />
                     <Input placeholder="Город" value={editCity} onChange={(e) => setEditCity(e.target.value)} />
                     {editClientError && <p className="text-xs text-error">{editClientError}</p>}

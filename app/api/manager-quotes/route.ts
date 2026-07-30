@@ -4,6 +4,7 @@ import { getVisibleManagerIds } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { storage } from "@/lib/storage";
 import { nextQuoteDisplayId } from "@/lib/display-ids";
+import { getSystemSettings } from "@/lib/system-settings";
 import { computeQuote, computeCargoCost } from "@/lib/quote-engine";
 import {
   buildEngineInputs,
@@ -100,10 +101,11 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Тарифы не заданы — заполните вкладку «Тарифы»." }, { status: 400 });
   }
 
-  const [densityTiers, volumeTariffs, buyoutCommissionTiers] = await Promise.all([
+  const [densityTiers, volumeTariffs, buyoutCommissionTiers, systemSettings] = await Promise.all([
     prisma.densityTariff.findMany(),
     prisma.volumeTariff.findMany(),
     prisma.buyoutCommissionTariff.findMany(),
+    getSystemSettings(),
   ]);
 
   const searchServiceFeeByType: Record<string, number> = {
@@ -112,7 +114,9 @@ export async function POST(req: NextRequest) {
     pro: Number(tariffSettings.proPriceRub),
   };
 
-  const searchFeeWaived = fields.quoteType === "standard" && (await isFreeStandardQuoteEligible(fields.clientId));
+  const searchFeeWaived =
+    fields.quoteType === "standard" &&
+    (await isFreeStandardQuoteEligible(fields.clientId, systemSettings.freeStandardQuoteLimit));
   const attachedServices = parseAttachedServices(formData);
   const attachedServicesTotalRub = attachedServices.reduce((sum, s) => sum + s.priceRub, 0);
   const customProductionFeeRub = customProductionFeeForTier(tariffSettings, fields.quoteType, fields.isCustomProduction);
@@ -124,6 +128,7 @@ export async function POST(req: NextRequest) {
     searchServiceFeeRub: searchFeeWaived ? 0 : searchServiceFeeByType[fields.quoteType],
     densityTiers: densityTiersToEngineInput(densityTiers),
     volumeTariffs: volumeTariffsToEngineInput(volumeTariffs),
+    lowDensityVolumeThresholdKgM3: Number(systemSettings.lowDensityVolumeThresholdKgM3),
     attachedServicesTotalRub,
     customProductionFeeRub,
   });

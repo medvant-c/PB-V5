@@ -5,6 +5,7 @@ import { createAccountToken } from "@/lib/account-tokens";
 import { sendActivationEmail } from "@/lib/account-email";
 import { getAppOrigin } from "@/lib/app-url";
 import { nextClientDisplayId } from "@/lib/display-ids";
+import { normalizePhone } from "@/lib/phone";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -62,6 +63,10 @@ export async function POST(req: NextRequest) {
   if (typeof phone !== "string" || !phone.trim()) {
     return Response.json({ error: "Укажите телефон." }, { status: 400 });
   }
+  const normalizedPhone = normalizePhone(phone);
+  if (!normalizedPhone) {
+    return Response.json({ error: "Укажите номер телефона полностью: +7 (XXX) XXX-XX-XX." }, { status: 400 });
+  }
   if (typeof country !== "string" || !country.trim()) {
     return Response.json({ error: "Укажите страну." }, { status: 400 });
   }
@@ -81,7 +86,7 @@ export async function POST(req: NextRequest) {
       displayId: await nextClientDisplayId(),
       name: name.trim(),
       email: normalizedEmail,
-      phone: phone.trim(),
+      phone: normalizedPhone,
       country: country.trim(),
       city: city.trim(),
     },

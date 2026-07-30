@@ -215,6 +215,7 @@ model Manager {
   clients        Client[]
   quotes         Quote[]
   tariffUpdates  TariffSettings[]
+  systemSettingsUpdates SystemSettings[]
   uploadedFiles  DeskFile[]
   cashOrders     CashOrder[]
   cashOpeningBalanceUpdates CashOpeningBalance[]
@@ -303,6 +304,53 @@ model TariffSettings {
   createdAt                DateTime @default(now())
   createdByManagerId       String
   createdByManager         Manager  @relation(fields: [createdByManagerId], references: [id])
+}
+
+// Operating knobs that used to be hardcoded constants scattered across
+// lib/quote-engine.ts, lib/desk-services/quote-request.ts, and
+// app/api/manager-dashboard/route.ts — moved here (owner-editable from the
+// new "Настройки" tab) so tweaking a premium rate or a policy threshold no
+// longer needs a code change + deploy. Unlike TariffSettings (append-only —
+// every save is a new row, so an already-issued quote keeps the numbers it
+// was quoted with), this is a SINGLETON updated in place: nothing here is
+// snapshotted onto a Quote, every read (dashboard premium math, the
+// density/volume threshold, the free-quote count) always uses today's
+// value, exactly like the hardcoded constants did before. See
+// lib/system-settings.ts for the find-or-create-with-defaults accessor,
+// and PB-V5 chat 2026-07-30.
+model SystemSettings {
+  id String @id @default(cuid())
+
+  // 2026-07-28 motivation policy rates (see app/api/manager-dashboard's own
+  // comment for the full policy writeup) — company-lead vs self-sourced
+  // rates on Просчёт/Выкуп, Влад's cut, and the fulfillment premium rate.
+  normalRatePercent                    Decimal @default(10)
+  selfSourcedProscetRatePercent        Decimal @default(100)
+  selfSourcedBuyoutDiscountRatePercent Decimal @default(50)
+  vladShareRatePercent                 Decimal @default(10)
+  fulfillmentPremiumRatePercent        Decimal @default(10)
+
+  // How many of a client's first Standard-tier quotes get the search fee
+  // waived — see FREE_STANDARD_QUOTE_LIMIT's old home in quote-request.ts.
+  freeStandardQuoteLimit Int @default(3)
+
+  // Below this density (kg/m³), cargo always prices "по объёму" regardless
+  // of the quote's own deliveryPricingMode — see
+  // LOW_DENSITY_VOLUME_THRESHOLD_KG_M3's old home in lib/quote-engine.ts.
+  lowDensityVolumeThresholdKgM3 Decimal @default(100)
+
+  // Dashboard hint-text blocks (components/manager/manager-dashboard.tsx) —
+  // plain text, "**слово**" renders bold (see FormattedText in that file).
+  // Blank/default seed text mirrors exactly what used to be hardcoded JSX,
+  // so migrating to this table doesn't change anything a manager sees until
+  // an owner actually edits it from Настройки.
+  premiumExplanationText String @default("")
+  incomeSummaryText      String @default("")
+  incomeDetailText       String @default("")
+
+  updatedAt          DateTime @updatedAt
+  updatedByManagerId String
+  updatedByManager   Manager  @relation(fields: [updatedByManagerId], references: [id])
 }
 
 // One row per density tier per cargo category — e.g. "Одежда, 150-160

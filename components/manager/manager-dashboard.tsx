@@ -149,6 +149,39 @@ interface DashboardData {
   // rate (see PB-V5 chat 2026-07-28) — underlying storage/math stays RUB,
   // only the presentation changes.
   cnyRateRub: number;
+  // Owner-editable from Настройки (see SystemSettings in
+  // prisma/schema.prisma) — rendered via FormattedText below, replacing
+  // what used to be hardcoded JSX here.
+  premiumExplanationText: string;
+  incomeSummaryText: string;
+  incomeDetailText: string;
+}
+
+// Renders owner-editable hint text (see SystemSettings.premiumExplanationText
+// etc.) with the one bit of rich formatting that text actually needs:
+// "\n\n" starts a new paragraph, "**слово**" renders bold — same visual
+// result as the JSX these blocks used to be hardcoded as, just editable
+// from Настройки now instead of a code change. Plain string interpolation
+// only (no HTML), so there's no injection surface even though the text is
+// manager-entered.
+function FormattedText({ text, className }: { text: string; className?: string }) {
+  return (
+    <>
+      {text.split("\n\n").map((paragraph, i) => (
+        <p key={i} className={cn("mt-1.5 text-xs leading-relaxed text-text-secondary", className)}>
+          {paragraph.split(/(\*\*[^*]+\*\*)/g).map((chunk, j) =>
+            chunk.startsWith("**") && chunk.endsWith("**") ? (
+              <span key={j} className="font-semibold text-text">
+                {chunk.slice(2, -2)}
+              </span>
+            ) : (
+              chunk
+            ),
+          )}
+        </p>
+      ))}
+    </>
+  );
 }
 
 function fmt(value: number): string {
@@ -835,19 +868,7 @@ function ManagerDashboard() {
           <div className="flex items-center gap-1.5 text-sm font-bold text-text">
             <Info className="h-4 w-4 text-text-secondary" /> Как считается премия
           </div>
-          <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
-            <span className="font-semibold text-text">Просчёт</span> — 10% от прибыли для обычного клиента (лид
-            компании), 100% для подтверждённого личного клиента менеджера.{" "}
-            <span className="font-semibold text-text">Выкуп и Скидка поставщика</span> — 10% для обычного клиента,
-            50% для личного клиента. Всё по факту, как только старший менеджер или руководитель подтвердит реальную
-            сумму выкупа.
-          </p>
-          <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
-            <span className="font-semibold text-text">Карго и Фулфилмент</span> — премия менеджеру только для
-            подтверждённого личного клиента: карго — фиксированная ставка $/кг или $/м³ (задаётся во вкладке
-            «Тарифы»), фулфилмент — 10% от выставленной суммы. Для лида компании менеджер с карго и фулфилмента
-            ничего не получает.
-          </p>
+          <FormattedText text={data.premiumExplanationText} />
         </div>
 
         {data.potentialProscetRub != null &&
@@ -861,11 +882,7 @@ function ManagerDashboard() {
               <div className="flex items-center gap-1.5 text-sm font-bold text-text">
                 <Lock className="h-4 w-4 text-text-secondary" /> Разбивка дохода — видно только руководителю
               </div>
-              <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
-                «В работе» выше — это оборот (всё, что заплатит клиент). Здесь — сколько из него реальная прибыль
-                компании, по источникам (Просчёт + Выкуп, Скидка поставщика, Карго), и отдельно — что уже
-                подтверждено (факт), а что ещё оценка (потенциал).
-              </p>
+              <FormattedText text={data.incomeSummaryText} />
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl border border-border bg-surface p-3.5">
                   <div className="flex items-center gap-1.5 text-xs text-text-secondary">
@@ -911,32 +928,8 @@ function ManagerDashboard() {
               </div>
 
               {incomeExplainerOpen && (
-                <div className="mt-3 space-y-2 rounded-xl border border-border bg-surface p-3.5 text-xs leading-relaxed text-text-secondary">
-                  <div>
-                    <span className="font-semibold text-text">Просчёт</span> = услуга поиска (Standart/Expert/Pro).{" "}
-                    <span className="font-semibold text-text">Выкуп</span> = комиссия за организацию выкупа + доп.
-                    услуги из прайс-листа + разница между плановой ценой товара и тем, что реально потрачено на
-                    выкуп.
-                  </div>
-                  <div>
-                    <span className="font-semibold text-text">Скидка поставщика</span> — дополнительная скидка
-                    фабрики сверх плановой цены, вводится вручную вместе с фактом выкупа. Отдельный источник, не
-                    входит в «Выкуп» выше.
-                  </div>
-                  <div>
-                    Потенциал считает разницу план/факт как 0, пока старший менеджер или руководитель не подтвердит
-                    реальную сумму выкупа — тогда просчёт переходит в факт.
-                  </div>
-                  <div>
-                    <span className="font-semibold text-text">Карго</span> = то, что заплатил клиент за
-                    карго-доставку, минус её реальная себестоимость (задаётся во вкладке «Тарифы»). В факт попадает
-                    только при статусе «Выдан клиенту» — до этого, даже если реальные габариты уже внесены, доход
-                    числится в потенциале.
-                  </div>
-                  <div className="border-t border-border pt-2">
-                    <span className="font-semibold text-text">Не считается доходом (100% расход, без наценки):</span>{" "}
-                    стоимость самого товара по плану и доставка по Китаю до склада.
-                  </div>
+                <div className="mt-3 rounded-xl border border-border bg-surface p-3.5">
+                  <FormattedText text={data.incomeDetailText} />
                 </div>
               )}
 

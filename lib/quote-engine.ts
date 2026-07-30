@@ -80,6 +80,12 @@ interface QuoteEngineInputs {
   // negative. Defaults to 0 so every existing caller keeps working
   // unchanged.
   cargoDiscountUsd?: number;
+  // Below this density (kg/m³), cargo always prices "по объёму" regardless
+  // of deliveryPricingMode — owner-editable from Настройки (see
+  // SystemSettings.lowDensityVolumeThresholdKgM3 in prisma/schema.prisma).
+  // Optional, defaulting to the value that used to be a hardcoded constant
+  // here, so a caller that doesn't pass it keeps working unchanged.
+  lowDensityVolumeThresholdKgM3?: number;
 }
 
 interface QuoteEngineOutputs {
@@ -116,8 +122,10 @@ interface QuoteEngineOutputs {
 // (the flat volumeRateUsdPerCbm rate) instead of a category-specific $/kg
 // tier — very light, bulky cargo doesn't fit the per-kg tables at all
 // (explicit manager instruction, applies uniformly, no per-category
-// exception).
-const LOW_DENSITY_VOLUME_THRESHOLD_KG_M3 = 100;
+// exception). Fallback default when a caller doesn't pass
+// inputs.lowDensityVolumeThresholdKgM3 — see SystemSettings in
+// prisma/schema.prisma for the owner-editable version.
+const DEFAULT_LOW_DENSITY_VOLUME_THRESHOLD_KG_M3 = 100;
 
 // cm³ → m³. Same /1_000_000 conversion already used in calculators-tab.tsx's
 // cargo-by-density calculator — kept consistent rather than reinvented.
@@ -196,7 +204,8 @@ function computeQuote(inputs: QuoteEngineInputs): QuoteEngineOutputs {
   let cargoRateUsd: number;
   let rawCargoDeliveryUsd: number;
   let cargoPricingBasis: DeliveryPricingMode;
-  if (inputs.deliveryPricingMode === "density" && densityKgM3 >= LOW_DENSITY_VOLUME_THRESHOLD_KG_M3) {
+  const lowDensityVolumeThresholdKgM3 = inputs.lowDensityVolumeThresholdKgM3 ?? DEFAULT_LOW_DENSITY_VOLUME_THRESHOLD_KG_M3;
+  if (inputs.deliveryPricingMode === "density" && densityKgM3 >= lowDensityVolumeThresholdKgM3) {
     const rate = lookupDensityRate(inputs.densityTiers, inputs.cargoCategoryKey, densityKgM3);
     if (rate === null) {
       throw new Error(

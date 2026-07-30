@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, Calculator, CheckSquare, Database, LogOut, Package, Tag, UserCog, Users, UsersRound, Wallet } from "lucide-react";
+import { Briefcase, Calculator, CheckSquare, Database, LogOut, Package, Settings, Tag, UserCog, Users, UsersRound, Wallet } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ManagerClientsTab } from "@/components/manager/tabs/clients-tab";
@@ -13,6 +13,7 @@ import { ManagerDatabaseTab } from "@/components/manager/tabs/database-tab";
 import { ManagerConfirmationsTab } from "@/components/manager/tabs/confirmations-tab";
 import { ManagerCashTab } from "@/components/manager/tabs/cash-tab";
 import { ManagerFulfillmentTab } from "@/components/manager/tabs/fulfillment-tab";
+import { ManagerSettingsTab } from "@/components/manager/tabs/settings-tab";
 import { ManagerDashboard } from "@/components/manager/manager-dashboard";
 
 interface ManagerWorkspaceProps {
@@ -43,6 +44,7 @@ const ALL_SECTIONS = [
   { id: "cash", label: "Отчёты по дням", icon: Wallet, Component: ManagerCashTab, ownerOnly: true, seniorOrOwnerOnly: false },
   { id: "database", label: "База данных", icon: Database, Component: ManagerDatabaseTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "staff", label: "Сотрудники", icon: UsersRound, Component: ManagerStaffTab, ownerOnly: true, seniorOrOwnerOnly: false },
+  { id: "settings", label: "Настройки", icon: Settings, Component: ManagerSettingsTab, ownerOnly: true, seniorOrOwnerOnly: false },
 ] as const;
 
 const LAST_SECTION_STORAGE_KEY = "manager-last-section";
@@ -57,6 +59,26 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
   const [exitingImpersonation, setExitingImpersonation] = useState(false);
   const [activeSection, setActiveSection] = useState<(typeof ALL_SECTIONS)[number]["id"]>("clients");
   const contentRef = useRef<HTMLDivElement>(null);
+
+  // Badge on the "Подтверждения" nav tab — how many buyout facts and
+  // self-sourced client claims are waiting on a старший менеджер/руководитель
+  // right now, so it's visible without opening the tab. Same two counts
+  // ManagerConfirmationsTab itself lists. Owner/senior only (that's who
+  // sees the tab at all — see seniorOrOwnerOnly below), refetched whenever
+  // the active tab changes so acting in Подтверждения and switching away
+  // clears/updates the count without a dedicated polling loop.
+  const [pendingConfirmationsCount, setPendingConfirmationsCount] = useState(0);
+  useEffect(() => {
+    if (role !== "owner" && role !== "senior") return;
+    fetch("/api/manager-confirmations")
+      .then((res) => res.json())
+      .then((data) => {
+        const buyouts = data.pendingBuyouts?.length ?? 0;
+        const clients = data.pendingClients?.length ?? 0;
+        setPendingConfirmationsCount(buyouts + clients);
+      })
+      .catch(() => {});
+  }, [role, activeSection]);
 
   // Clicking a nav tab jumps straight to that tab's content, skipping past
   // the dashboard above it — the dashboard is useful to glance at on load,
@@ -109,7 +131,7 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
 
   return (
     <div className="manager-cabinet-theme min-h-screen bg-bg">
-      <div className="mx-auto max-w-6xl px-4 py-10">
+      <div className="mx-auto max-w-7xl px-4 py-10">
       <div className="sticky top-0 z-30 space-y-2">
         {impersonatedByName && (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-warning/30 bg-warning/10 px-4 py-2.5 text-sm backdrop-blur-md">
@@ -167,6 +189,11 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
             >
               <section.icon className="h-4 w-4 shrink-0" />
               {section.label}
+              {section.id === "confirmations" && pendingConfirmationsCount > 0 && (
+                <span className="flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-error px-1 text-[10px] font-bold text-white">
+                  {pendingConfirmationsCount}
+                </span>
+              )}
             </button>
           ))}
         </nav>

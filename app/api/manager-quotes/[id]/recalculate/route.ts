@@ -12,6 +12,7 @@ import {
   stripCargoCostForNonOwner,
   volumeTariffsToEngineInput,
 } from "@/lib/desk-services/quote-request";
+import { getSystemSettings } from "@/lib/system-settings";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -41,10 +42,11 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (!tariffSettings) {
     return Response.json({ error: "Тарифы не заданы — заполните вкладку «Тарифы»." }, { status: 400 });
   }
-  const [densityTiers, volumeTariffs, buyoutCommissionTiers] = await Promise.all([
+  const [densityTiers, volumeTariffs, buyoutCommissionTiers, systemSettings] = await Promise.all([
     prisma.densityTariff.findMany(),
     prisma.volumeTariff.findMany(),
     prisma.buyoutCommissionTariff.findMany(),
+    getSystemSettings(),
   ]);
 
   const searchServiceFeeRub = existing.searchFeeWaived
@@ -82,6 +84,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     buyoutCommissionTiers: buyoutCommissionTariffsToEngineInput(buyoutCommissionTiers),
     cnyRateRub: Number(tariffSettings.cnyRateRub),
     usdRateRub: Number(tariffSettings.usdRateRub),
+    lowDensityVolumeThresholdKgM3: Number(systemSettings.lowDensityVolumeThresholdKgM3),
     attachedServicesTotalRub,
     customProductionFeeRub,
     cargoDiscountUsd: Number(existing.cargoDiscountUsd),

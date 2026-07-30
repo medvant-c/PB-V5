@@ -5,6 +5,7 @@ import { COOKIE_NAME, SESSION_DURATION_SECONDS, createClientSessionToken } from 
 import { buildSessionCookieHeader, getClientIp } from "@/lib/request-utils";
 import { prisma } from "@/lib/prisma";
 import { nextClientDisplayId } from "@/lib/display-ids";
+import { normalizePhone } from "@/lib/phone";
 
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 10;
@@ -39,6 +40,12 @@ export async function POST(req: NextRequest) {
 
   const normalizedEmail = email.trim().toLowerCase();
   const passwordHash = hashPassword(password);
+  // Phone is optional here (unlike the manager-cabinet/старый-desk forms),
+  // so a number that doesn't fully normalize (see lib/phone.ts) isn't
+  // rejected outright — self-registration shouldn't block over a phone
+  // format nitpick. Best-effort: normalized shape when possible, the
+  // trimmed raw text otherwise.
+  const suppliedPhone = typeof phone === "string" && phone.trim() ? (normalizePhone(phone) ?? phone.trim()) : null;
 
   const existing = await prisma.client.findUnique({ where: { email: normalizedEmail } });
 
@@ -59,7 +66,7 @@ export async function POST(req: NextRequest) {
       data: {
         passwordHash,
         name: name.trim(),
-        phone: typeof phone === "string" && phone.trim() ? phone.trim() : existing.phone,
+        phone: suppliedPhone ?? existing.phone,
       },
     });
     clientId = updated.id;
@@ -69,7 +76,7 @@ export async function POST(req: NextRequest) {
         displayId: await nextClientDisplayId(),
         name: name.trim(),
         email: normalizedEmail,
-        phone: typeof phone === "string" && phone.trim() ? phone.trim() : null,
+        phone: suppliedPhone,
         passwordHash,
       },
     });

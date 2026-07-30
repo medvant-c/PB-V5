@@ -156,6 +156,9 @@ interface QuoteRates {
   // on the quote's tier — 0/undefined when fields.isCustomProduction is
   // false. See Quote.customProductionFeeRub in prisma/schema.prisma.
   customProductionFeeRub?: number;
+  // From SystemSettings.lowDensityVolumeThresholdKgM3 — see
+  // QuoteEngineInputs.lowDensityVolumeThresholdKgM3 in lib/quote-engine.ts.
+  lowDensityVolumeThresholdKgM3?: number;
 }
 
 function buildEngineInputs(fields: ParsedQuoteFields, rates: QuoteRates): QuoteEngineInputs {
@@ -183,6 +186,7 @@ function buildEngineInputs(fields: ParsedQuoteFields, rates: QuoteRates): QuoteE
     usdRateRub: rates.usdRateRub,
     attachedServicesTotalRub: rates.attachedServicesTotalRub,
     customProductionFeeRub: rates.customProductionFeeRub,
+    lowDensityVolumeThresholdKgM3: rates.lowDensityVolumeThresholdKgM3,
   };
 }
 
@@ -237,16 +241,19 @@ function parseAttachedServices(formData: FormData): AttachedServiceInput[] {
     .filter((item) => item.name && Number.isFinite(item.priceRub) && item.priceRub >= 0);
 }
 
-// A client's first 3 Standard-tier quotes are free (search-service fee
+// A client's first N Standard-tier quotes are free (search-service fee
 // waived) — a promo, not a discount, so it's flagged separately
 // (Quote.searchFeeWaived) rather than just landing on a 0 fee that would be
 // indistinguishable from a manual override. Decided once at creation; never
-// re-evaluated on edit (see lib/desk-services/quote-request.ts callers).
-const FREE_STANDARD_QUOTE_LIMIT = 3;
+// re-evaluated on edit (see lib/desk-services/quote-request.ts callers). N
+// is owner-editable from Настройки (SystemSettings.freeStandardQuoteLimit)
+// — the caller fetches it and passes it in; DEFAULT_FREE_STANDARD_QUOTE_LIMIT
+// only covers a caller that doesn't.
+const DEFAULT_FREE_STANDARD_QUOTE_LIMIT = 3;
 
-async function isFreeStandardQuoteEligible(clientId: string): Promise<boolean> {
+async function isFreeStandardQuoteEligible(clientId: string, limit: number = DEFAULT_FREE_STANDARD_QUOTE_LIMIT): Promise<boolean> {
   const priorStandardCount = await prisma.quote.count({ where: { clientId, quoteType: "standard" } });
-  return priorStandardCount < FREE_STANDARD_QUOTE_LIMIT;
+  return priorStandardCount < limit;
 }
 
 function densityTiersToEngineInput(
@@ -316,7 +323,6 @@ export {
   findVolumeTariffCost,
   parseAttachedServices,
   stripCargoCostForNonOwner,
-  FREE_STANDARD_QUOTE_LIMIT,
   customProductionFeeForTier,
 };
 export type { ParsedQuoteFields, QuoteRates, QuoteEngineOutputs, AttachedServiceInput };

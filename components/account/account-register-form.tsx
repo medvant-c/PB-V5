@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { formatPhoneMask } from "@/lib/phone";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -87,7 +88,12 @@ function AccountRegisterForm() {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="register-phone">Телефон (необязательно)</Label>
-            <Input id="register-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <Input
+              id="register-phone"
+              placeholder="+7 (___) ___-__-__"
+              value={phone}
+              onChange={(e) => setPhone(formatPhoneMask(e.target.value))}
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="register-password">Пароль</Label>

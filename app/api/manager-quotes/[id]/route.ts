@@ -15,6 +15,7 @@ import {
   stripCargoCostForNonOwner,
   volumeTariffsToEngineInput,
 } from "@/lib/desk-services/quote-request";
+import { getSystemSettings } from "@/lib/system-settings";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -89,9 +90,10 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   }
   const { fields } = parsed;
 
-  const [densityTiers, volumeTariffs] = await Promise.all([
+  const [densityTiers, volumeTariffs, systemSettings] = await Promise.all([
     prisma.densityTariff.findMany(),
     prisma.volumeTariff.findMany(),
+    getSystemSettings(),
   ]);
 
   // Needed unconditionally now (cargo margin, below), not just for
@@ -130,6 +132,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     searchServiceFeeRub,
     densityTiers: densityTiersToEngineInput(densityTiers),
     volumeTariffs: volumeTariffsToEngineInput(volumeTariffs),
+    lowDensityVolumeThresholdKgM3: Number(systemSettings.lowDensityVolumeThresholdKgM3),
     attachedServicesTotalRub,
     customProductionFeeRub,
   });

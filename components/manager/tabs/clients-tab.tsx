@@ -60,6 +60,7 @@ import {
   type QuoteStatus,
 } from "@/lib/quote-statuses";
 import { cn } from "@/lib/utils";
+import { formatPhoneMask } from "@/lib/phone";
 
 const BULK_QUOTE_TYPES = [
   { value: "standard", label: "Standart" },
@@ -1870,7 +1871,12 @@ function ManagerClientsTab() {
           <div className="grid gap-2 sm:grid-cols-2">
             <Input placeholder="Имя клиента" value={name} onChange={(e) => setName(e.target.value)} required />
             <Input placeholder="Компания" value={company} onChange={(e) => setCompany(e.target.value)} />
-            <Input placeholder="Телефон" value={phone} onChange={(e) => setPhone(e.target.value)} required />
+            <Input
+              placeholder="+7 (___) ___-__-__"
+              value={phone}
+              onChange={(e) => setPhone(formatPhoneMask(e.target.value))}
+              required
+            />
             <Input placeholder="Telegram / WeChat" value={messenger} onChange={(e) => setMessenger(e.target.value)} />
             <Input type="email" placeholder="Email (необязательно)" value={email} onChange={(e) => setEmail(e.target.value)} />
             <Select value={source} onValueChange={setSource}>
@@ -2091,9 +2097,9 @@ function ManagerClientsTab() {
                           ) : (
                             <>
                               <Input
-                                placeholder="Телефон"
+                                placeholder="+7 (___) ___-__-__"
                                 value={editDraft.phone}
-                                onChange={(e) => setEditDraft((d) => ({ ...d, phone: e.target.value }))}
+                                onChange={(e) => setEditDraft((d) => ({ ...d, phone: formatPhoneMask(e.target.value) }))}
                               />
                               <Input
                                 placeholder="Telegram / WeChat"
@@ -2135,10 +2141,14 @@ function ManagerClientsTab() {
 
                     <ClientDraftRequests clientId={client.id} refreshKey={quotesRefreshKey} onChange={loadDraftCounts} />
 
-                    <Label>Документы клиента</Label>
                     <ClientFilesPanel clientId={client.id} />
 
-                    <Label>Просчёты клиента</Label>
+                    <div className="flex items-center justify-between gap-2">
+                      <Label>Просчёты клиента</Label>
+                      <Button type="button" size="sm" onClick={() => setQuoteDialogClientId(client.id)}>
+                        Сформировать просчёт
+                      </Button>
+                    </div>
                     <ClientQuotes
                       clientId={client.id}
                       refreshKey={quotesRefreshKey}

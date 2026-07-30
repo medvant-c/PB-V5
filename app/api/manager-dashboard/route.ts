@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { getVisibleManagerIds } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
+import { getSystemSettings } from "@/lib/system-settings";
 import { QUOTE_STATUSES, type QuoteStatus } from "@/lib/quote-statuses";
 
 // Statuses that imply the buyout has actually happened — client's money
@@ -37,18 +38,15 @@ const CONVERSION_PREMIUM_THRESHOLD_PERCENT = 60;
 //     — and deliberately never mentioned anywhere in the manager-facing
 //     UI (see components/manager/manager-dashboard.tsx), not just excluded
 //     from the math.
-const NORMAL_RATE_PERCENT = 10;
-const SELF_SOURCED_PROSCET_RATE_PERCENT = 100;
-const SELF_SOURCED_BUYOUT_DISCOUNT_RATE_PERCENT = 50;
-// Vlad (Партнёр) takes 10% off the top of every source, on every
-// confirmed deal, regardless of lead source — computed once, company-wide,
-// not per-manager.
-const VLAD_SHARE_RATE_PERCENT = 10;
-// Фулфилмент — flat 10% of what was billed to the client, ONLY for a
-// confirmed self-sourced client (see policy note above) — zero for a
-// company lead, even though the full revenue still counts toward the
-// Влад/founders profit pool below.
-const FULFILLMENT_PREMIUM_RATE_PERCENT = 10;
+// The five rates the policy above describes are no longer hardcoded here —
+// owner-editable from Настройки (see SystemSettings in
+// prisma/schema.prisma), fetched fresh in GET below and threaded through
+// summarize() and the rest of this route.
+interface PremiumRates {
+  normalRatePercent: number;
+  selfSourcedProscetRatePercent: number;
+  selfSourcedBuyoutDiscountRatePercent: number;
+}
 
 interface QuoteForStats {
   managerId: string;
@@ -161,7 +159,7 @@ function isSelfSourcedFor(q: QuoteForStats, managerId: string): boolean {
   return q.client.selfSourcedConfirmed && q.client.createdByManagerId === managerId;
 }
 
-function summarize(quotes: QuoteForStats[], cargoRates: { usdPerKg: number; usdPerM3: number }) {
+function summarize(quotes: QuoteForStats[], cargoRates: { usdPerKg: number; usdPerM3: number }, premiumRates: PremiumRates) {
   const statusCounts: Record<string, number> = {};
   for (const status of QUOTE_STATUSES) statusCounts[status] = 0;
   let boughtRub = 0;
@@ -230,8 +228,10 @@ function summarize(quotes: QuoteForStats[], cargoRates: { usdPerKg: number; usdP
       // recomputed live — see schema comment on that field. Просчёт gets
       // the full 100% boost for a self-sourced client; Выкуп/Скидка get a
       // smaller 50% boost — not the same rate as Просчёт.
-      const proscetRate = q.buyoutSelfSourcedBoost ? SELF_SOURCED_PROSCET_RATE_PERCENT : NORMAL_RATE_PERCENT;
-      const buyoutDiscountRate = q.buyoutSelfSourcedBoost ? SELF_SOURCED_BUYOUT_DISCOUNT_RATE_PERCENT : NORMAL_RATE_PERCENT;
+      const proscetRate = q.buyoutSelfSourcedBoost ? premiumRates.selfSourcedProscetRatePercent : premiumRates.normalRatePercent;
+      const buyoutDiscountRate = q.buyoutSelfSourcedBoost
+        ? premiumRates.selfSourcedBuyoutDiscountRatePercent
+        : premiumRates.normalRatePercent;
       factualPremiumRub +=
         Math.max(0, proscetRub) * (proscetRate / 100) +
         (Math.max(0, buyoutRub) + Math.max(0, discountRub)) * (buyoutDiscountRate / 100);
@@ -240,8 +240,8 @@ function summarize(quotes: QuoteForStats[], cargoRates: { usdPerKg: number; usdP
       potentialProscetRub += proscetRub;
       potentialBuyoutRub += buyoutRub;
       const isBoosted = isSelfSourcedFor(q, q.managerId);
-      const proscetRate = isBoosted ? SELF_SOURCED_PROSCET_RATE_PERCENT : NORMAL_RATE_PERCENT;
-      const buyoutRate = isBoosted ? SELF_SOURCED_BUYOUT_DISCOUNT_RATE_PERCENT : NORMAL_RATE_PERCENT;
+      const proscetRate = isBoosted ? premiumRates.selfSourcedProscetRatePercent : premiumRates.normalRatePercent;
+      const buyoutRate = isBoosted ? premiumRates.selfSourcedBuyoutDiscountRatePercent : premiumRates.normalRatePercent;
       potentialPremiumRub += Math.max(0, proscetRub) * (proscetRate / 100) + Math.max(0, buyoutRub) * (buyoutRate / 100);
     }
 
@@ -304,11 +304,21 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: "Не авторизовано." }, { status: 401 });
   }
 
-  const tariffSettings = await prisma.tariffSettings.findFirst({ orderBy: { createdAt: "desc" } });
+  const [tariffSettings, systemSettings] = await Promise.all([
+    prisma.tariffSettings.findFirst({ orderBy: { createdAt: "desc" } }),
+    getSystemSettings(session.managerId),
+  ]);
   const cargoRates = {
     usdPerKg: tariffSettings ? Number(tariffSettings.managerCargoRateUsdPerKg) : 0.3,
     usdPerM3: tariffSettings ? Number(tariffSettings.managerCargoRateUsdPerM3) : 5,
   };
+  const premiumRates: PremiumRates = {
+    normalRatePercent: Number(systemSettings.normalRatePercent),
+    selfSourcedProscetRatePercent: Number(systemSettings.selfSourcedProscetRatePercent),
+    selfSourcedBuyoutDiscountRatePercent: Number(systemSettings.selfSourcedBuyoutDiscountRatePercent),
+  };
+  const vladShareRatePercent = Number(systemSettings.vladShareRatePercent);
+  const fulfillmentPremiumRatePercent = Number(systemSettings.fulfillmentPremiumRatePercent);
 
   const visibleManagerIds = await getVisibleManagerIds(session);
   const quotes = await prisma.quote.findMany({
@@ -375,7 +385,7 @@ export async function GET(req: NextRequest) {
     fulfillmentTotalRub += rub;
     const isSelfSourced = o.client.selfSourcedConfirmed && o.client.createdByManagerId === o.managerId;
     if (!isSelfSourced) continue;
-    const premium = rub * (FULFILLMENT_PREMIUM_RATE_PERCENT / 100);
+    const premium = rub * (fulfillmentPremiumRatePercent / 100);
     fulfillmentPremiumRubByManager.set(o.managerId, (fulfillmentPremiumRubByManager.get(o.managerId) ?? 0) + premium);
   }
   function withFulfillmentPremium<T extends { factualPremiumRub: number }>(row: T, managerId: string | "all"): T & { factualFulfillmentPremiumRub: number } {
@@ -386,7 +396,7 @@ export async function GET(req: NextRequest) {
     return { ...row, factualFulfillmentPremiumRub: premium, factualPremiumRub: row.factualPremiumRub + premium };
   }
 
-  const overall = withFulfillmentPremium(summarize(quotes, cargoRates), "all");
+  const overall = withFulfillmentPremium(summarize(quotes, cargoRates, premiumRates), "all");
 
   // Per-manager breakdown — meaningful for owner (sees everyone) and senior
   // (sees their team); a plain manager only ever sees themself here, so
@@ -410,7 +420,7 @@ export async function GET(req: NextRequest) {
     perManager = managers.map((m) => ({
       managerId: m.id,
       managerName: m.name,
-      ...withFulfillmentPremium(summarize(byManager.get(m.id) ?? [], cargoRates), m.id),
+      ...withFulfillmentPremium(summarize(byManager.get(m.id) ?? [], cargoRates, premiumRates), m.id),
       completedToday: countCompletedSince(m.id, startOfDay),
       completedWeek: countCompletedSince(m.id, startOfWeek),
       completedMonth: countCompletedSince(m.id, startOfMonth),
@@ -482,7 +492,7 @@ export async function GET(req: NextRequest) {
     // Фулфилмент has no tracked cost — its full billed amount counts as
     // profit for this pool, same treatment as Просчёт.
     const totalProfitPoolRub = totalConfirmedQuoteProfitRub + fulfillmentTotalRub;
-    vladShareRub = totalProfitPoolRub * (VLAD_SHARE_RATE_PERCENT / 100);
+    vladShareRub = totalProfitPoolRub * (vladShareRatePercent / 100);
     founderShareRub = (totalProfitPoolRub - vladShareRub - totalManagerFactualPremiumsRub) / 2;
   }
 
@@ -523,5 +533,10 @@ export async function GET(req: NextRequest) {
     // profit math stays exactly as-is, just rendered in a different unit.
     cnyRateRub: tariffSettings ? Number(tariffSettings.cnyRateRub) : 1,
     conversionPremiumThresholdPercent: CONVERSION_PREMIUM_THRESHOLD_PERCENT,
+    // Owner-editable from Настройки — see FormattedText in
+    // manager-dashboard.tsx for the "**bold**" rendering.
+    premiumExplanationText: systemSettings.premiumExplanationText,
+    incomeSummaryText: systemSettings.incomeSummaryText,
+    incomeDetailText: systemSettings.incomeDetailText,
   });
 }

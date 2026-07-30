@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
-import { Download, File as FileIcon, Loader2, Trash2, Upload } from "lucide-react";
+import { ChevronDown, Download, File as FileIcon, Loader2, Trash2, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ClientFileRecord {
@@ -33,6 +33,12 @@ interface ClientFilesPanelProps {
 // same mechanics as the "База данных" tab (components/manager/tabs/database-tab.tsx)
 // but scoped to one client via /api/manager-clients/[id]/files.
 function ClientFilesPanel({ clientId }: ClientFilesPanelProps) {
+  // Collapsed by default — a client card with several documents was
+  // pushing everything below it (Просчёты клиента etc.) far down the page.
+  // Same collapsed-by-default archive pattern as BuyoutArchive in
+  // confirmations-tab.tsx, with a visible file count on the closed header
+  // so it's obvious there's something to expand. See PB-V5 chat 2026-07-30.
+  const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<ClientFileRecord[]>([]);
   const [viewer, setViewer] = useState<{ managerId: string; role: string } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -111,95 +117,111 @@ function ClientFilesPanel({ clientId }: ClientFilesPanelProps) {
   }
 
   return (
-    <div className="space-y-2">
-      <div
-        onDragOver={(event) => {
-          event.preventDefault();
-          setIsDragOver(true);
-        }}
-        onDragLeave={() => setIsDragOver(false)}
-        onDrop={handleDrop}
-        className={cn(
-          "flex items-center justify-center gap-2 rounded-lg border border-dashed px-3 py-3 text-center transition-colors",
-          isDragOver ? "border-primary bg-primary/5" : "border-border bg-bg",
-        )}
+    <div className="rounded-xl border border-border bg-surface">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 p-3 text-left"
       >
-        <input
-          ref={inputRef}
-          type="file"
-          accept={ACCEPT}
-          className="hidden"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (file) uploadFile(file);
-          }}
-        />
-        {uploading ? (
-          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
-        ) : (
-          <Upload className="h-4 w-4 shrink-0 text-text-secondary" />
-        )}
-        <p className="text-xs text-text-secondary">
-          Перетащите договор, счёт или ТЗ сюда, или{" "}
-          <button
-            type="button"
-            onClick={() => inputRef.current?.click()}
-            disabled={uploading}
-            className="font-medium text-primary hover:underline disabled:opacity-50"
+        <span className="flex items-center gap-1.5 text-sm font-medium text-text">
+          <FileIcon className="h-4 w-4 shrink-0 text-text-secondary" />
+          Документы клиента{!loading && files.length > 0 ? ` (${files.length})` : ""}
+        </span>
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-text-secondary transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && (
+        <div className="space-y-2 border-t border-border p-3">
+          <div
+            onDragOver={(event) => {
+              event.preventDefault();
+              setIsDragOver(true);
+            }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={handleDrop}
+            className={cn(
+              "flex items-center justify-center gap-2 rounded-lg border border-dashed px-3 py-3 text-center transition-colors",
+              isDragOver ? "border-primary bg-primary/5" : "border-border bg-bg",
+            )}
           >
-            выберите файл
-          </button>{" "}
-          — PDF, DOC(X), XLS(X), PNG, JPG, до 100MB
-        </p>
-      </div>
-
-      {error && <p className="text-xs text-error">{error}</p>}
-
-      {loading ? (
-        <p className="text-xs text-text-secondary">Загрузка списка файлов…</p>
-      ) : files.length === 0 ? (
-        <p className="text-xs text-text-secondary">Документов пока нет.</p>
-      ) : (
-        <ul className="space-y-1.5">
-          {files.map((file) => (
-            <li
-              key={file.id}
-              className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm"
-            >
-              <FileIcon className="h-4 w-4 shrink-0 text-text-secondary" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium text-text">{file.originalName}</div>
-                <div className="text-[11px] text-text-secondary">
-                  {formatSize(file.size)} · {new Date(file.uploadedAt).toLocaleDateString("ru-RU")}
-                  {file.uploadedByManager ? ` · ${file.uploadedByManager.name}` : ""}
-                </div>
-              </div>
-              <a
-                href={`/api/manager-client-files/${file.id}`}
-                aria-label={`Скачать ${file.originalName}`}
-                className="shrink-0 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-black/5 hover:text-primary"
+            <input
+              ref={inputRef}
+              type="file"
+              accept={ACCEPT}
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) uploadFile(file);
+              }}
+            />
+            {uploading ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+            ) : (
+              <Upload className="h-4 w-4 shrink-0 text-text-secondary" />
+            )}
+            <p className="text-xs text-text-secondary">
+              Перетащите договор, счёт или ТЗ сюда, или{" "}
+              <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                disabled={uploading}
+                className="font-medium text-primary hover:underline disabled:opacity-50"
               >
-                <Download className="h-4 w-4" />
-              </a>
-              {viewer && (viewer.role === "owner" || viewer.managerId === file.uploadedByManagerId) && (
-                <button
-                  type="button"
-                  onClick={() => deleteFile(file.id)}
-                  disabled={pendingDeleteId === file.id}
-                  aria-label={`Удалить ${file.originalName}`}
-                  className="shrink-0 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-error/10 hover:text-error disabled:opacity-50"
+                выберите файл
+              </button>{" "}
+              — PDF, DOC(X), XLS(X), PNG, JPG, до 100MB
+            </p>
+          </div>
+
+          {error && <p className="text-xs text-error">{error}</p>}
+
+          {loading ? (
+            <p className="text-xs text-text-secondary">Загрузка списка файлов…</p>
+          ) : files.length === 0 ? (
+            <p className="text-xs text-text-secondary">Документов пока нет.</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {files.map((file) => (
+                <li
+                  key={file.id}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-bg px-3 py-2 text-sm"
                 >
-                  {pendingDeleteId === file.id ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4" />
+                  <FileIcon className="h-4 w-4 shrink-0 text-text-secondary" />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium text-text">{file.originalName}</div>
+                    <div className="text-[11px] text-text-secondary">
+                      {formatSize(file.size)} · {new Date(file.uploadedAt).toLocaleDateString("ru-RU")}
+                      {file.uploadedByManager ? ` · ${file.uploadedByManager.name}` : ""}
+                    </div>
+                  </div>
+                  <a
+                    href={`/api/manager-client-files/${file.id}`}
+                    aria-label={`Скачать ${file.originalName}`}
+                    className="shrink-0 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-black/5 hover:text-primary"
+                  >
+                    <Download className="h-4 w-4" />
+                  </a>
+                  {viewer && (viewer.role === "owner" || viewer.managerId === file.uploadedByManagerId) && (
+                    <button
+                      type="button"
+                      onClick={() => deleteFile(file.id)}
+                      disabled={pendingDeleteId === file.id}
+                      aria-label={`Удалить ${file.originalName}`}
+                      className="shrink-0 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-error/10 hover:text-error disabled:opacity-50"
+                    >
+                      {pendingDeleteId === file.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </button>
                   )}
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
     </div>
   );

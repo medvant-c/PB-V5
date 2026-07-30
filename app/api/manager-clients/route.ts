@@ -3,6 +3,7 @@ import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { getVisibleManagerIds } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { nextClientDisplayId } from "@/lib/display-ids";
+import { normalizePhone } from "@/lib/phone";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -100,6 +101,13 @@ export async function POST(req: NextRequest) {
   if (typeof phone !== "string" || !phone.trim()) {
     return Response.json({ error: "Укажите телефон." }, { status: 400 });
   }
+  // Enforced here (not just the input mask) so a normalized, filterable/
+  // exportable shape lands in the DB regardless of how the request was
+  // made — see lib/phone.ts.
+  const normalizedPhone = normalizePhone(phone);
+  if (!normalizedPhone) {
+    return Response.json({ error: "Укажите номер телефона полностью: +7 (XXX) XXX-XX-XX." }, { status: 400 });
+  }
 
   const VALID_SOURCES = ["instagram", "telegram", "website", "referral", "other"];
   const normalizedSource = typeof source === "string" && VALID_SOURCES.includes(source) ? source : null;
@@ -126,7 +134,7 @@ export async function POST(req: NextRequest) {
       company: typeof company === "string" && company.trim() ? company.trim() : null,
       messenger: typeof messenger === "string" && messenger.trim() ? messenger.trim() : null,
       email: normalizedEmail,
-      phone: phone.trim(),
+      phone: normalizedPhone,
       source: normalizedSource as never,
       createdByManagerId: session.managerId,
       ...(isSelfSourced ? { selfSourcedClaimed: true, selfSourcedClaimedAt: new Date() } : {}),
