@@ -16,9 +16,11 @@
 //   Rather than guess real client-facing pricing, these two categories are
 //   left for the manager to add from the Тарифы tab once the real numbers
 //   are available.
-// - CNY/USD rates, buyout commission %: demo placeholders (matches the
-//   existing calculators-tab.tsx CNY_RATE convention) — replace on first
-//   real use, same as every other "заполните реальным" constant in this repo.
+// - CNY/USD rates: demo placeholders (matches the existing
+//   calculators-tab.tsx CNY_RATE convention) — replace on first real use,
+//   same as every other "заполните реальным" constant in this repo.
+// - Buyout commission tiers: real numbers from the owner's own graduated
+//   table (2026-07-30) — 10%/7%/5%/3% by sum закупа bracket.
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "@/generated/prisma/client";
 
@@ -28,6 +30,15 @@ const prisma = new PrismaClient({
 
 // [minDensity, maxDensity, ratePerKgUsd] — ascending, matches both Одежда
 // and Обувь tables from the spec (identical numbers in both).
+// [minAmountRub, maxAmountRub, commissionPercent] — ascending, from the
+// owner's own graduated buyout-commission table.
+const BUYOUT_COMMISSION_TIERS: [number, number | null, number][] = [
+  [0, 500_000, 10],
+  [500_000, 1_000_000, 7],
+  [1_000_000, 1_500_000, 5],
+  [1_500_000, null, 3],
+];
+
 const CLOTHING_SHOE_TIERS: [number, number | null, number][] = [
   [0, 100, 48.0],
   [100, 110, 4.6],
@@ -58,7 +69,6 @@ async function main() {
         cnyRateRub: 12.6,
         usdRateRub: 95,
         volumeRateUsdPerCbm: 340,
-        buyoutCommissionPercent: 5,
         standardPriceRub: 500,
         expertPriceRub: 1000,
         proPriceRub: 2000,
@@ -89,6 +99,20 @@ async function main() {
       })),
     });
     console.log(`Seeded ${CLOTHING_SHOE_TIERS.length} density tiers for ${categoryKey}.`);
+  }
+
+  const existingBuyoutCommissionTiers = await prisma.buyoutCommissionTariff.count();
+  if (existingBuyoutCommissionTiers === 0) {
+    await prisma.buyoutCommissionTariff.createMany({
+      data: BUYOUT_COMMISSION_TIERS.map(([minAmountRub, maxAmountRub, commissionPercent]) => ({
+        minAmountRub,
+        maxAmountRub,
+        commissionPercent,
+      })),
+    });
+    console.log(`Seeded ${BUYOUT_COMMISSION_TIERS.length} buyout commission tiers.`);
+  } else {
+    console.log("Skipping buyout commission tiers — already has rows.");
   }
 }
 

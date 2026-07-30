@@ -16,6 +16,7 @@ interface PendingBuyout {
   totalPriceCny: string;
   totalRub: string;
   searchServiceFeeRub: string;
+  customProductionFeeRub: string;
   buyoutCommissionRub: string;
   cnyRateUsed: string;
   manager: { id: string; name: string };
@@ -63,7 +64,9 @@ function previewDiscountCny(
   if (!Number.isFinite(buyoutCny) || buyoutCny <= 0) return null;
   if (!Number.isFinite(paymentRub) || paymentRub <= 0 || !Number.isFinite(paymentRate) || paymentRate <= 0) return null;
   const paymentAmountCny = paymentRub / paymentRate;
-  const servicesAndCommissionCny = (Number(quote.searchServiceFeeRub) + Number(quote.buyoutCommissionRub)) / Number(quote.cnyRateUsed);
+  const servicesAndCommissionCny =
+    (Number(quote.searchServiceFeeRub) + Number(quote.buyoutCommissionRub) + Number(quote.customProductionFeeRub)) /
+    Number(quote.cnyRateUsed);
   return paymentAmountCny - servicesAndCommissionCny - buyoutCny;
 }
 
@@ -381,7 +384,9 @@ function ManagerConfirmationsTab() {
                   // не нужно ничего вводить руками, только поправить при расхождении.
                   const draft = drafts[quote.id] ?? { cny: "", rate: quote.cnyRateUsed, rub: "", rateRub: quote.cnyRateUsed };
                   const days = daysWaiting(quote.statusChangedAt);
-                  const servicesAndCommissionCny = (Number(quote.searchServiceFeeRub) + Number(quote.buyoutCommissionRub)) / Number(quote.cnyRateUsed);
+                  const servicesAndCommissionCny =
+                    (Number(quote.searchServiceFeeRub) + Number(quote.buyoutCommissionRub) + Number(quote.customProductionFeeRub)) /
+                    Number(quote.cnyRateUsed);
                   const discountPreview = previewDiscountCny(quote, draft);
                   return (
                     <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
@@ -426,7 +431,7 @@ function ManagerConfirmationsTab() {
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="w-44 shrink-0 text-xs text-text-secondary">Услуги поиска и комиссия (авто):</span>
+                          <span className="w-44 shrink-0 text-xs text-text-secondary">Услуги, комиссия и произв-во (авто):</span>
                           <span className="w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text-secondary">
                             {servicesAndCommissionCny.toFixed(2)}¥
                           </span>

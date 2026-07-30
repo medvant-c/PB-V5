@@ -66,6 +66,8 @@ export async function GET(req: NextRequest) {
       cargoDeliveryRub: Number(q.cargoDeliveryRub),
       searchServiceFeeRub: Number(q.searchServiceFeeRub),
       searchFeeWaived: q.searchFeeWaived,
+      isCustomProduction: q.isCustomProduction,
+      customProductionFeeRub: Number(q.customProductionFeeRub),
       buyoutCommissionPercent: Number(q.buyoutCommissionPercent),
       buyoutCommissionRub: Number(q.buyoutCommissionRub),
       totalRub: Number(q.totalRub),

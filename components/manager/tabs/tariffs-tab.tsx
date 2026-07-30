@@ -10,10 +10,12 @@ interface TariffSettingsRecord {
   cnyRateRub: string;
   usdRateRub: string;
   volumeRateUsdPerCbm: string;
-  buyoutCommissionPercent: string;
   standardPriceRub: string;
   expertPriceRub: string;
   proPriceRub: string;
+  customProductionStandardRub: string;
+  customProductionExpertRub: string;
+  customProductionProRub: string;
   managerCargoRateUsdPerKg: string;
   managerCargoRateUsdPerM3: string;
   createdAt: string;
@@ -44,6 +46,13 @@ interface VolumeTariffRecord {
   costUsdPerCbm?: string;
 }
 
+interface BuyoutCommissionTariffRecord {
+  id: string;
+  minAmountRub: string;
+  maxAmountRub: string | null;
+  commissionPercent: string;
+}
+
 const FIELD_LABELS: Record<
   keyof Omit<TariffSettingsRecord, "createdAt" | "cargoDensityMarginUsdPerKg" | "cargoVolumeMarginUsdPerCbm">,
   string
@@ -51,10 +60,12 @@ const FIELD_LABELS: Record<
   cnyRateRub: "Курс юаня (CNY → RUB)",
   usdRateRub: "Курс доллара (USD → RUB)",
   volumeRateUsdPerCbm: "Резервная ставка за м³ (если для категории нет своего тарифа), $",
-  buyoutCommissionPercent: "Комиссия за организацию выкупа, %",
   standardPriceRub: "Поиск товара Standart, ₽",
   expertPriceRub: "Поиск товара Expert, ₽",
   proPriceRub: "Поиск товара Pro, ₽",
+  customProductionStandardRub: "Производство под заказ (Standart), ₽",
+  customProductionExpertRub: "Производство под заказ (Expert), ₽",
+  customProductionProRub: "Производство под заказ (Pro), ₽",
   managerCargoRateUsdPerKg: "Премия менеджеру за карго (свой клиент), $/кг",
   managerCargoRateUsdPerM3: "Премия менеджеру за карго (свой клиент), $/м³",
 };
@@ -93,6 +104,15 @@ function ManagerTariffsTab() {
   const [busyVolumeTariffId, setBusyVolumeTariffId] = useState<string | null>(null);
   const [volumeRateDrafts, setVolumeRateDrafts] = useState<Record<string, string>>({});
   const [volumeCostDrafts, setVolumeCostDrafts] = useState<Record<string, string>>({});
+
+  const [buyoutCommissionTariffs, setBuyoutCommissionTariffs] = useState<BuyoutCommissionTariffRecord[]>([]);
+  const [loadingBuyoutCommissionTariffs, setLoadingBuyoutCommissionTariffs] = useState(true);
+  const [showNewBuyoutCommissionTariffForm, setShowNewBuyoutCommissionTariffForm] = useState(false);
+  const [newBuyoutCommissionTariff, setNewBuyoutCommissionTariff] = useState({ minAmountRub: "", maxAmountRub: "", commissionPercent: "" });
+  const [buyoutCommissionTariffError, setBuyoutCommissionTariffError] = useState<string | null>(null);
+  const [creatingBuyoutCommissionTariff, setCreatingBuyoutCommissionTariff] = useState(false);
+  const [busyBuyoutCommissionTariffId, setBusyBuyoutCommissionTariffId] = useState<string | null>(null);
+  const [buyoutCommissionPercentDrafts, setBuyoutCommissionPercentDrafts] = useState<Record<string, string>>({});
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -153,11 +173,28 @@ function ManagerTariffsTab() {
     }
   }, []);
 
+  const loadBuyoutCommissionTariffs = useCallback(async () => {
+    setLoadingBuyoutCommissionTariffs(true);
+    try {
+      const res = await fetch("/api/manager-buyout-commission-tariffs");
+      const data = await res.json();
+      if (res.ok) {
+        setBuyoutCommissionTariffs(data.tiers);
+        setBuyoutCommissionPercentDrafts(
+          Object.fromEntries(data.tiers.map((t: BuyoutCommissionTariffRecord) => [t.id, t.commissionPercent])),
+        );
+      }
+    } finally {
+      setLoadingBuyoutCommissionTariffs(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadSettings();
     loadTiers();
     loadVolumeTariffs();
-  }, [loadSettings, loadTiers, loadVolumeTariffs]);
+    loadBuyoutCommissionTariffs();
+  }, [loadSettings, loadTiers, loadVolumeTariffs, loadBuyoutCommissionTariffs]);
 
   async function handleSave(event: React.FormEvent) {
     event.preventDefault();
@@ -327,6 +364,63 @@ function ManagerTariffsTab() {
       if (res.ok) await loadVolumeTariffs();
     } finally {
       setBusyVolumeTariffId(null);
+    }
+  }
+
+  async function handleCreateBuyoutCommissionTariff() {
+    if (creatingBuyoutCommissionTariff) return;
+    setCreatingBuyoutCommissionTariff(true);
+    setBuyoutCommissionTariffError(null);
+    try {
+      const res = await fetch("/api/manager-buyout-commission-tariffs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...newBuyoutCommissionTariff, maxAmountRub: newBuyoutCommissionTariff.maxAmountRub || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBuyoutCommissionTariffError(data.error ?? "Не удалось добавить тариф.");
+        return;
+      }
+      setNewBuyoutCommissionTariff({ minAmountRub: "", maxAmountRub: "", commissionPercent: "" });
+      setShowNewBuyoutCommissionTariffForm(false);
+      await loadBuyoutCommissionTariffs();
+    } catch {
+      setBuyoutCommissionTariffError("Не удалось связаться с сервером.");
+    } finally {
+      setCreatingBuyoutCommissionTariff(false);
+    }
+  }
+
+  async function handleUpdateBuyoutCommissionPercent(id: string, currentPercent: string) {
+    const draft = buyoutCommissionPercentDrafts[id];
+    if (draft === undefined || draft === currentPercent) return;
+    const percent = Number(draft);
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+      setBuyoutCommissionPercentDrafts((current) => ({ ...current, [id]: currentPercent }));
+      return;
+    }
+    setBusyBuyoutCommissionTariffId(id);
+    try {
+      const res = await fetch(`/api/manager-buyout-commission-tariffs/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ commissionPercent: percent }),
+      });
+      if (res.ok) await loadBuyoutCommissionTariffs();
+    } finally {
+      setBusyBuyoutCommissionTariffId(null);
+    }
+  }
+
+  async function handleDeleteBuyoutCommissionTariff(id: string) {
+    if (!window.confirm("Удалить эту ступень комиссии? Просчёты, уже посчитанные с этой ставкой, не изменятся.")) return;
+    setBusyBuyoutCommissionTariffId(id);
+    try {
+      const res = await fetch(`/api/manager-buyout-commission-tariffs/${id}`, { method: "DELETE" });
+      if (res.ok) await loadBuyoutCommissionTariffs();
+    } finally {
+      setBusyBuyoutCommissionTariffId(null);
     }
   }
 
@@ -674,6 +768,117 @@ function ManagerTariffsTab() {
                             disabled={busyVolumeTariffId === tariff.id}
                           />
                         </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-border pt-6">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-bold text-text">Комиссия за организацию выкупа</h3>
+          {canEdit && !showNewBuyoutCommissionTariffForm && (
+            <Button type="button" size="sm" variant="outline" onClick={() => setShowNewBuyoutCommissionTariffForm(true)}>
+              <Plus className="h-4 w-4" /> Добавить ступень
+            </Button>
+          )}
+        </div>
+        <p className="mt-1 text-sm text-text-secondary">
+          Сумма закупа (стоимость товара, без доставки по Китаю) → комиссия за организацию выкупа, %. Чем больше
+          заказ, тем ниже комиссия. Ступени не должны пересекаться — верхняя граница не входит в саму ступень
+          (например, «0–499 999,99» и следующая ступень «от 500 000»).
+        </p>
+
+        {showNewBuyoutCommissionTariffForm && (
+          <div className="mt-3 space-y-2 rounded-xl border border-dashed border-border p-3">
+            <div className="grid gap-2 sm:grid-cols-3">
+              <Input
+                type="number"
+                placeholder="От, ₽"
+                value={newBuyoutCommissionTariff.minAmountRub}
+                onChange={(e) => setNewBuyoutCommissionTariff((c) => ({ ...c, minAmountRub: e.target.value }))}
+              />
+              <Input
+                type="number"
+                placeholder="До, ₽ (необязательно)"
+                value={newBuyoutCommissionTariff.maxAmountRub}
+                onChange={(e) => setNewBuyoutCommissionTariff((c) => ({ ...c, maxAmountRub: e.target.value }))}
+              />
+              <Input
+                type="number"
+                step="0.01"
+                placeholder="Комиссия, %"
+                value={newBuyoutCommissionTariff.commissionPercent}
+                onChange={(e) => setNewBuyoutCommissionTariff((c) => ({ ...c, commissionPercent: e.target.value }))}
+              />
+            </div>
+            {buyoutCommissionTariffError && <p className="text-xs text-error">{buyoutCommissionTariffError}</p>}
+            <div className="flex gap-2">
+              <Button type="button" size="sm" onClick={handleCreateBuyoutCommissionTariff} disabled={creatingBuyoutCommissionTariff}>
+                {creatingBuyoutCommissionTariff ? <Loader2 className="h-4 w-4 animate-spin" /> : "Добавить"}
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setShowNewBuyoutCommissionTariffForm(false)}>
+                Отмена
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {loadingBuyoutCommissionTariffs ? (
+          <p className="mt-3 text-sm text-text-secondary">Загрузка…</p>
+        ) : buyoutCommissionTariffs.length === 0 ? (
+          <p className="mt-3 text-sm text-text-secondary">Ступеней пока нет.</p>
+        ) : (
+          <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+            <table className="w-full min-w-75 border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-border bg-bg text-left text-xs text-text-secondary">
+                  <th className="px-3 py-1.5 font-medium">Сумма закупа, ₽</th>
+                  <th className="px-3 py-1.5 font-medium">Комиссия, %</th>
+                  {canEdit && <th className="px-3 py-1.5 font-medium" />}
+                </tr>
+              </thead>
+              <tbody>
+                {buyoutCommissionTariffs.map((tier) => (
+                  <tr key={tier.id} className="border-b border-border last:border-0">
+                    <td className="px-3 py-1.5 text-text-secondary">
+                      {Number(tier.minAmountRub).toLocaleString("ru-RU")}–{tier.maxAmountRub ? Number(tier.maxAmountRub).toLocaleString("ru-RU") : "∞"}
+                    </td>
+                    <td className="px-3 py-1.5 font-medium text-text">
+                      {canEdit ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min={0}
+                            max={100}
+                            className="h-7 w-20 px-1.5 text-sm"
+                            value={buyoutCommissionPercentDrafts[tier.id] ?? tier.commissionPercent}
+                            onChange={(e) => setBuyoutCommissionPercentDrafts((c) => ({ ...c, [tier.id]: e.target.value }))}
+                            onBlur={() => handleUpdateBuyoutCommissionPercent(tier.id, tier.commissionPercent)}
+                            disabled={busyBuyoutCommissionTariffId === tier.id}
+                          />
+                          %
+                        </div>
+                      ) : (
+                        `${tier.commissionPercent}%`
+                      )}
+                    </td>
+                    {canEdit && (
+                      <td className="px-3 py-1.5 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteBuyoutCommissionTariff(tier.id)}
+                          disabled={busyBuyoutCommissionTariffId === tier.id}
+                          className="text-text-secondary transition-colors hover:text-error disabled:opacity-50"
+                          aria-label="Удалить ступень"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </td>
                     )}
                   </tr>

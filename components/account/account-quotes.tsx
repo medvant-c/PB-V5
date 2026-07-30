@@ -49,6 +49,8 @@ interface AccountQuote {
   cargoDeliveryRub: number;
   searchServiceFeeRub: number;
   searchFeeWaived: boolean;
+  isCustomProduction: boolean;
+  customProductionFeeRub: number;
   buyoutCommissionPercent: number;
   buyoutCommissionRub: number;
   totalRub: number;
@@ -455,6 +457,15 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
                           <span className="font-semibold text-text">{fmt(quote.searchServiceFeeRub)}₽</span>
                         )}
                       </div>
+                      {quote.isCustomProduction && (
+                        <div className="flex items-center justify-between px-3 py-2 text-sm">
+                          <span className="flex items-center gap-1.5 text-text-secondary">
+                            Производство под заказ
+                            <InfoHint>Товара нет в свободной продаже — фабрика изготавливает его специально под ваш заказ.</InfoHint>
+                          </span>
+                          <span className="font-semibold text-text">{fmt(quote.customProductionFeeRub)}₽</span>
+                        </div>
+                      )}
                       <div className="flex items-center justify-between px-3 py-2 text-sm">
                         <span className="flex items-center gap-1.5 text-text-secondary">
                           Организация выкупа ({quote.buyoutCommissionPercent}%)

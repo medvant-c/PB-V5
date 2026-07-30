@@ -10,6 +10,11 @@ interface ServiceItem {
   price: string;
   priceNote?: string;
   bullets: string[];
+  // A short, eye-catching promo call-to-action shown as a badge right next
+  // to the price on the COLLAPSED row — not buried inside "что входит",
+  // where a client browsing the list would never see it. See PB-V5 chat
+  // 2026-07-29 ("выдели это как побуждение к действию").
+  promoBadge?: string;
 }
 
 interface ServiceGroup {
@@ -32,6 +37,7 @@ const SERVICE_GROUPS: ServiceGroup[] = [
         id: "standard",
         name: "Standart",
         price: "500 ₽",
+        promoBadge: "Первые 3 — бесплатно! 🎁",
         bullets: [
           "Поиск массового товара по фотографии на маркетплейсах Китая (1688, Taobao, Pinduoduo и др.)",
           "Подбор нескольких предложений, сравнение цен",
@@ -147,13 +153,26 @@ function ServicePriceList() {
               {group.items.map((item) => {
                 const isOpen = openId === item.id;
                 return (
-                  <div key={item.id} className="rounded-xl border border-border bg-bg">
+                  <div
+                    key={item.id}
+                    className={cn(
+                      "rounded-xl border",
+                      item.promoBadge ? "border-success/40 bg-success/5" : "border-border bg-bg",
+                    )}
+                  >
                     <button
                       type="button"
                       onClick={() => setOpenId(isOpen ? null : item.id)}
-                      className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
+                      className="flex w-full flex-wrap items-center justify-between gap-x-2 gap-y-1 px-3 py-2.5 text-left"
                     >
-                      <span className="min-w-0 flex-1 text-sm font-medium text-text">{item.name}</span>
+                      <span className="flex min-w-0 flex-1 items-center gap-2">
+                        <span className="text-sm font-medium text-text">{item.name}</span>
+                        {item.promoBadge && (
+                          <span className="rounded-full bg-success px-2 py-0.5 text-[11px] font-bold text-white">
+                            {item.promoBadge}
+                          </span>
+                        )}
+                      </span>
                       <span className="flex shrink-0 items-baseline gap-1">
                         <span className="text-sm font-bold text-primary">{item.price}</span>
                         <ChevronDown

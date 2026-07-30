@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canAccessManagerQuote } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
-import { stripCargoCostForNonOwner } from "@/lib/desk-services/quote-request";
+import { customProductionFeeForTier, stripCargoCostForNonOwner } from "@/lib/desk-services/quote-request";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -57,14 +57,21 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
         expert: Number(tariffSettings.expertPriceRub),
         pro: Number(tariffSettings.proPriceRub),
       }[quoteType] ?? 0);
-  const feeDeltaRub = newSearchServiceFeeRub - Number(existing.searchServiceFeeRub);
+  const searchFeeDeltaRub = newSearchServiceFeeRub - Number(existing.searchServiceFeeRub);
+
+  // "Производство под заказ" is tier-priced too — re-derive it for the new
+  // tier the same way, so switching a custom-production quote from
+  // Standart to Pro also moves its production fee, not just the search fee.
+  const newCustomProductionFeeRub = customProductionFeeForTier(tariffSettings, quoteType, existing.isCustomProduction);
+  const customProductionFeeDeltaRub = newCustomProductionFeeRub - Number(existing.customProductionFeeRub);
 
   const quote = await prisma.quote.update({
     where: { id },
     data: {
       quoteType: quoteType as (typeof QUOTE_TYPES)[number],
       searchServiceFeeRub: newSearchServiceFeeRub,
-      totalRub: Number(existing.totalRub) + feeDeltaRub,
+      customProductionFeeRub: newCustomProductionFeeRub,
+      totalRub: Number(existing.totalRub) + searchFeeDeltaRub + customProductionFeeDeltaRub,
     },
   });
 

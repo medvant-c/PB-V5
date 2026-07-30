@@ -45,7 +45,15 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const quotes = await prisma.quote.findMany({
     where: { id: { in: quoteIds }, clientId },
     orderBy: { createdAt: "asc" },
-    select: { displayId: true, productName: true, quoteType: true, searchServiceFeeRub: true, searchFeeWaived: true },
+    select: {
+      displayId: true,
+      productName: true,
+      quoteType: true,
+      searchServiceFeeRub: true,
+      searchFeeWaived: true,
+      isCustomProduction: true,
+      customProductionFeeRub: true,
+    },
   });
   if (quotes.length === 0) {
     return Response.json({ error: "Просчёты не найдены." }, { status: 404 });
@@ -57,6 +65,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     quoteType: quote.quoteType,
     searchServiceFeeRub: Number(quote.searchServiceFeeRub),
     searchFeeWaived: quote.searchFeeWaived,
+    isCustomProduction: quote.isCustomProduction,
+    customProductionFeeRub: Number(quote.customProductionFeeRub),
   }));
 
   const buffer = await renderInvoiceExcel({ client: { name: client.name, phone: client.phone }, rows });

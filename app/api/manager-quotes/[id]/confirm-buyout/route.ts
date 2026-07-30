@@ -30,11 +30,16 @@ async function getOrCreateBuyoutIncomeCategory() {
 // computed here from the other three real-money figures:
 //   Скидка¥ = ОплатаФакт¥ − УслугиИКомиссия¥ − ВыкупФакт¥
 // where ОплатаФакт¥ = actualClientPaymentRub / actualClientPaymentRateUsed
-// and УслугиИКомиссия¥ = (searchServiceFeeRub + buyoutCommissionRub) / cnyRateUsed
-// (both already-quoted RUB figures converted at the quote's own snapshotted
-// rate, not the real buyout rate — the client was quoted and billed in RUB
-// at cnyRateUsed regardless of what the factory purchase rate later turns
-// out to be). Also captures the real payment RECEIVED from the client
+// and УслугиИКомиссия¥ = (searchServiceFeeRub + buyoutCommissionRub +
+// customProductionFeeRub) / cnyRateUsed — the "производство под заказ" fee
+// (see prisma/schema.prisma) is real money the client already paid same as
+// the search fee, so it must be carved out here too, or it silently
+// inflates "Скидка поставщика" instead of landing in Просчёт (see
+// proscetProfitRub in manager-dashboard/route.ts). (Both already-quoted RUB
+// figures converted at the quote's own snapshotted rate, not the real
+// buyout rate — the client was quoted and billed in RUB at cnyRateUsed
+// regardless of what the factory purchase rate later turns out to be.)
+// Also captures the real payment RECEIVED from the client
 // (actualClientPaymentRub — the mirror of actualBuyoutCny's real COST),
 // auto-creating/updating a linked income CashOrder in Отчёты по дням so the
 // manager never has to separately re-enter the same payment by hand in the
@@ -94,7 +99,9 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const category = await getOrCreateBuyoutIncomeCategory();
   const paymentAmountCny = paymentRub / paymentRate;
   // Реконсиляционный остаток — см. комментарий над PATCH выше.
-  const servicesAndCommissionCny = (Number(quote.searchServiceFeeRub) + Number(quote.buyoutCommissionRub)) / Number(quote.cnyRateUsed);
+  const servicesAndCommissionCny =
+    (Number(quote.searchServiceFeeRub) + Number(quote.buyoutCommissionRub) + Number(quote.customProductionFeeRub)) /
+    Number(quote.cnyRateUsed);
   const discountCny = paymentAmountCny - servicesAndCommissionCny - cny;
   const comment = `Просчёт №${quote.displayId} — ${quote.productName}`;
 

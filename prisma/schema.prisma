@@ -265,14 +265,20 @@ model TariffSettings {
   // by density — spec explicitly calls this a temporary placeholder value
   // the manager will tune ("пока ставим временно 340$").
   volumeRateUsdPerCbm      Decimal
-  // % of (total goods cost + China domestic delivery) charged as the
-  // buyout/purchasing-organization commission — not specified in the
-  // original spec, so this starts as an editable placeholder rather than a
-  // hardcoded guess (flagged to the owner separately).
-  buyoutCommissionPercent  Decimal
+  // Buyout/purchasing-organization commission is no longer a single flat
+  // rate here — see BuyoutCommissionTariff below (graduated by the goods
+  // amount, "сумма закупа"). See PB-V5 chat 2026-07-30.
   standardPriceRub         Decimal
   expertPriceRub           Decimal
   proPriceRub              Decimal
+  // "Производство под заказ" service fee, per search tier — a made-to-order
+  // product needs extra factory coordination beyond a normal search, so
+  // it's billed as its own tier-priced add-on (see Quote.isCustomProduction
+  // below), same editable-placeholder reasoning as standardPriceRub etc.
+  // See PB-V5 chat 2026-07-29.
+  customProductionStandardRub Decimal @default(1000)
+  customProductionExpertRub   Decimal @default(2000)
+  customProductionProRub      Decimal @default(3000)
   // Manager's flat cargo compensation for a CONFIRMED SELF-SOURCED client
   // only (2026-07-28 motivation policy, corrected same day — a company
   // lead earns the manager nothing from cargo at all; see
@@ -348,6 +354,24 @@ model VolumeTariff {
   createdAt     DateTime @default(now())
 }
 
+// Graduated buyout/purchasing-organization commission — replaces the old
+// single flat TariffSettings.buyoutCommissionPercent (2026-07-30, per
+// owner's own tier table: bigger orders earn a lower %). One row per
+// bracket of "сумма закупа" (goods cost only — Quote.totalPriceRub, NOT
+// including China-domestic delivery, same "закуп = стоимость товара"
+// reading the owner confirmed). minAmountRub is inclusive, maxAmountRub is
+// the upper bound, exclusive — null means "no upper bound" (the top
+// bracket), same null-is-open-ended convention as DensityTariff.maxDensity.
+// A quote snapshots whichever rate it matched onto Quote.buyoutCommissionPercent,
+// so editing this table never changes an already-issued quote's numbers.
+model BuyoutCommissionTariff {
+  id                String   @id @default(cuid())
+  minAmountRub      Decimal
+  maxAmountRub      Decimal?
+  commissionPercent Decimal
+  createdAt         DateTime @default(now())
+}
+
 // Free-form status list, not a strict blocking workflow — same
 // pick-any-status philosophy as the older Order/OrderStatusEvent pipeline
 // in /desk, just without a separate history table (statusChangedAt below is
@@ -399,6 +423,15 @@ model Quote {
   // show "БЕСПЛАТНО" specifically for the promo case, not for an unrelated
   // manual discount down to zero.
   searchFeeWaived     Boolean   @default(false)
+
+  // "Производство под заказ" — the manager flags a made-to-order product,
+  // billing the tier-priced service from TariffSettings.customProduction*Rub
+  // (snapshotted here at creation/quote-type-change time, same reasoning as
+  // searchServiceFeeRub — the owner can change the rate later without
+  // rewriting already-quoted totals). Zero/false for a normal off-the-shelf
+  // product. See PB-V5 chat 2026-07-29.
+  isCustomProduction     Boolean @default(false)
+  customProductionFeeRub Decimal @default(0)
 
   productName        String
   // Never shown on the client-facing PDF export — internal only.
@@ -461,7 +494,8 @@ model Quote {
   buyoutCommissionRub     Decimal
 
   // Grand total the client actually pays: goods + China delivery + search
-  // service + buyout commission + cargo delivery.
+  // service + buyout commission + cargo delivery + производство под заказ
+  // (if isCustomProduction) + attached services.
   totalRub Decimal
 
   // FX rates actually used for this quote — snapshotted from TariffSettings

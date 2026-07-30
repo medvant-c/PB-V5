@@ -52,6 +52,7 @@ export async function GET(req: NextRequest) {
         totalPriceCny: true,
         totalRub: true,
         searchServiceFeeRub: true,
+        customProductionFeeRub: true,
         buyoutCommissionRub: true,
         cnyRateUsed: true,
         manager: { select: { id: true, name: true } },

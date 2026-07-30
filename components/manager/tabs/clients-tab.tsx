@@ -107,6 +107,8 @@ interface QuoteRecord {
   chinaDeliveryRub: string;
   searchServiceFeeRub: string;
   searchFeeWaived: boolean;
+  isCustomProduction: boolean;
+  customProductionFeeRub: string;
   buyoutCommissionRub: string;
   cargoDeliveryRub: string;
   cargoDiscountUsd: string;
@@ -164,6 +166,7 @@ function quoteBreakdown(quote: QuoteRecord) {
   const totalPriceRub = Number(quote.totalPriceRub);
   const chinaDeliveryRub = Number(quote.chinaDeliveryRub);
   const searchServiceFeeRub = Number(quote.searchServiceFeeRub);
+  const customProductionFeeRub = Number(quote.customProductionFeeRub);
   const buyoutCommissionRub = Number(quote.buyoutCommissionRub);
   const cargoDeliveryRub = Number(quote.cargoDeliveryRub);
   const totalRub = Number(quote.totalRub);
@@ -171,13 +174,15 @@ function quoteBreakdown(quote: QuoteRecord) {
     quote.deliveryPricingMode === "density" && Number(quote.densityKgM3) >= LOW_DENSITY_VOLUME_THRESHOLD_KG_M3
       ? "по плотности"
       : "по объёму";
-  const knownSum = totalPriceRub + chinaDeliveryRub + searchServiceFeeRub + buyoutCommissionRub + cargoDeliveryRub;
+  const knownSum =
+    totalPriceRub + chinaDeliveryRub + searchServiceFeeRub + customProductionFeeRub + buyoutCommissionRub + cargoDeliveryRub;
   const attachedServicesRub = Math.max(0, totalRub - knownSum);
 
   return {
     totalPriceRub,
     chinaDeliveryRub,
     searchServiceFeeRub,
+    customProductionFeeRub,
     buyoutCommissionRub,
     cargoDeliveryRub,
     cargoBasis,
@@ -1062,6 +1067,12 @@ function ClientQuotes({
                                 <span>Услуга поиска</span>
                                 <span>{quote.searchFeeWaived ? "бесплатно" : `${fmtRub(b.searchServiceFeeRub)} ₽`}</span>
                               </div>
+                              {b.customProductionFeeRub > 0 && (
+                                <div className="flex justify-between gap-4">
+                                  <span>Производство под заказ</span>
+                                  <span>{fmtRub(b.customProductionFeeRub)} ₽</span>
+                                </div>
+                              )}
                               <div className="flex justify-between gap-4">
                                 <span>Комиссия за выкуп</span>
                                 <span>{fmtRub(b.buyoutCommissionRub)} ₽</span>

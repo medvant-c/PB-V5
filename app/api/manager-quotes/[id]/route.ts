@@ -6,6 +6,7 @@ import { storage } from "@/lib/storage";
 import { computeQuote, computeCargoCost } from "@/lib/quote-engine";
 import {
   buildEngineInputs,
+  customProductionFeeForTier,
   densityTiersToEngineInput,
   findDensityTierCost,
   findVolumeTariffCost,
@@ -114,15 +115,23 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
   const attachedServices = parseAttachedServices(formData);
   const attachedServicesTotalRub = attachedServices.reduce((sum, s) => sum + s.priceRub, 0);
+  const customProductionFeeRub = customProductionFeeForTier(tariffSettings, fields.quoteType, fields.isCustomProduction);
 
   const engineInputs = buildEngineInputs(fields, {
     cnyRateRub: Number(existing.cnyRateUsed),
     usdRateRub: Number(existing.usdRateUsed),
-    buyoutCommissionPercent: Number(existing.buyoutCommissionPercent),
+    // Frozen, same as cnyRateRub/usdRateRub above — an edit never moves
+    // money the client was already quoted (see recalculate/route.ts's
+    // comment). A single bracket spanning the whole range reuses the exact
+    // same tier-lookup code path in computeQuote while still resolving to
+    // this quote's own already-snapshotted %, regardless of how
+    // totalPriceRub itself changes from the edit.
+    buyoutCommissionTiers: [{ minAmountRub: 0, maxAmountRub: null, commissionPercent: Number(existing.buyoutCommissionPercent) }],
     searchServiceFeeRub,
     densityTiers: densityTiersToEngineInput(densityTiers),
     volumeTariffs: volumeTariffsToEngineInput(volumeTariffs),
     attachedServicesTotalRub,
+    customProductionFeeRub,
   });
 
   let computed;
@@ -165,6 +174,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     data: {
       quoteType: fields.quoteType,
       searchServiceFeeRub,
+      isCustomProduction: fields.isCustomProduction,
+      customProductionFeeRub,
       productName: fields.productName,
       productLink: fields.productLink,
       productDescription: fields.productDescription,

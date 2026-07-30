@@ -22,6 +22,12 @@ interface VolumeTierInput {
   rateUsdPerCbm: number;
 }
 
+interface BuyoutCommissionTierInput {
+  minAmountRub: number;
+  maxAmountRub: number | null;
+  commissionPercent: number;
+}
+
 type VolumeInputMode = "per_unit_dims" | "total_dims" | "manual_total";
 type DeliveryPricingMode = "density" | "volume";
 
@@ -49,13 +55,25 @@ interface QuoteEngineInputs {
   volumeTariffs: VolumeTierInput[];
 
   searchServiceFeeRub: number;
-  buyoutCommissionPercent: number;
+  // Graduated by totalPriceRub (goods cost only, not China delivery) — see
+  // BuyoutCommissionTariff in prisma/schema.prisma. Resolved inside
+  // computeQuote (totalPriceRub isn't known until then) and echoed back on
+  // QuoteEngineOutputs so the caller can snapshot which rate actually
+  // applied, same pattern as cargoRateUsd.
+  buyoutCommissionTiers: BuyoutCommissionTierInput[];
   cnyRateRub: number;
   usdRateRub: number;
   // Sum of any extra Panda Bridge services (from the price list) attached
   // to this quote — added straight into totalRub. Defaults to 0 so every
   // existing caller keeps working unchanged.
   attachedServicesTotalRub?: number;
+  // "Производство под заказ" tier-priced service fee (see
+  // TariffSettings.customProduction*Rub) — added straight into totalRub,
+  // same shape as attachedServicesTotalRub but kept as its own field so it
+  // stays a distinct, labeled line item rather than folding into "доп.
+  // услуги". Defaults to 0 (normal off-the-shelf product). See PB-V5 chat
+  // 2026-07-29.
+  customProductionFeeRub?: number;
   // Manager-entered discount off the computed cargo delivery charge (e.g.
   // for a big client) — a flat USD amount, clamped to [0, raw cargo
   // charge] so it can waive cargo delivery entirely but never make it
@@ -85,6 +103,11 @@ interface QuoteEngineOutputs {
   cargoDiscountUsd: number;
   cargoDeliveryUsd: number;
   cargoDeliveryRub: number;
+  // Which bracket actually matched totalPriceRub — the caller persists
+  // this (Quote.buyoutCommissionPercent), not just buyoutCommissionRub, so
+  // an edited quote's breakdown still shows the % that was applied even
+  // after the tariff table itself changes later.
+  buyoutCommissionPercent: number;
   buyoutCommissionRub: number;
   totalRub: number;
 }
@@ -140,6 +163,16 @@ function lookupVolumeRate(tariffs: VolumeTierInput[], categoryKey: string): numb
   return match?.rateUsdPerCbm ?? null;
 }
 
+// Same [min, max) range-matching rule as lookupDensityRate, just keyed by
+// amount instead of category+density (there's no category dimension here —
+// one bracket ladder for every quote).
+function lookupBuyoutCommissionRate(tiers: BuyoutCommissionTierInput[], amountRub: number): number | null {
+  const match = tiers.find(
+    (tier) => amountRub >= tier.minAmountRub && (tier.maxAmountRub === null || amountRub < tier.maxAmountRub),
+  );
+  return match?.commissionPercent ?? null;
+}
+
 // Throws (rather than returning a partial/zeroed result) on a missing
 // density-tariff lookup — a silent $0 cargo rate is a worse failure mode
 // than a loud error the manager has to fix before quoting a real client.
@@ -193,17 +226,29 @@ function computeQuote(inputs: QuoteEngineInputs): QuoteEngineOutputs {
   const cargoDeliveryUsd = rawCargoDeliveryUsd - cargoDiscountUsd;
   const cargoDeliveryRub = cargoDeliveryUsd * inputs.usdRateRub;
 
-  const buyoutCommissionRub = (totalPriceRub + chinaDeliveryRub) * (inputs.buyoutCommissionPercent / 100);
+  // Graduated by totalPriceRub alone (goods cost, not China delivery) —
+  // see BuyoutCommissionTariff. Throws rather than silently defaulting to
+  // 0%, same "loud error beats a wrong number" rule as the density/volume
+  // lookups above.
+  const buyoutCommissionPercent = lookupBuyoutCommissionRate(inputs.buyoutCommissionTiers, totalPriceRub);
+  if (buyoutCommissionPercent === null) {
+    throw new Error(
+      `Нет тарифа комиссии за выкуп для суммы закупа ${Math.round(totalPriceRub).toLocaleString("ru-RU")} ₽ — добавьте тариф во вкладке «Тарифы».`,
+    );
+  }
+  const buyoutCommissionRub = (totalPriceRub + chinaDeliveryRub) * (buyoutCommissionPercent / 100);
 
   // Grand total the client pays: the goods themselves, China-domestic
   // delivery, our search-service fee, the buyout commission, international
-  // cargo delivery, and any extra attached services.
+  // cargo delivery, производство под заказ (if any), and any extra attached
+  // services.
   const totalRub =
     totalPriceRub +
     chinaDeliveryRub +
     inputs.searchServiceFeeRub +
     buyoutCommissionRub +
     cargoDeliveryRub +
+    (inputs.customProductionFeeRub ?? 0) +
     (inputs.attachedServicesTotalRub ?? 0);
 
   return {
@@ -219,6 +264,7 @@ function computeQuote(inputs: QuoteEngineInputs): QuoteEngineOutputs {
     cargoDiscountUsd,
     cargoDeliveryUsd,
     cargoDeliveryRub,
+    buyoutCommissionPercent,
     buyoutCommissionRub,
     totalRub,
   };
@@ -257,5 +303,21 @@ function computeCargoCost(inputs: CargoCostInputs): CargoCostOutputs {
   return { cargoCostUsd, cargoCostRub };
 }
 
-export { computeQuote, computeCargoCost, lookupDensityRate, lookupVolumeRate, computeTotalVolumeM3, cmToM3 };
-export type { QuoteEngineInputs, QuoteEngineOutputs, DensityTierInput, VolumeTierInput, VolumeInputMode, DeliveryPricingMode };
+export {
+  computeQuote,
+  computeCargoCost,
+  lookupDensityRate,
+  lookupVolumeRate,
+  lookupBuyoutCommissionRate,
+  computeTotalVolumeM3,
+  cmToM3,
+};
+export type {
+  QuoteEngineInputs,
+  QuoteEngineOutputs,
+  DensityTierInput,
+  VolumeTierInput,
+  BuyoutCommissionTierInput,
+  VolumeInputMode,
+  DeliveryPricingMode,
+};

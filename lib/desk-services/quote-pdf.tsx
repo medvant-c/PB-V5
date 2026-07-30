@@ -122,6 +122,8 @@ interface QuotePdfProps {
     cargoDeliveryRub: number;
     searchServiceFeeRub: number;
     searchFeeWaived: boolean;
+    isCustomProduction: boolean;
+    customProductionFeeRub: number;
     buyoutCommissionPercent: number;
     buyoutCommissionRub: number;
     totalRub: number;
@@ -214,6 +216,12 @@ function QuotePdfPage({ quote, client, photoBuffers, attachedServices }: QuotePd
               <Text style={styles.rowValue}>{fmt(quote.searchServiceFeeRub)}₽</Text>
             )}
           </View>
+          {quote.isCustomProduction && (
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>Производство под заказ</Text>
+              <Text style={styles.rowValue}>{fmt(quote.customProductionFeeRub)}₽</Text>
+            </View>
+          )}
           <View style={styles.row}>
             <Text style={styles.rowLabel}>Организация выкупа ({quote.buyoutCommissionPercent}%)</Text>
             <Text style={styles.rowValue}>{fmt(quote.buyoutCommissionRub)}₽</Text>

@@ -66,6 +66,8 @@ export async function POST(req: NextRequest) {
           cargoDeliveryRub: Number(quote.cargoDeliveryRub),
           searchServiceFeeRub: Number(quote.searchServiceFeeRub),
           searchFeeWaived: quote.searchFeeWaived,
+          isCustomProduction: quote.isCustomProduction,
+          customProductionFeeRub: Number(quote.customProductionFeeRub),
           buyoutCommissionPercent: Number(quote.buyoutCommissionPercent),
           buyoutCommissionRub: Number(quote.buyoutCommissionRub),
           totalRub: Number(quote.totalRub),

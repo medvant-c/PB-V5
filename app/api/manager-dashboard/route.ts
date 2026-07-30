@@ -70,6 +70,7 @@ interface QuoteForStats {
   densityKgM3: unknown;
   deliveryPricingMode: string;
   searchServiceFeeRub: unknown;
+  customProductionFeeRub: unknown;
   buyoutCommissionRub: unknown;
   cnyRateUsed: unknown;
   usdRateUsed: unknown;
@@ -89,10 +90,14 @@ interface SourceProfits {
   discountRub: number;
 }
 
-// Просчёт profit is just the search-service fee itself (0 if waived) — no
-// cost is tracked against it, the fee IS the profit.
+// Просчёт profit is the search-service fee (0 if waived) plus the
+// "производство под заказ" fee, if any — same no-cost-tracked reasoning
+// applies to both (see Quote.customProductionFeeRub in prisma/schema.prisma),
+// so it rides along in the same bucket and gets the same self-sourced 100%
+// boost as the search fee, instead of silently falling into "Выкуп" via the
+// residual below. See PB-V5 chat 2026-07-30.
 function proscetProfitRub(q: QuoteForStats): number {
-  return Number(q.searchServiceFeeRub);
+  return Number(q.searchServiceFeeRub) + Number(q.customProductionFeeRub);
 }
 
 // Pre-confirmation estimate: goods cost assumed == quoted price (zero
@@ -321,6 +326,7 @@ export async function GET(req: NextRequest) {
       densityKgM3: true,
       deliveryPricingMode: true,
       searchServiceFeeRub: true,
+      customProductionFeeRub: true,
       buyoutCommissionRub: true,
       cnyRateUsed: true,
       usdRateUsed: true,

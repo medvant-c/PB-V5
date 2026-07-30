@@ -1,7 +1,13 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import type { ManagerSession } from "@/lib/manager-auth";
-import type { DensityTierInput, VolumeTierInput, QuoteEngineInputs, QuoteEngineOutputs } from "@/lib/quote-engine";
+import type {
+  DensityTierInput,
+  VolumeTierInput,
+  BuyoutCommissionTierInput,
+  QuoteEngineInputs,
+  QuoteEngineOutputs,
+} from "@/lib/quote-engine";
 
 // cargoCostUsd/cargoCostRub are owner-confidential (see Quote in
 // prisma/schema.prisma) — every route that returns a Quote row to the
@@ -63,6 +69,11 @@ interface ParsedQuoteFields {
   deliveryPricingMode: "density" | "volume";
   cargoCategoryKey?: string;
   cargoDiscountUsd?: number;
+  // "Производство под заказ" — see Quote.isCustomProduction in
+  // prisma/schema.prisma. The route (not this parser) looks up the actual
+  // fee from TariffSettings once this is known, same pattern as
+  // searchServiceFeeRub.
+  isCustomProduction: boolean;
 }
 
 function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } | { error: string } {
@@ -128,6 +139,7 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
       deliveryPricingMode,
       cargoCategoryKey: requiredString(formData.get("cargoCategoryKey")) ?? undefined,
       cargoDiscountUsd: optionalNumber(formData.get("cargoDiscountUsd")),
+      isCustomProduction: formData.get("isCustomProduction") === "true",
     },
   };
 }
@@ -135,11 +147,15 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
 interface QuoteRates {
   cnyRateRub: number;
   usdRateRub: number;
-  buyoutCommissionPercent: number;
+  buyoutCommissionTiers: BuyoutCommissionTierInput[];
   searchServiceFeeRub: number;
   densityTiers: DensityTierInput[];
   volumeTariffs: VolumeTierInput[];
   attachedServicesTotalRub?: number;
+  // Looked up by the route from TariffSettings.customProduction*Rub based
+  // on the quote's tier — 0/undefined when fields.isCustomProduction is
+  // false. See Quote.customProductionFeeRub in prisma/schema.prisma.
+  customProductionFeeRub?: number;
 }
 
 function buildEngineInputs(fields: ParsedQuoteFields, rates: QuoteRates): QuoteEngineInputs {
@@ -162,11 +178,31 @@ function buildEngineInputs(fields: ParsedQuoteFields, rates: QuoteRates): QuoteE
     densityTiers: rates.densityTiers,
     volumeTariffs: rates.volumeTariffs,
     searchServiceFeeRub: rates.searchServiceFeeRub,
-    buyoutCommissionPercent: rates.buyoutCommissionPercent,
+    buyoutCommissionTiers: rates.buyoutCommissionTiers,
     cnyRateRub: rates.cnyRateRub,
     usdRateRub: rates.usdRateRub,
     attachedServicesTotalRub: rates.attachedServicesTotalRub,
+    customProductionFeeRub: rates.customProductionFeeRub,
   };
+}
+
+// Shared by every route that needs the actual ₽ fee for a given tier when
+// isCustomProduction is true — 0 otherwise. Kept here (not duplicated per
+// route) since quote-type/route.ts, recalculate/route.ts, and the create/
+// edit routes all need the exact same lookup.
+function customProductionFeeForTier(
+  tariffSettings: { customProductionStandardRub: unknown; customProductionExpertRub: unknown; customProductionProRub: unknown },
+  quoteType: string,
+  isCustomProduction: boolean,
+): number {
+  if (!isCustomProduction) return 0;
+  return (
+    {
+      standard: Number(tariffSettings.customProductionStandardRub),
+      expert: Number(tariffSettings.customProductionExpertRub),
+      pro: Number(tariffSettings.customProductionProRub),
+    }[quoteType] ?? 0
+  );
 }
 
 interface AttachedServiceInput {
@@ -231,6 +267,16 @@ function volumeTariffsToEngineInput(tariffs: { categoryKey: string; rateUsdPerCb
   }));
 }
 
+function buyoutCommissionTariffsToEngineInput(
+  tiers: { minAmountRub: unknown; maxAmountRub: unknown; commissionPercent: unknown }[],
+): BuyoutCommissionTierInput[] {
+  return tiers.map((tier) => ({
+    minAmountRub: Number(tier.minAmountRub),
+    maxAmountRub: tier.maxAmountRub === null ? null : Number(tier.maxAmountRub),
+    commissionPercent: Number(tier.commissionPercent),
+  }));
+}
+
 // Same category-matching rule as lookupVolumeRate in lib/quote-engine.ts,
 // but returns costUsdPerCbm instead — server-only for the same
 // confidentiality reason as findDensityTierCost below.
@@ -265,10 +311,12 @@ export {
   isFreeStandardQuoteEligible,
   densityTiersToEngineInput,
   volumeTariffsToEngineInput,
+  buyoutCommissionTariffsToEngineInput,
   findDensityTierCost,
   findVolumeTariffCost,
   parseAttachedServices,
   stripCargoCostForNonOwner,
   FREE_STANDARD_QUOTE_LIMIT,
+  customProductionFeeForTier,
 };
 export type { ParsedQuoteFields, QuoteRates, QuoteEngineOutputs, AttachedServiceInput };

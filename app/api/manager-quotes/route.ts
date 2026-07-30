@@ -7,6 +7,8 @@ import { nextQuoteDisplayId } from "@/lib/display-ids";
 import { computeQuote, computeCargoCost } from "@/lib/quote-engine";
 import {
   buildEngineInputs,
+  buyoutCommissionTariffsToEngineInput,
+  customProductionFeeForTier,
   densityTiersToEngineInput,
   findDensityTierCost,
   findVolumeTariffCost,
@@ -98,9 +100,10 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Тарифы не заданы — заполните вкладку «Тарифы»." }, { status: 400 });
   }
 
-  const [densityTiers, volumeTariffs] = await Promise.all([
+  const [densityTiers, volumeTariffs, buyoutCommissionTiers] = await Promise.all([
     prisma.densityTariff.findMany(),
     prisma.volumeTariff.findMany(),
+    prisma.buyoutCommissionTariff.findMany(),
   ]);
 
   const searchServiceFeeByType: Record<string, number> = {
@@ -112,15 +115,17 @@ export async function POST(req: NextRequest) {
   const searchFeeWaived = fields.quoteType === "standard" && (await isFreeStandardQuoteEligible(fields.clientId));
   const attachedServices = parseAttachedServices(formData);
   const attachedServicesTotalRub = attachedServices.reduce((sum, s) => sum + s.priceRub, 0);
+  const customProductionFeeRub = customProductionFeeForTier(tariffSettings, fields.quoteType, fields.isCustomProduction);
 
   const engineInputs = buildEngineInputs(fields, {
     cnyRateRub: Number(tariffSettings.cnyRateRub),
     usdRateRub: Number(tariffSettings.usdRateRub),
-    buyoutCommissionPercent: Number(tariffSettings.buyoutCommissionPercent),
+    buyoutCommissionTiers: buyoutCommissionTariffsToEngineInput(buyoutCommissionTiers),
     searchServiceFeeRub: searchFeeWaived ? 0 : searchServiceFeeByType[fields.quoteType],
     densityTiers: densityTiersToEngineInput(densityTiers),
     volumeTariffs: volumeTariffsToEngineInput(volumeTariffs),
     attachedServicesTotalRub,
+    customProductionFeeRub,
   });
 
   let computed;
@@ -172,6 +177,8 @@ export async function POST(req: NextRequest) {
       quoteType: fields.quoteType,
       searchServiceFeeRub: engineInputs.searchServiceFeeRub,
       searchFeeWaived,
+      isCustomProduction: fields.isCustomProduction,
+      customProductionFeeRub,
       productName: fields.productName,
       productLink: fields.productLink,
       productDescription: fields.productDescription,
@@ -205,7 +212,7 @@ export async function POST(req: NextRequest) {
       cargoDeliveryRub: computed.cargoDeliveryRub,
       cargoCostUsd: cargoCost.cargoCostUsd,
       cargoCostRub: cargoCost.cargoCostRub,
-      buyoutCommissionPercent: engineInputs.buyoutCommissionPercent,
+      buyoutCommissionPercent: computed.buyoutCommissionPercent,
       buyoutCommissionRub: computed.buyoutCommissionRub,
       totalRub: computed.totalRub,
       cnyRateUsed: engineInputs.cnyRateRub,

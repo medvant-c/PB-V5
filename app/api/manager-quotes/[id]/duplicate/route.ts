@@ -43,6 +43,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       quoteType: existing.quoteType,
       searchServiceFeeRub: existing.searchServiceFeeRub,
       searchFeeWaived: existing.searchFeeWaived,
+      isCustomProduction: existing.isCustomProduction,
+      customProductionFeeRub: existing.customProductionFeeRub,
       productName: `${existing.productName} (копия)`,
       productLink: existing.productLink,
       productDescription: existing.productDescription,

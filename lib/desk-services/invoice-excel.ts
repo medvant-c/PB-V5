@@ -24,13 +24,22 @@ interface InvoiceRow {
   quoteType: string;
   searchServiceFeeRub: number;
   searchFeeWaived: boolean;
+  // "Производство под заказ" — billed on this same pre-purchase invoice,
+  // as its own row right under the quote's Просчёт row (not folded into
+  // one amount), since it's a distinct service the client can see billed
+  // separately. See Quote.customProductionFeeRub in prisma/schema.prisma
+  // and PB-V5 chat 2026-07-30.
+  isCustomProduction: boolean;
+  customProductionFeeRub: number;
 }
 
 // "Счёт на услуги" — bills specifically for the Просчёт (search/calculation)
-// service fee per quote, NOT the full order total (goods/cargo/buyout get
-// invoiced separately, at buyout time, via Отчёты по дням) — a manager
-// generates this after doing the calculation work itself, before any goods
-// have actually been bought. See PB-V5 chat 2026-07-29.
+// service fee per quote, plus "производство под заказ" if flagged (both
+// billed/known before any goods are bought), NOT the full order total
+// (goods/cargo/buyout get invoiced separately, at buyout time, via Отчёты
+// по дням) — a manager generates this after doing the calculation work
+// itself, before any goods have actually been bought. See PB-V5 chat
+// 2026-07-29, production-fee row added 2026-07-30.
 async function renderInvoiceExcel(props: { client: { name: string; phone: string | null }; rows: InvoiceRow[] }): Promise<Buffer> {
   const { client, rows } = props;
   const workbook = new ExcelJS.Workbook();
@@ -55,7 +64,8 @@ async function renderInvoiceExcel(props: { client: { name: string; phone: string
   });
 
   let totalRub = 0;
-  rows.forEach((row, index) => {
+  let stripeIndex = 0;
+  rows.forEach((row) => {
     const amountRub = row.searchFeeWaived ? 0 : row.searchServiceFeeRub;
     totalRub += amountRub;
     const excelRow = sheet.addRow([
@@ -65,11 +75,30 @@ async function renderInvoiceExcel(props: { client: { name: string; phone: string
       row.searchFeeWaived ? "БЕСПЛАТНО" : Math.round(amountRub),
     ]);
     const stripeFill: ExcelJS.Fill | undefined =
-      index % 2 === 1 ? { type: "pattern", pattern: "solid", fgColor: { argb: STRIPE_FILL } } : undefined;
+      stripeIndex % 2 === 1 ? { type: "pattern", pattern: "solid", fgColor: { argb: STRIPE_FILL } } : undefined;
     excelRow.eachCell((cell, colNumber) => {
       cell.alignment = { vertical: "middle", wrapText: colNumber === 2 };
       if (stripeFill) cell.fill = stripeFill;
     });
+    stripeIndex++;
+
+    if (row.isCustomProduction) {
+      totalRub += row.customProductionFeeRub;
+      const productionRow = sheet.addRow([
+        row.displayId,
+        "Производство под заказ",
+        QUOTE_TYPE_LABEL[row.quoteType] ?? row.quoteType,
+        Math.round(row.customProductionFeeRub),
+      ]);
+      const productionStripeFill: ExcelJS.Fill | undefined =
+        stripeIndex % 2 === 1 ? { type: "pattern", pattern: "solid", fgColor: { argb: STRIPE_FILL } } : undefined;
+      productionRow.eachCell((cell, colNumber) => {
+        cell.alignment = { vertical: "middle", wrapText: colNumber === 2 };
+        cell.font = { italic: true };
+        if (productionStripeFill) cell.fill = productionStripeFill;
+      });
+      stripeIndex++;
+    }
   });
 
   sheet.addRow([]);

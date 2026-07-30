@@ -14,6 +14,7 @@ import {
   computeQuote,
   type DensityTierInput,
   type VolumeTierInput,
+  type BuyoutCommissionTierInput,
   type DeliveryPricingMode,
   type VolumeInputMode,
 } from "@/lib/quote-engine";
@@ -24,10 +25,12 @@ interface TariffSettingsRecord {
   cnyRateRub: string;
   usdRateRub: string;
   volumeRateUsdPerCbm: string;
-  buyoutCommissionPercent: string;
   standardPriceRub: string;
   expertPriceRub: string;
   proPriceRub: string;
+  customProductionStandardRub: string;
+  customProductionExpertRub: string;
+  customProductionProRub: string;
 }
 
 interface DensityTierRecord {
@@ -42,6 +45,12 @@ interface VolumeTariffRecord {
   categoryKey: string;
   categoryLabel: string;
   rateUsdPerCbm: string;
+}
+
+interface BuyoutCommissionTariffRecord {
+  minAmountRub: string;
+  maxAmountRub: string | null;
+  commissionPercent: string;
 }
 
 interface ExistingPhoto {
@@ -113,6 +122,7 @@ interface QuoteDetail {
   usdRateUsed: string;
   buyoutCommissionPercent: string;
   searchFeeWaived: boolean;
+  isCustomProduction: boolean;
 }
 
 interface QuoteDialogProps {
@@ -131,12 +141,21 @@ const QUOTE_TYPES = [
   { value: "pro", label: "Pro" },
 ] as const;
 
+// Tier → the TariffSettings field backing its "производство под заказ" fee
+// — a plain lookup instead of building the key string at each call site.
+const CUSTOM_PRODUCTION_FIELD_BY_TYPE: Record<(typeof QUOTE_TYPES)[number]["value"], (t: TariffSettingsRecord) => string> = {
+  standard: (t) => t.customProductionStandardRub,
+  expert: (t) => t.customProductionExpertRub,
+  pro: (t) => t.customProductionProRub,
+};
+
 function fmt(value: number): string {
   return Number.isFinite(value) ? Math.round(value).toLocaleString("ru-RU") : "—";
 }
 
 const BLANK_FORM = {
   quoteType: "standard" as "standard" | "expert" | "pro",
+  isCustomProduction: false,
   productName: "",
   productLink: "",
   productDescription: "",
@@ -165,6 +184,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   const [tariffs, setTariffs] = useState<TariffSettingsRecord | null>(null);
   const [tiers, setTiers] = useState<DensityTierRecord[]>([]);
   const [volumeTariffs, setVolumeTariffs] = useState<VolumeTariffRecord[]>([]);
+  const [buyoutCommissionTariffs, setBuyoutCommissionTariffs] = useState<BuyoutCommissionTariffRecord[]>([]);
   const [loadingTariffs, setLoadingTariffs] = useState(true);
   const [loadingQuote, setLoadingQuote] = useState(false);
   // Frozen at quote creation, re-derived by the server on every PATCH the
@@ -183,6 +203,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   } | null>(null);
 
   const [quoteType, setQuoteType] = useState(BLANK_FORM.quoteType);
+  const [isCustomProduction, setIsCustomProduction] = useState(BLANK_FORM.isCustomProduction);
   const [photos, setPhotos] = useState<File[]>([]);
   const [existingPhotos, setExistingPhotos] = useState<ExistingPhoto[]>([]);
   const [removedPhotoIds, setRemovedPhotoIds] = useState<string[]>([]);
@@ -222,12 +243,14 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       fetch("/api/manager-tariffs").then((res) => res.json()),
       fetch("/api/manager-density-tariffs").then((res) => res.json()),
       fetch("/api/manager-volume-tariffs").then((res) => res.json()),
+      fetch("/api/manager-buyout-commission-tariffs").then((res) => res.json()),
       fetch("/api/manager-service-catalog").then((res) => res.json()),
     ])
-      .then(([settingsData, tiersData, volumeTariffsData, catalogData]) => {
+      .then(([settingsData, tiersData, volumeTariffsData, buyoutCommissionTariffsData, catalogData]) => {
         setTariffs(settingsData.settings ?? null);
         setTiers(tiersData.tiers ?? []);
         setVolumeTariffs(volumeTariffsData.tariffs ?? []);
+        setBuyoutCommissionTariffs(buyoutCommissionTariffsData.tiers ?? []);
         setCatalog(catalogData.items ?? []);
       })
       .finally(() => setLoadingTariffs(false));
@@ -244,6 +267,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     if (!editingQuoteId) {
       setAttachedServices([]);
       setQuoteType(BLANK_FORM.quoteType);
+      setIsCustomProduction(BLANK_FORM.isCustomProduction);
       setProductName(BLANK_FORM.productName);
       setProductLink(BLANK_FORM.productLink);
       setProductDescription(BLANK_FORM.productDescription);
@@ -280,6 +304,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         }) => {
           const q = data.quote;
           setQuoteType(q.quoteType);
+          setIsCustomProduction(q.isCustomProduction);
           setProductName(q.productName);
           setProductLink(q.productLink ?? "");
           setProductDescription(q.productDescription ?? "");
@@ -370,6 +395,14 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           ? Number(tariffs.expertPriceRub)
           : Number(tariffs.proPriceRub);
 
+    const customProductionFeeRub = !isCustomProduction
+      ? 0
+      : quoteType === "standard"
+        ? Number(tariffs.customProductionStandardRub)
+        : quoteType === "expert"
+          ? Number(tariffs.customProductionExpertRub)
+          : Number(tariffs.customProductionProRub);
+
     const densityTiers: DensityTierInput[] = tiers.map((tier) => ({
       categoryKey: tier.categoryKey,
       minDensity: Number(tier.minDensity),
@@ -380,6 +413,17 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       categoryKey: tariff.categoryKey,
       rateUsdPerCbm: Number(tariff.rateUsdPerCbm),
     }));
+    // Frozen (editing): a single bracket spanning the whole range, same
+    // trick as the PATCH route — always resolves to this quote's own
+    // already-snapshotted %, regardless of totalPriceRub. Live (new quote):
+    // today's actual bracket ladder from Тарифы.
+    const buyoutCommissionTiers: BuyoutCommissionTierInput[] = isFrozen
+      ? [{ minAmountRub: 0, maxAmountRub: null, commissionPercent: frozenRates.buyoutCommissionPercent }]
+      : buyoutCommissionTariffs.map((tier) => ({
+          minAmountRub: Number(tier.minAmountRub),
+          maxAmountRub: tier.maxAmountRub === null ? null : Number(tier.maxAmountRub),
+          commissionPercent: Number(tier.commissionPercent),
+        }));
 
     try {
       return computeQuote({
@@ -400,10 +444,11 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         densityTiers,
         volumeTariffs: volumeTariffInputs,
         searchServiceFeeRub,
-        buyoutCommissionPercent: isFrozen ? frozenRates.buyoutCommissionPercent : Number(tariffs.buyoutCommissionPercent),
+        buyoutCommissionTiers,
         cnyRateRub: isFrozen ? frozenRates.cnyRateRub : Number(tariffs.cnyRateRub),
         usdRateRub: isFrozen ? frozenRates.usdRateRub : Number(tariffs.usdRateRub),
         attachedServicesTotalRub,
+        customProductionFeeRub,
         cargoDiscountUsd: num(cargoDiscountUsd),
       });
     } catch {
@@ -413,7 +458,9 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     tariffs,
     tiers,
     volumeTariffs,
+    buyoutCommissionTariffs,
     quoteType,
+    isCustomProduction,
     quantity,
     priceCnyPerUnit,
     chinaDeliveryCny,
@@ -472,6 +519,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       const formData = new FormData();
       formData.append("clientId", client.id);
       formData.append("quoteType", quoteType);
+      formData.append("isCustomProduction", String(isCustomProduction));
       if (productName.trim()) formData.append("productName", productName.trim());
       if (productLink.trim()) formData.append("productLink", productLink.trim());
       if (productDescription.trim()) formData.append("productDescription", productDescription.trim());
@@ -613,6 +661,32 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                 </div>
               </TooltipProvider>
             </div>
+
+            <label
+              className={cn(
+                "flex cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors",
+                isCustomProduction ? "border-primary bg-primary/5" : "border-border bg-surface",
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={isCustomProduction}
+                  onChange={(e) => setIsCustomProduction(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium text-text">Производство под заказ</span>
+                  <span className="block text-xs text-text-secondary">
+                    Товара нет в свободной продаже — фабрика делает его специально под этот заказ
+                  </span>
+                </span>
+              </span>
+              {tariffs && (
+                <span className="shrink-0 text-xs font-semibold text-primary">
+                  + {fmt(Number(CUSTOM_PRODUCTION_FIELD_BY_TYPE[quoteType](tariffs)))} ₽
+                </span>
+              )}
+            </label>
 
             <div className="space-y-1.5">
               <Label>Фото товара</Label>

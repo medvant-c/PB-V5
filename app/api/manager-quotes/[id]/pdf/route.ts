@@ -58,6 +58,8 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       cargoDeliveryRub: Number(quote.cargoDeliveryRub),
       searchServiceFeeRub: Number(quote.searchServiceFeeRub),
       searchFeeWaived: quote.searchFeeWaived,
+      isCustomProduction: quote.isCustomProduction,
+      customProductionFeeRub: Number(quote.customProductionFeeRub),
       buyoutCommissionPercent: Number(quote.buyoutCommissionPercent),
       buyoutCommissionRub: Number(quote.buyoutCommissionRub),
       totalRub: Number(quote.totalRub),

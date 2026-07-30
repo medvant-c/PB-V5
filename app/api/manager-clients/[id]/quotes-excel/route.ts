@@ -76,6 +76,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         totalVolumeM3: Number(quote.totalVolumeM3),
         searchServiceFeeRub: Number(quote.searchServiceFeeRub),
         searchFeeWaived: quote.searchFeeWaived,
+        customProductionFeeRub: Number(quote.customProductionFeeRub),
         buyoutCommissionRub: Number(quote.buyoutCommissionRub),
         attachedServicesTotalRub,
         cargoDeliveryRub: Number(quote.cargoDeliveryRub),

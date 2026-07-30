@@ -4,6 +4,8 @@ import { canAccessManagerQuote } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { computeQuote, computeCargoCost, type QuoteEngineInputs } from "@/lib/quote-engine";
 import {
+  buyoutCommissionTariffsToEngineInput,
+  customProductionFeeForTier,
   densityTiersToEngineInput,
   findDensityTierCost,
   findVolumeTariffCost,
@@ -39,9 +41,10 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (!tariffSettings) {
     return Response.json({ error: "Тарифы не заданы — заполните вкладку «Тарифы»." }, { status: 400 });
   }
-  const [densityTiers, volumeTariffs] = await Promise.all([
+  const [densityTiers, volumeTariffs, buyoutCommissionTiers] = await Promise.all([
     prisma.densityTariff.findMany(),
     prisma.volumeTariff.findMany(),
+    prisma.buyoutCommissionTariff.findMany(),
   ]);
 
   const searchServiceFeeRub = existing.searchFeeWaived
@@ -51,6 +54,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         expert: Number(tariffSettings.expertPriceRub),
         pro: Number(tariffSettings.proPriceRub),
       }[existing.quoteType] ?? 0);
+  const customProductionFeeRub = customProductionFeeForTier(tariffSettings, existing.quoteType, existing.isCustomProduction);
 
   const attachedServices = await prisma.quoteAttachedService.findMany({ where: { quoteId: id } });
   const attachedServicesTotalRub = attachedServices.reduce((sum, s) => sum + Number(s.priceRub), 0);
@@ -75,10 +79,11 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     // today's rate, not whatever was frozen at creation.
     volumeTariffs: volumeTariffsToEngineInput(volumeTariffs),
     searchServiceFeeRub,
-    buyoutCommissionPercent: Number(tariffSettings.buyoutCommissionPercent),
+    buyoutCommissionTiers: buyoutCommissionTariffsToEngineInput(buyoutCommissionTiers),
     cnyRateRub: Number(tariffSettings.cnyRateRub),
     usdRateRub: Number(tariffSettings.usdRateRub),
     attachedServicesTotalRub,
+    customProductionFeeRub,
     cargoDiscountUsd: Number(existing.cargoDiscountUsd),
   };
 
@@ -119,6 +124,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     where: { id },
     data: {
       searchServiceFeeRub,
+      customProductionFeeRub,
       priceRubPerUnit: computed.priceRubPerUnit,
       totalPriceCny: computed.totalPriceCny,
       totalPriceRub: computed.totalPriceRub,
@@ -132,7 +138,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       cargoDeliveryRub: computed.cargoDeliveryRub,
       cargoCostUsd: cargoCost.cargoCostUsd,
       cargoCostRub: cargoCost.cargoCostRub,
-      buyoutCommissionPercent: engineInputs.buyoutCommissionPercent,
+      buyoutCommissionPercent: computed.buyoutCommissionPercent,
       buyoutCommissionRub: computed.buyoutCommissionRub,
       totalRub: computed.totalRub,
       cnyRateUsed: engineInputs.cnyRateRub,

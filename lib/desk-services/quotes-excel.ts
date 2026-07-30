@@ -21,10 +21,10 @@ const QUOTE_TYPE_LABEL: Record<string, string> = {
 };
 
 // Order matches the pricing breakdown everywhere else (quote-pdf.tsx,
-// quote-dialog.tsx): goods → China delivery → search fee → buyout
-// commission → cargo delivery → extra services → grand total. Column at
-// index i corresponds 1:1 with the values pushed in the row array below —
-// keep both in sync if either changes.
+// quote-dialog.tsx): goods → China delivery → search fee → производство
+// под заказ → buyout commission → cargo delivery → extra services → grand
+// total. Column at index i corresponds 1:1 with the values pushed in the
+// row array below — keep both in sync if either changes.
 const COLUMNS = [
   { header: "Тип поиска", width: 12, wrap: false },
   { header: "Фото 1", width: PHOTO_COL_WIDTH, wrap: false },
@@ -42,6 +42,7 @@ const COLUMNS = [
   { header: "Плотность, кг/м³", width: 14, wrap: false },
   { header: "Объём, м³", width: 11, wrap: false },
   { header: "Услуга поиска, ₽", width: 14, wrap: false },
+  { header: "Производство под заказ, ₽", width: 16, wrap: false },
   { header: "Комиссия за выкуп, ₽", width: 16, wrap: false },
   { header: "Доп. услуги, ₽", width: 13, wrap: false },
   { header: "Доставка карго, ₽", width: 14, wrap: false },
@@ -65,6 +66,7 @@ interface QuoteExcelRow {
   totalVolumeM3: number;
   searchServiceFeeRub: number;
   searchFeeWaived: boolean;
+  customProductionFeeRub: number;
   buyoutCommissionRub: number;
   attachedServicesTotalRub: number;
   cargoDeliveryRub: number;
@@ -113,6 +115,7 @@ async function renderQuotesExcel(props: { client: { name: string; company: strin
       Math.round(row.densityKgM3),
       Number(row.totalVolumeM3.toFixed(3)),
       row.searchFeeWaived ? "БЕСПЛАТНО" : Math.round(row.searchServiceFeeRub),
+      Math.round(row.customProductionFeeRub),
       Math.round(row.buyoutCommissionRub),
       Math.round(row.attachedServicesTotalRub),
       Math.round(row.cargoDeliveryRub),

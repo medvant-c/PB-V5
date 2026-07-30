@@ -55,6 +55,7 @@ export async function GET(req: NextRequest) {
       actualClientPaymentRub: true,
       actualClientPaymentRateUsed: true,
       searchServiceFeeRub: true,
+      customProductionFeeRub: true,
       buyoutCommissionRub: true,
       cnyRateUsed: true,
       buyoutConfirmedAt: true,
@@ -94,7 +95,8 @@ export async function GET(req: NextRequest) {
         b.actualClientPaymentRub && b.actualClientPaymentRateUsed
           ? Number(b.actualClientPaymentRub) / Number(b.actualClientPaymentRateUsed)
           : null,
-      servicesAndCommissionCny: (Number(b.searchServiceFeeRub) + Number(b.buyoutCommissionRub)) / Number(b.cnyRateUsed),
+      servicesAndCommissionCny:
+        (Number(b.searchServiceFeeRub) + Number(b.buyoutCommissionRub) + Number(b.customProductionFeeRub)) / Number(b.cnyRateUsed),
     })),
     teamManagers,
   });
