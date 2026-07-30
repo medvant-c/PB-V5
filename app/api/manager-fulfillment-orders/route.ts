@@ -14,10 +14,12 @@ export async function GET(req: NextRequest) {
 
   const visibleManagerIds = await getVisibleManagerIds(session);
   const clientId = req.nextUrl.searchParams.get("clientId");
+  const includeArchived = req.nextUrl.searchParams.get("includeArchived") === "1";
   const orders = await prisma.fulfillmentOrder.findMany({
     where: {
       ...(visibleManagerIds === "all" ? {} : { managerId: { in: visibleManagerIds } }),
       ...(clientId ? { clientId } : {}),
+      ...(includeArchived ? {} : { archivedAt: null }),
     },
     orderBy: { createdAt: "desc" },
     include: {

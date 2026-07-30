@@ -41,6 +41,11 @@ enum DeskFileTab {
   // Quote.cargoRateOverrideCostUsd. relatedId is the Quote id. See PB-V5
   // chat 2026-07-30.
   quote_cargo_rate_proof
+  // Same idea as quote_cargo_rate_proof but for a manual ¥→₽ rate
+  // (Quote.cnyRateRubOverride) — proof the special rate was actually
+  // agreed, not made up. relatedId is the Quote id. See PB-V5 chat
+  // 2026-07-30.
+  quote_cny_rate_proof
 }
 
 model DeskFile {
@@ -603,6 +608,23 @@ model Quote {
   // someone reopens this quote later.
   cnyRateUsed Decimal
   usdRateUsed Decimal
+  // Manager-entered manual ¥→₽ rate for a special case (client negotiated a
+  // specific rate, etc.) — when set, cnyRateUsed above is THIS value instead
+  // of TariffSettings.cnyRateRub. null = normal rate, same as before this
+  // field existed. Same "typed on purpose, re-apply on edit/recalculate
+  // rather than silently reverting" reasoning as cargoRateUsdOverride above.
+  cnyRateRubOverride Decimal?
+  // Same owner/senior sign-off gate as cargoRateOverrideConfirmed above —
+  // the rate is usable immediately (it's already what the client is
+  // charged), this just confirms it's a real agreed rate, not made up.
+  // Unlike cargo there's no separate "cost" to enter: the profit impact of
+  // a non-standard rate already flows through the existing
+  // fxProfitRub (actualBuyoutRateUsed vs cnyRateUsed) in
+  // app/api/manager-dashboard/route.ts regardless of where cnyRateUsed came
+  // from, so confirming here is proof-only.
+  cnyRateOverrideConfirmed          Boolean   @default(false)
+  cnyRateOverrideConfirmedByManagerId String?
+  cnyRateOverrideConfirmedAt        DateTime?
 
   // One line each, not a thread — the client and manager each have their
   // own comment slot under a quote, both visible to both sides, but each
@@ -905,15 +927,25 @@ model CashOpeningBalance {
 // (a physical product the client dropped off — name/sku/dimensions), each
 // of which holds its own FulfillmentOrderItemService lines (which catalog
 // services apply to THAT item, and whether the warehouse has done them
-// yet). Deliberately still no order-level status/workflow beyond that —
-// per-service completion is the one atomic unit of physical work that
-// matters (see FulfillmentOrderItemService below).
+// yet). Per-service completion (below) is still the atomic unit of
+// physical work; FulfillmentOrder.status is a coarser, manually-set
+// summary for the order as a whole (see PB-V5 chat 2026-07-30).
 model FulfillmentServiceItem {
   id            String                        @id @default(cuid())
   name          String
   priceRub      Decimal
   createdAt     DateTime                      @default(now())
   itemServices  FulfillmentOrderItemService[]
+}
+
+// Free-form, not a blocking pipeline — same "pick any status" philosophy as
+// QuoteStatus, just a much shorter list since a fulfillment order's own
+// lifecycle is simple (no cargo/buyout side effects to gate on).
+enum FulfillmentOrderStatus {
+  new_order // новый
+  in_progress // в работе
+  done // выполнен
+  paid // оплачен
 }
 
 model FulfillmentOrder {
@@ -927,6 +959,11 @@ model FulfillmentOrder {
   quote     Quote?   @relation(fields: [quoteId], references: [id])
   managerId String
   manager   Manager  @relation(fields: [managerId], references: [id])
+  status    FulfillmentOrderStatus @default(new_order)
+  // Soft-delete, same convention as Client.archivedAt — an archived order
+  // drops out of the default list but isn't gone (unlike an actual DELETE,
+  // which this resource also supports for genuine mistakes).
+  archivedAt DateTime?
   // Sum of every item's services' priceRub × quantity — snapshotted at
   // creation, not recomputed later. This is the ONLY field the fulfillment
   // premium calc in app/api/manager-dashboard/route.ts reads — item/service

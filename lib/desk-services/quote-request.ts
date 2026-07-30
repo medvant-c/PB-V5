@@ -72,6 +72,13 @@ interface ParsedQuoteFields {
   // Manual $/кг or $/м³ rate — see Quote.cargoRateUsdOverride in
   // prisma/schema.prisma. undefined = no override, normal catalog lookup.
   cargoRateUsdOverride?: number;
+  // Manual ¥→₽ rate for a special case — see Quote.cnyRateRubOverride in
+  // prisma/schema.prisma. undefined = no override, normal TariffSettings
+  // rate. Not part of QuoteRates/buildEngineInputs below: the route itself
+  // resolves the final cnyRateRub to pass the engine (override ?? tariff
+  // rate), same as it already resolves cnyRateRub from either
+  // TariffSettings or a frozen snapshot depending on create vs edit.
+  cnyRateRubOverride?: number;
   // "Производство под заказ" — see Quote.isCustomProduction in
   // prisma/schema.prisma. The route (not this parser) looks up the actual
   // fee from TariffSettings once this is known, same pattern as
@@ -143,6 +150,7 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
       cargoCategoryKey: requiredString(formData.get("cargoCategoryKey")) ?? undefined,
       cargoDiscountUsd: optionalNumber(formData.get("cargoDiscountUsd")),
       cargoRateUsdOverride: optionalNumber(formData.get("cargoRateUsdOverride")),
+      cnyRateRubOverride: optionalNumber(formData.get("cnyRateRubOverride")),
       isCustomProduction: formData.get("isCustomProduction") === "true",
     },
   };

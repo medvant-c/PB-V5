@@ -106,14 +106,14 @@ export async function POST(req: NextRequest) {
   if (hasEmail && !EMAIL_RE.test((email as string).trim())) {
     return Response.json({ error: "Укажите корректный email." }, { status: 400 });
   }
-  if (typeof phone !== "string" || !phone.trim()) {
-    return Response.json({ error: "Укажите телефон." }, { status: 400 });
-  }
-  // Enforced here (not just the input mask) so a normalized, filterable/
-  // exportable shape lands in the DB regardless of how the request was
-  // made — see lib/phone.ts.
-  const normalizedPhone = normalizePhone(phone);
-  if (!normalizedPhone) {
+  // Phone is optional too now — only the name is truly required at
+  // creation (see PB-V5 chat 2026-07-30). Format is still enforced when
+  // provided, same reasoning as email above. Enforced here (not just the
+  // input mask) so a normalized, filterable/exportable shape lands in the
+  // DB regardless of how the request was made — see lib/phone.ts.
+  const hasPhone = typeof phone === "string" && phone.trim();
+  const normalizedPhone = hasPhone ? normalizePhone(phone as string) : null;
+  if (hasPhone && !normalizedPhone) {
     return Response.json({ error: "Укажите номер телефона полностью: +7 (XXX) XXX-XX-XX." }, { status: 400 });
   }
 

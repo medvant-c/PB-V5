@@ -120,7 +120,12 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const customProductionFeeRub = customProductionFeeForTier(tariffSettings, fields.quoteType, fields.isCustomProduction);
 
   const engineInputs = buildEngineInputs(fields, {
-    cnyRateRub: Number(existing.cnyRateUsed),
+    // Frozen unless a manual override is present — same reasoning as the
+    // POST route: an override is usable immediately, confirmation only
+    // gates the sign-off. No override (same as before) keeps the exact
+    // frozen value, never a live tariff lookup — an edit never moves money
+    // the client was already quoted.
+    cnyRateRub: fields.cnyRateRubOverride ?? Number(existing.cnyRateUsed),
     usdRateRub: Number(existing.usdRateUsed),
     // Frozen, same as cnyRateRub/usdRateRub above — an edit never moves
     // money the client was already quoted (see recalculate/route.ts's
@@ -158,6 +163,15 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const cargoRateOverrideConfirmedAt = cargoRateOverrideChanged ? null : existing.cargoRateOverrideConfirmedAt;
   const confirmedCargoCostUsd =
     cargoRateOverrideConfirmed && cargoRateOverrideCostUsd !== null ? Number(cargoRateOverrideCostUsd) : null;
+
+  // Same reset-on-change rule as cargoRateUsdOverride above, for the
+  // manual ¥→₽ rate — see Quote.cnyRateOverrideConfirmed in
+  // prisma/schema.prisma.
+  const existingCnyRateRubOverride = existing.cnyRateRubOverride !== null ? Number(existing.cnyRateRubOverride) : undefined;
+  const cnyRateOverrideChanged = fields.cnyRateRubOverride !== existingCnyRateRubOverride;
+  const cnyRateOverrideConfirmed = cnyRateOverrideChanged ? false : existing.cnyRateOverrideConfirmed;
+  const cnyRateOverrideConfirmedByManagerId = cnyRateOverrideChanged ? null : existing.cnyRateOverrideConfirmedByManagerId;
+  const cnyRateOverrideConfirmedAt = cnyRateOverrideChanged ? null : existing.cnyRateOverrideConfirmedAt;
 
   // Same per-category cost lookup as the POST route — see its comment. A
   // confirmed manual rate's real supplier cost (confirmedCargoCostUsd)
@@ -237,6 +251,11 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       cargoCostRub: cargoCost.cargoCostRub,
       buyoutCommissionRub: computed.buyoutCommissionRub,
       totalRub: computed.totalRub,
+      cnyRateUsed: engineInputs.cnyRateRub,
+      cnyRateRubOverride: fields.cnyRateRubOverride ?? null,
+      cnyRateOverrideConfirmed,
+      cnyRateOverrideConfirmedByManagerId,
+      cnyRateOverrideConfirmedAt,
     },
   });
 

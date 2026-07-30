@@ -121,6 +121,8 @@ interface QuoteDetail {
   cargoRateUsdOverride: string | null;
   cargoRateOverrideConfirmed: boolean;
   cnyRateUsed: string;
+  cnyRateRubOverride: string | null;
+  cnyRateOverrideConfirmed: boolean;
   usdRateUsed: string;
   buyoutCommissionPercent: string;
   searchFeeWaived: boolean;
@@ -179,6 +181,7 @@ const BLANK_FORM = {
   cargoCategoryKey: "",
   cargoDiscountUsd: "",
   cargoRateUsdOverride: "",
+  cnyRateRubOverride: "",
 };
 
 function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: QuoteDialogProps) {
@@ -242,6 +245,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   // itself (that resets confirmation server-side), just can't be the one
   // who marks it confirmed. Only meaningful while editing.
   const [cargoRateOverrideConfirmed, setCargoRateOverrideConfirmed] = useState(false);
+  const [cnyRateRubOverride, setCnyRateRubOverride] = useState(BLANK_FORM.cnyRateRubOverride);
+  const [cnyRateOverrideConfirmed, setCnyRateOverrideConfirmed] = useState(false);
 
   const [catalog, setCatalog] = useState<ServiceCatalogItemRecord[]>([]);
   const [attachedServices, setAttachedServices] = useState<AttachedServiceState[]>([]);
@@ -314,6 +319,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       setCargoDiscountUsd(BLANK_FORM.cargoDiscountUsd);
       setCargoRateUsdOverride(BLANK_FORM.cargoRateUsdOverride);
       setCargoRateOverrideConfirmed(false);
+      setCnyRateRubOverride(BLANK_FORM.cnyRateRubOverride);
+      setCnyRateOverrideConfirmed(false);
       setFrozenRates(null);
       setExistingPhotos([]);
       return;
@@ -355,6 +362,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           setCargoDiscountUsd(Number(q.cargoDiscountUsd) > 0 ? q.cargoDiscountUsd : "");
           setCargoRateUsdOverride(q.cargoRateUsdOverride ?? "");
           setCargoRateOverrideConfirmed(q.cargoRateOverrideConfirmed);
+          setCnyRateRubOverride(q.cnyRateRubOverride ?? "");
+          setCnyRateOverrideConfirmed(q.cnyRateOverrideConfirmed);
           setFrozenRates({
             cnyRateRub: Number(q.cnyRateUsed),
             usdRateRub: Number(q.usdRateUsed),
@@ -474,7 +483,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         volumeTariffs: volumeTariffInputs,
         searchServiceFeeRub,
         buyoutCommissionTiers,
-        cnyRateRub: isFrozen ? frozenRates.cnyRateRub : Number(tariffs.cnyRateRub),
+        cnyRateRub: num(cnyRateRubOverride) ?? (isFrozen ? frozenRates.cnyRateRub : Number(tariffs.cnyRateRub)),
         usdRateRub: isFrozen ? frozenRates.usdRateRub : Number(tariffs.usdRateRub),
         attachedServicesTotalRub,
         customProductionFeeRub,
@@ -510,6 +519,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     attachedServicesTotalRub,
     cargoDiscountUsd,
     cargoRateUsdOverride,
+    cnyRateRubOverride,
     isEditing,
     frozenRates,
   ]);
@@ -600,6 +610,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         formData.append("cargoCategoryKey", cargoCategoryKey);
         if (cargoDiscountUsd.trim()) formData.append("cargoDiscountUsd", cargoDiscountUsd.trim());
         if (cargoRateUsdOverride.trim()) formData.append("cargoRateUsdOverride", cargoRateUsdOverride.trim());
+        if (cnyRateRubOverride.trim()) formData.append("cnyRateRubOverride", cnyRateRubOverride.trim());
       }
 
       if (attachedServices.length > 0) {
@@ -802,6 +813,30 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                 </div>
               </div>
             )}
+
+            <div className="space-y-1.5">
+              <Label>Ручной курс юаня, ₽ (необязательно — иначе берётся из тарифов)</Label>
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                placeholder="из тарифов"
+                value={cnyRateRubOverride}
+                onChange={(e) => setCnyRateRubOverride(e.target.value)}
+              />
+              {cnyRateRubOverride.trim() &&
+                (isEditing ? (
+                  <p className={cn("text-xs", cnyRateOverrideConfirmed ? "text-success" : "text-warning")}>
+                    {cnyRateOverrideConfirmed
+                      ? "✓ Курс подтверждён руководителем/старшим менеджером."
+                      : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — курс уже применяется в просчёте."}
+                  </p>
+                ) : (
+                  <p className="text-xs text-warning">
+                    После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
+                  </p>
+                ))}
+            </div>
 
             <div className="space-y-1.5">
               <Label htmlFor="china-delivery">Доставка по Китаю, ¥</Label>

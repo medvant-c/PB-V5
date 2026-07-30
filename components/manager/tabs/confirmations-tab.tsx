@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Archive, CheckCircle2, ChevronDown, Loader2, Ruler, UserCheck, Wallet } from "lucide-react";
+import { Archive, CheckCircle2, ChevronDown, Coins, Loader2, Ruler, UserCheck, Wallet } from "lucide-react";
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -40,6 +40,17 @@ interface PendingCargoRate {
   cargoRateUsd: string;
   cargoRateUsdOverride: string;
   deliveryPricingMode: string;
+  manager: { id: string; name: string };
+  client: { name: string; company: string | null };
+}
+
+interface PendingCnyRate {
+  id: string;
+  displayId: number;
+  productName: string;
+  createdAt: string;
+  cnyRateUsed: string;
+  cnyRateRubOverride: string;
   manager: { id: string; name: string };
   client: { name: string; company: string | null };
 }
@@ -262,6 +273,7 @@ function ManagerConfirmationsTab() {
   const [pendingBuyouts, setPendingBuyouts] = useState<PendingBuyout[]>([]);
   const [pendingClients, setPendingClients] = useState<PendingClient[]>([]);
   const [pendingCargoRates, setPendingCargoRates] = useState<PendingCargoRate[]>([]);
+  const [pendingCnyRates, setPendingCnyRates] = useState<PendingCnyRate[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [drafts, setDrafts] = useState<Record<string, { cny: string; rate: string; rub: string; rateRub: string }>>({});
@@ -272,6 +284,10 @@ function ManagerConfirmationsTab() {
   const [busyCargoRateId, setBusyCargoRateId] = useState<string | null>(null);
   const [cargoRateError, setCargoRateError] = useState<string | null>(null);
 
+  const [cnyRateFiles, setCnyRateFiles] = useState<Record<string, File | null>>({});
+  const [busyCnyRateId, setBusyCnyRateId] = useState<string | null>(null);
+  const [cnyRateError, setCnyRateError] = useState<string | null>(null);
+
   function load() {
     setLoading(true);
     return fetch("/api/manager-confirmations")
@@ -280,6 +296,7 @@ function ManagerConfirmationsTab() {
         setPendingBuyouts(data.pendingBuyouts ?? []);
         setPendingClients(data.pendingClients ?? []);
         setPendingCargoRates(data.pendingCargoRates ?? []);
+        setPendingCnyRates(data.pendingCnyRates ?? []);
       })
       .finally(() => setLoading(false));
   }
@@ -315,6 +332,34 @@ function ManagerConfirmationsTab() {
       }
     } finally {
       setBusyCargoRateId(null);
+    }
+  }
+
+  async function handleConfirmCnyRate(quoteId: string) {
+    const file = cnyRateFiles[quoteId];
+    if (!file) {
+      setCnyRateError("Приложите подтверждение (скриншот переписки).");
+      return;
+    }
+    setBusyCnyRateId(quoteId);
+    setCnyRateError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-cny-rate`, { method: "PATCH", body: formData });
+      if (res.ok) {
+        setCnyRateFiles((current) => {
+          const { [quoteId]: _omit, ...rest } = current;
+          void _omit;
+          return rest;
+        });
+        await load();
+      } else {
+        const data = await res.json();
+        setCnyRateError(data.error ?? "Не удалось подтвердить курс.");
+      }
+    } finally {
+      setBusyCnyRateId(null);
     }
   }
 
@@ -403,7 +448,8 @@ function ManagerConfirmationsTab() {
 
   if (loading) return <p className="text-sm text-text-secondary">Загрузка…</p>;
 
-  const isEmpty = pendingBuyouts.length === 0 && pendingClients.length === 0 && pendingCargoRates.length === 0;
+  const isEmpty =
+    pendingBuyouts.length === 0 && pendingClients.length === 0 && pendingCargoRates.length === 0 && pendingCnyRates.length === 0;
 
   return (
     <div className="space-y-6">
@@ -605,6 +651,59 @@ function ManagerConfirmationsTab() {
                     </li>
                   );
                 })}
+              </ul>
+            </div>
+          )}
+
+          {pendingCnyRates.length > 0 && (
+            <div>
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
+                <Coins className="h-3.5 w-3.5" /> Ручной курс юаня ({pendingCnyRates.length})
+              </h3>
+              <p className="mt-1 text-xs text-text-secondary">
+                Менеджер вписал курс ¥→₽ вручную, не из тарифов. Приложите скриншот переписки, подтверждающий, что
+                это реальный согласованный курс.
+              </p>
+              {cnyRateError && <p className="mt-1 text-xs text-error">{cnyRateError}</p>}
+              <ul className="mt-2 space-y-2">
+                {pendingCnyRates.map((quote) => (
+                  <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <span className="font-medium text-text">
+                          №{quote.displayId} · {quote.productName}
+                        </span>
+                        <span className="ml-2 text-xs text-text-secondary">
+                          {quote.client.name}
+                          {quote.client.company ? ` · ${quote.client.company}` : ""} · менеджер {quote.manager.name}
+                        </span>
+                      </div>
+                      <span className="text-xs font-medium text-warning">
+                        курс: 1¥ = {Number(quote.cnyRateRubOverride).toFixed(2)}₽
+                      </span>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки:</span>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        onChange={(e) => setCnyRateFiles((c) => ({ ...c, [quote.id]: e.target.files?.[0] ?? null }))}
+                        className="text-xs text-text-secondary"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmCnyRate(quote.id)}
+                      disabled={busyCnyRateId === quote.id}
+                      className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
+                    >
+                      {busyCnyRateId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      Подтвердить
+                    </button>
+                  </li>
+                ))}
               </ul>
             </div>
           )}

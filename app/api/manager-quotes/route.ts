@@ -122,7 +122,9 @@ export async function POST(req: NextRequest) {
   const customProductionFeeRub = customProductionFeeForTier(tariffSettings, fields.quoteType, fields.isCustomProduction);
 
   const engineInputs = buildEngineInputs(fields, {
-    cnyRateRub: Number(tariffSettings.cnyRateRub),
+    // A manual override is usable immediately, same as cargoRateUsdOverride
+    // below — confirmation only gates the sign-off, not the price itself.
+    cnyRateRub: fields.cnyRateRubOverride ?? Number(tariffSettings.cnyRateRub),
     usdRateRub: Number(tariffSettings.usdRateRub),
     buyoutCommissionTiers: buyoutCommissionTariffsToEngineInput(buyoutCommissionTiers),
     searchServiceFeeRub: searchFeeWaived ? 0 : searchServiceFeeByType[fields.quoteType],
@@ -227,6 +229,9 @@ export async function POST(req: NextRequest) {
       totalRub: computed.totalRub,
       cnyRateUsed: engineInputs.cnyRateRub,
       usdRateUsed: engineInputs.usdRateRub,
+      // A manual rate always starts unconfirmed — see
+      // Quote.cnyRateOverrideConfirmed in prisma/schema.prisma.
+      cnyRateRubOverride: fields.cnyRateRubOverride ?? null,
     },
   });
 

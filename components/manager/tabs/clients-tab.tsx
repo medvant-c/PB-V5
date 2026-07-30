@@ -1910,12 +1910,11 @@ function ManagerClientsTab() {
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
             <Input placeholder="Имя клиента" value={name} onChange={(e) => setName(e.target.value)} required />
-            <Input placeholder="Компания" value={company} onChange={(e) => setCompany(e.target.value)} />
+            <Input placeholder="Компания (необязательно)" value={company} onChange={(e) => setCompany(e.target.value)} />
             <Input
-              placeholder="+7 (___) ___-__-__"
+              placeholder="+7 (___) ___-__-__ (необязательно)"
               value={phone}
               onChange={(e) => setPhone(formatPhoneMask(e.target.value))}
-              required
             />
             <Input placeholder="Telegram / WeChat" value={messenger} onChange={(e) => setMessenger(e.target.value)} />
             <Input type="email" placeholder="Email (необязательно)" value={email} onChange={(e) => setEmail(e.target.value)} />

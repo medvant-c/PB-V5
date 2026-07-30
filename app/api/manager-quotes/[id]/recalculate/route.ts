@@ -82,7 +82,10 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     volumeTariffs: volumeTariffsToEngineInput(volumeTariffs),
     searchServiceFeeRub,
     buyoutCommissionTiers: buyoutCommissionTariffsToEngineInput(buyoutCommissionTiers),
-    cnyRateRub: Number(tariffSettings.cnyRateRub),
+    // Reused as-is if set, same as cargoRateUsdOverride below — recalculate
+    // re-prices tariff-driven numbers against today's rates, it doesn't
+    // touch the manual override itself or its confirmation state.
+    cnyRateRub: existing.cnyRateRubOverride !== null ? Number(existing.cnyRateRubOverride) : Number(tariffSettings.cnyRateRub),
     usdRateRub: Number(tariffSettings.usdRateRub),
     lowDensityVolumeThresholdKgM3: Number(systemSettings.lowDensityVolumeThresholdKgM3),
     attachedServicesTotalRub,

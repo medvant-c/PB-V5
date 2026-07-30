@@ -80,7 +80,8 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
         const buyouts = data.pendingBuyouts?.length ?? 0;
         const clients = data.pendingClients?.length ?? 0;
         const cargoRates = data.pendingCargoRates?.length ?? 0;
-        setPendingConfirmationsCount(buyouts + clients + cargoRates);
+        const cnyRates = data.pendingCnyRates?.length ?? 0;
+        setPendingConfirmationsCount(buyouts + clients + cargoRates + cnyRates);
       })
       .catch(() => {});
   }, [role, activeSection]);
