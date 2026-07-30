@@ -86,6 +86,14 @@ interface QuoteEngineInputs {
   // Optional, defaulting to the value that used to be a hardcoded constant
   // here, so a caller that doesn't pass it keeps working unchanged.
   lowDensityVolumeThresholdKgM3?: number;
+  // Manager-entered manual $/кг or $/м³ rate — when set, this replaces the
+  // DensityTariff/VolumeTariff catalog lookup entirely (a one-off
+  // negotiated rate, or a category/density bracket with no catalog entry
+  // yet). Still needs deliveryPricingMode/cargoCategoryKey to know which
+  // basis (weight vs volume) it multiplies against — this only bypasses
+  // the *rate* lookup, not the basis decision. See Quote.cargoRateUsdOverride
+  // in prisma/schema.prisma.
+  cargoRateUsdOverride?: number;
 }
 
 interface QuoteEngineOutputs {
@@ -206,28 +214,40 @@ function computeQuote(inputs: QuoteEngineInputs): QuoteEngineOutputs {
   let cargoPricingBasis: DeliveryPricingMode;
   const lowDensityVolumeThresholdKgM3 = inputs.lowDensityVolumeThresholdKgM3 ?? DEFAULT_LOW_DENSITY_VOLUME_THRESHOLD_KG_M3;
   if (inputs.deliveryPricingMode === "density" && densityKgM3 >= lowDensityVolumeThresholdKgM3) {
-    const rate = lookupDensityRate(inputs.densityTiers, inputs.cargoCategoryKey, densityKgM3);
-    if (rate === null) {
-      throw new Error(
-        `Нет тарифа для категории «${inputs.cargoCategoryKey}» при плотности ${densityKgM3.toFixed(1)} кг/м³ — добавьте тариф во вкладке «Тарифы».`,
-      );
-    }
-    cargoRateUsd = rate;
-    rawCargoDeliveryUsd = totalWeightKg * cargoRateUsd;
     cargoPricingBasis = "density";
+    // A manual rate bypasses the catalog lookup entirely but not the
+    // basis decision above — a one-off negotiated $/кг rate still needs to
+    // know it's $/кг, not $/м³. See Quote.cargoRateUsdOverride in
+    // prisma/schema.prisma.
+    if (inputs.cargoRateUsdOverride !== undefined) {
+      cargoRateUsd = inputs.cargoRateUsdOverride;
+    } else {
+      const rate = lookupDensityRate(inputs.densityTiers, inputs.cargoCategoryKey, densityKgM3);
+      if (rate === null) {
+        throw new Error(
+          `Нет тарифа для категории «${inputs.cargoCategoryKey}» при плотности ${densityKgM3.toFixed(1)} кг/м³ — добавьте тариф во вкладке «Тарифы».`,
+        );
+      }
+      cargoRateUsd = rate;
+    }
+    rawCargoDeliveryUsd = totalWeightKg * cargoRateUsd;
   } else {
     // Either the manager picked "по объёму" outright, or density mode fell
     // back here because densityKgM3 < 100 — either way, priced by this
     // category's own $/m³ rate now, not one flat rate for everyone.
-    const rate = lookupVolumeRate(inputs.volumeTariffs, inputs.cargoCategoryKey);
-    if (rate === null) {
-      throw new Error(
-        `Нет тарифа по объёму для категории «${inputs.cargoCategoryKey}» — добавьте тариф во вкладке «Тарифы».`,
-      );
-    }
-    cargoRateUsd = rate;
-    rawCargoDeliveryUsd = totalVolumeM3 * cargoRateUsd;
     cargoPricingBasis = "volume";
+    if (inputs.cargoRateUsdOverride !== undefined) {
+      cargoRateUsd = inputs.cargoRateUsdOverride;
+    } else {
+      const rate = lookupVolumeRate(inputs.volumeTariffs, inputs.cargoCategoryKey);
+      if (rate === null) {
+        throw new Error(
+          `Нет тарифа по объёму для категории «${inputs.cargoCategoryKey}» — добавьте тариф во вкладке «Тарифы».`,
+        );
+      }
+      cargoRateUsd = rate;
+    }
+    rawCargoDeliveryUsd = totalVolumeM3 * cargoRateUsd;
   }
   // Clamped so a mistyped huge discount can waive the charge entirely but
   // never flip it negative.

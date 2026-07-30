@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     select: { id: true, name: true },
   });
 
-  const [pendingBuyouts, pendingClients] = await Promise.all([
+  const [pendingBuyouts, pendingClients, pendingCargoRates] = await Promise.all([
     prisma.quote.findMany({
       where: { ...managerFilter, status: { in: POST_BUYOUT_STATUSES }, buyoutFactConfirmed: false },
       orderBy: { statusChangedAt: "asc" },
@@ -71,7 +71,25 @@ export async function GET(req: NextRequest) {
         createdByManager: { select: { id: true, name: true } },
       },
     }),
+    // A manual cargo rate (Quote.cargoRateUsdOverride) needs owner/senior
+    // sign-off — the real supplier cost + a proof screenshot — before
+    // profit accounting for it can be trusted. See PB-V5 chat 2026-07-30.
+    prisma.quote.findMany({
+      where: { ...managerFilter, cargoRateUsdOverride: { not: null }, cargoRateOverrideConfirmed: false },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        displayId: true,
+        productName: true,
+        createdAt: true,
+        cargoRateUsd: true,
+        cargoRateUsdOverride: true,
+        deliveryPricingMode: true,
+        manager: { select: { id: true, name: true } },
+        client: { select: { name: true, company: true } },
+      },
+    }),
   ]);
 
-  return Response.json({ pendingBuyouts, pendingClients, teamManagers });
+  return Response.json({ pendingBuyouts, pendingClients, pendingCargoRates, teamManagers });
 }

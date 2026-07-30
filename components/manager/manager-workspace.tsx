@@ -79,7 +79,8 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
       .then((data) => {
         const buyouts = data.pendingBuyouts?.length ?? 0;
         const clients = data.pendingClients?.length ?? 0;
-        setPendingConfirmationsCount(buyouts + clients);
+        const cargoRates = data.pendingCargoRates?.length ?? 0;
+        setPendingConfirmationsCount(buyouts + clients + cargoRates);
       })
       .catch(() => {});
   }, [role, activeSection]);

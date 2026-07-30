@@ -145,19 +145,38 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: message }, { status: 400 });
   }
 
-  // Same per-category cost lookup as the POST route — see its comment.
+  // A NEW or CHANGED manual cargo rate needs fresh owner/senior sign-off —
+  // see Quote.cargoRateOverrideConfirmed in prisma/schema.prisma. Unchanged
+  // (including "still unset") carries the existing confirmation state
+  // forward untouched, same "edits never silently move already-audited
+  // money" principle as the frozen FX/buyout% above.
+  const existingCargoRateUsdOverride = existing.cargoRateUsdOverride !== null ? Number(existing.cargoRateUsdOverride) : undefined;
+  const cargoRateOverrideChanged = fields.cargoRateUsdOverride !== existingCargoRateUsdOverride;
+  const cargoRateOverrideConfirmed = cargoRateOverrideChanged ? false : existing.cargoRateOverrideConfirmed;
+  const cargoRateOverrideCostUsd = cargoRateOverrideChanged ? null : existing.cargoRateOverrideCostUsd;
+  const cargoRateOverrideConfirmedByManagerId = cargoRateOverrideChanged ? null : existing.cargoRateOverrideConfirmedByManagerId;
+  const cargoRateOverrideConfirmedAt = cargoRateOverrideChanged ? null : existing.cargoRateOverrideConfirmedAt;
+  const confirmedCargoCostUsd =
+    cargoRateOverrideConfirmed && cargoRateOverrideCostUsd !== null ? Number(cargoRateOverrideCostUsd) : null;
+
+  // Same per-category cost lookup as the POST route — see its comment. A
+  // confirmed manual rate's real supplier cost (confirmedCargoCostUsd)
+  // wins over the catalog lookup — that's the whole point of the
+  // confirmation step (see PB-V5 chat 2026-07-30).
   const cargoCategoryKey = fields.cargoCategoryKey;
   const densityMarginForThisQuote =
-    computed.cargoPricingBasis === "density" && cargoCategoryKey
+    computed.cargoPricingBasis === "density"
       ? (() => {
-          const cost = findDensityTierCost(densityTiers, cargoCategoryKey, computed.densityKgM3);
+          if (confirmedCargoCostUsd !== null) return computed.cargoRateUsd - confirmedCargoCostUsd;
+          const cost = cargoCategoryKey ? findDensityTierCost(densityTiers, cargoCategoryKey, computed.densityKgM3) : null;
           return cost !== null ? computed.cargoRateUsd - cost : Number(tariffSettings.cargoDensityMarginUsdPerKg);
         })()
       : Number(tariffSettings.cargoDensityMarginUsdPerKg);
   const volumeMarginForThisQuote =
-    computed.cargoPricingBasis === "volume" && cargoCategoryKey
+    computed.cargoPricingBasis === "volume"
       ? (() => {
-          const cost = findVolumeTariffCost(volumeTariffs, cargoCategoryKey);
+          if (confirmedCargoCostUsd !== null) return computed.cargoRateUsd - confirmedCargoCostUsd;
+          const cost = cargoCategoryKey ? findVolumeTariffCost(volumeTariffs, cargoCategoryKey) : null;
           return cost !== null ? computed.cargoRateUsd - cost : Number(tariffSettings.cargoVolumeMarginUsdPerCbm);
         })()
       : Number(tariffSettings.cargoVolumeMarginUsdPerCbm);
@@ -206,6 +225,11 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       // Required for both modes now — see the POST route's comment.
       cargoCategoryKey,
       cargoRateUsd: computed.cargoRateUsd,
+      cargoRateUsdOverride: fields.cargoRateUsdOverride ?? null,
+      cargoRateOverrideConfirmed,
+      cargoRateOverrideCostUsd,
+      cargoRateOverrideConfirmedByManagerId,
+      cargoRateOverrideConfirmedAt,
       cargoDiscountUsd: computed.cargoDiscountUsd,
       cargoDeliveryUsd: computed.cargoDeliveryUsd,
       cargoDeliveryRub: computed.cargoDeliveryRub,

@@ -79,7 +79,21 @@ interface QuoteForStats {
   actualSupplierDiscountCny: unknown;
   buyoutSelfSourcedBoost: boolean | null;
   cargoBonusRatePercent: unknown;
-  client: { selfSourcedConfirmed: boolean; createdByManagerId: string | null };
+  client: { selfSourcedConfirmed: boolean; createdByManagerId: string | null; vladShareRatePercentOverride: unknown };
+}
+
+// Client.vladShareRatePercentOverride lets the owner waive or reduce
+// Влад's cut for one specific client (a personal friend of his, a favor —
+// rare, per-client, see PB-V5 chat 2026-07-30) without touching the global
+// rate (SystemSettings.vladShareRatePercent) everyone else still pays.
+// null/undefined = no override, use the global rate.
+function effectiveVladRatePercent(
+  client: { vladShareRatePercentOverride: unknown },
+  defaultRatePercent: number,
+): number {
+  return client.vladShareRatePercentOverride !== null && client.vladShareRatePercentOverride !== undefined
+    ? Number(client.vladShareRatePercentOverride)
+    : defaultRatePercent;
 }
 
 interface SourceProfits {
@@ -347,7 +361,7 @@ export async function GET(req: NextRequest) {
       buyoutSelfSourcedBoost: true,
       cargoBonusRatePercent: true,
       completedAt: true,
-      client: { select: { selfSourcedConfirmed: true, createdByManagerId: true } },
+      client: { select: { selfSourcedConfirmed: true, createdByManagerId: true, vladShareRatePercentOverride: true } },
     },
   });
 
@@ -376,7 +390,11 @@ export async function GET(req: NextRequest) {
   // counts toward the Влад/founders pool below either way.
   const fulfillmentOrders = await prisma.fulfillmentOrder.findMany({
     where: visibleManagerIds === "all" ? undefined : { managerId: { in: visibleManagerIds } },
-    select: { managerId: true, totalRub: true, client: { select: { selfSourcedConfirmed: true, createdByManagerId: true } } },
+    select: {
+      managerId: true,
+      totalRub: true,
+      client: { select: { selfSourcedConfirmed: true, createdByManagerId: true, vladShareRatePercentOverride: true } },
+    },
   });
   const fulfillmentPremiumRubByManager = new Map<string, number>();
   let fulfillmentTotalRub = 0;
@@ -492,7 +510,26 @@ export async function GET(req: NextRequest) {
     // Фулфилмент has no tracked cost — its full billed amount counts as
     // profit for this pool, same treatment as Просчёт.
     const totalProfitPoolRub = totalConfirmedQuoteProfitRub + fulfillmentTotalRub;
-    vladShareRub = totalProfitPoolRub * (vladShareRatePercent / 100);
+
+    // Влад's cut is computed PER DEAL, not once on the aggregate pool
+    // above — that's the only way a per-client override
+    // (Client.vladShareRatePercentOverride) can actually change anything.
+    // Same Math.max(0, ...)-per-item clamping the old aggregate version
+    // used, just applied before each deal's own rate multiply instead of
+    // after one company-wide multiply.
+    const vladShareFromQuotesRub = quotes
+      .filter((q) => q.buyoutFactConfirmed)
+      .reduce((sum, q) => {
+        const { proscetRub, buyoutRub, discountRub } = factualSourceProfits(q);
+        const perQuoteTotal = Math.max(0, proscetRub + buyoutRub + discountRub + fxProfitRub(q) + cargoProfitRub(q));
+        const rate = effectiveVladRatePercent(q.client, vladShareRatePercent);
+        return sum + perQuoteTotal * (rate / 100);
+      }, 0);
+    const vladShareFromFulfillmentRub = fulfillmentOrders.reduce((sum, o) => {
+      const rate = effectiveVladRatePercent(o.client, vladShareRatePercent);
+      return sum + Number(o.totalRub) * (rate / 100);
+    }, 0);
+    vladShareRub = vladShareFromQuotesRub + vladShareFromFulfillmentRub;
     founderShareRub = (totalProfitPoolRub - vladShareRub - totalManagerFactualPremiumsRub) / 2;
   }
 

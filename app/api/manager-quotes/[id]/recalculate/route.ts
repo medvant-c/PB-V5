@@ -88,6 +88,10 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     attachedServicesTotalRub,
     customProductionFeeRub,
     cargoDiscountUsd: Number(existing.cargoDiscountUsd),
+    // Reused as-is, not re-entered — recalculate re-prices tariff-driven
+    // numbers against today's rates, it doesn't touch the manual override
+    // itself or its confirmation state (see Quote.cargoRateUsdOverride).
+    cargoRateUsdOverride: existing.cargoRateUsdOverride !== null ? Number(existing.cargoRateUsdOverride) : undefined,
   };
 
   let computed;
@@ -98,17 +102,25 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: message }, { status: 400 });
   }
 
+  // A confirmed manual rate's real supplier cost wins over the catalog
+  // lookup — see Quote.cargoRateOverrideConfirmed in prisma/schema.prisma.
+  const confirmedCargoCostUsd =
+    existing.cargoRateOverrideConfirmed && existing.cargoRateOverrideCostUsd !== null
+      ? Number(existing.cargoRateOverrideCostUsd)
+      : null;
   const densityMarginForThisQuote =
-    computed.cargoPricingBasis === "density" && existing.cargoCategoryKey
+    computed.cargoPricingBasis === "density"
       ? (() => {
-          const cost = findDensityTierCost(densityTiers, existing.cargoCategoryKey!, computed.densityKgM3);
+          if (confirmedCargoCostUsd !== null) return computed.cargoRateUsd - confirmedCargoCostUsd;
+          const cost = existing.cargoCategoryKey ? findDensityTierCost(densityTiers, existing.cargoCategoryKey, computed.densityKgM3) : null;
           return cost !== null ? computed.cargoRateUsd - cost : Number(tariffSettings.cargoDensityMarginUsdPerKg);
         })()
       : Number(tariffSettings.cargoDensityMarginUsdPerKg);
   const volumeMarginForThisQuote =
-    computed.cargoPricingBasis === "volume" && existing.cargoCategoryKey
+    computed.cargoPricingBasis === "volume"
       ? (() => {
-          const cost = findVolumeTariffCost(volumeTariffs, existing.cargoCategoryKey!);
+          if (confirmedCargoCostUsd !== null) return computed.cargoRateUsd - confirmedCargoCostUsd;
+          const cost = existing.cargoCategoryKey ? findVolumeTariffCost(volumeTariffs, existing.cargoCategoryKey) : null;
           return cost !== null ? computed.cargoRateUsd - cost : Number(tariffSettings.cargoVolumeMarginUsdPerCbm);
         })()
       : Number(tariffSettings.cargoVolumeMarginUsdPerCbm);

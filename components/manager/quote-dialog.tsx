@@ -118,6 +118,8 @@ interface QuoteDetail {
   cargoCategoryKey: string | null;
   cargoDiscountUsd: string;
   cargoRateUsd: string;
+  cargoRateUsdOverride: string | null;
+  cargoRateOverrideConfirmed: boolean;
   cnyRateUsed: string;
   usdRateUsed: string;
   buyoutCommissionPercent: string;
@@ -176,6 +178,7 @@ const BLANK_FORM = {
   deliveryPricingMode: "density" as DeliveryPricingMode,
   cargoCategoryKey: "",
   cargoDiscountUsd: "",
+  cargoRateUsdOverride: "",
 };
 
 function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: QuoteDialogProps) {
@@ -233,6 +236,12 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   const [deliveryPricingMode, setDeliveryPricingMode] = useState(BLANK_FORM.deliveryPricingMode);
   const [cargoCategoryKey, setCargoCategoryKey] = useState(BLANK_FORM.cargoCategoryKey);
   const [cargoDiscountUsd, setCargoDiscountUsd] = useState(BLANK_FORM.cargoDiscountUsd);
+  const [cargoRateUsdOverride, setCargoRateUsdOverride] = useState(BLANK_FORM.cargoRateUsdOverride);
+  // Read-only info once a manual rate has been approved (see Quote.
+  // cargoRateOverrideConfirmed) — the manager can still change the rate
+  // itself (that resets confirmation server-side), just can't be the one
+  // who marks it confirmed. Only meaningful while editing.
+  const [cargoRateOverrideConfirmed, setCargoRateOverrideConfirmed] = useState(false);
 
   const [catalog, setCatalog] = useState<ServiceCatalogItemRecord[]>([]);
   const [attachedServices, setAttachedServices] = useState<AttachedServiceState[]>([]);
@@ -303,6 +312,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       setDeliveryPricingMode(BLANK_FORM.deliveryPricingMode);
       setCargoCategoryKey(BLANK_FORM.cargoCategoryKey);
       setCargoDiscountUsd(BLANK_FORM.cargoDiscountUsd);
+      setCargoRateUsdOverride(BLANK_FORM.cargoRateUsdOverride);
+      setCargoRateOverrideConfirmed(false);
       setFrozenRates(null);
       setExistingPhotos([]);
       return;
@@ -342,6 +353,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           setDeliveryPricingMode(q.deliveryPricingMode);
           setCargoCategoryKey(q.cargoCategoryKey ?? "");
           setCargoDiscountUsd(Number(q.cargoDiscountUsd) > 0 ? q.cargoDiscountUsd : "");
+          setCargoRateUsdOverride(q.cargoRateUsdOverride ?? "");
+          setCargoRateOverrideConfirmed(q.cargoRateOverrideConfirmed);
           setFrozenRates({
             cnyRateRub: Number(q.cnyRateUsed),
             usdRateRub: Number(q.usdRateUsed),
@@ -466,6 +479,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         attachedServicesTotalRub,
         customProductionFeeRub,
         cargoDiscountUsd: num(cargoDiscountUsd),
+        cargoRateUsdOverride: num(cargoRateUsdOverride),
         lowDensityVolumeThresholdKgM3,
       });
     } catch {
@@ -495,6 +509,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     cargoCategoryKey,
     attachedServicesTotalRub,
     cargoDiscountUsd,
+    cargoRateUsdOverride,
     isEditing,
     frozenRates,
   ]);
@@ -584,6 +599,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         // Required for both modes now — "по объёму" prices per category too.
         formData.append("cargoCategoryKey", cargoCategoryKey);
         if (cargoDiscountUsd.trim()) formData.append("cargoDiscountUsd", cargoDiscountUsd.trim());
+        if (cargoRateUsdOverride.trim()) formData.append("cargoRateUsdOverride", cargoRateUsdOverride.trim());
       }
 
       if (attachedServices.length > 0) {
@@ -895,11 +911,38 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               </Select>
               {preview && (
                 <p className="text-xs text-text-secondary">
-                  Ставка: ${preview.cargoRateUsd.toFixed(2)}/{preview.cargoPricingBasis === "density" ? "кг" : "м³"} →{" "}
+                  Ставка: ${preview.cargoRateUsd.toFixed(2)}/{preview.cargoPricingBasis === "density" ? "кг" : "м³"}
+                  {cargoRateUsdOverride.trim() && " (вручную)"} →{" "}
                   {preview.cargoDeliveryUsd.toFixed(1)}$ / {fmt(preview.cargoDeliveryRub)} ₽
                   {preview.cargoDiscountUsd > 0 && ` (скидка -$${preview.cargoDiscountUsd.toFixed(1)})`}
                 </p>
               )}
+              <div className="space-y-1.5">
+                <Label>
+                  Ручная ставка, ${preview?.cargoPricingBasis === "volume" ? "м³" : "кг"} (необязательно — иначе берётся из
+                  тарифов)
+                </Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="из тарифов"
+                  value={cargoRateUsdOverride}
+                  onChange={(e) => setCargoRateUsdOverride(e.target.value)}
+                />
+                {cargoRateUsdOverride.trim() &&
+                  (isEditing ? (
+                    <p className={cn("text-xs", cargoRateOverrideConfirmed ? "text-success" : "text-warning")}>
+                      {cargoRateOverrideConfirmed
+                        ? "✓ Ставка подтверждена руководителем/старшим менеджером."
+                        : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — до этого прибыль по карго считается приблизительно."}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-warning">
+                      После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
+                    </p>
+                  ))}
+              </div>
               <div className="space-y-1.5">
                 <Label>Скидка на карго для клиента, $ (необязательно)</Label>
                 <Input

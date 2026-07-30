@@ -69,6 +69,9 @@ interface ParsedQuoteFields {
   deliveryPricingMode: "density" | "volume";
   cargoCategoryKey?: string;
   cargoDiscountUsd?: number;
+  // Manual $/кг or $/м³ rate — see Quote.cargoRateUsdOverride in
+  // prisma/schema.prisma. undefined = no override, normal catalog lookup.
+  cargoRateUsdOverride?: number;
   // "Производство под заказ" — see Quote.isCustomProduction in
   // prisma/schema.prisma. The route (not this parser) looks up the actual
   // fee from TariffSettings once this is known, same pattern as
@@ -139,6 +142,7 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
       deliveryPricingMode,
       cargoCategoryKey: requiredString(formData.get("cargoCategoryKey")) ?? undefined,
       cargoDiscountUsd: optionalNumber(formData.get("cargoDiscountUsd")),
+      cargoRateUsdOverride: optionalNumber(formData.get("cargoRateUsdOverride")),
       isCustomProduction: formData.get("isCustomProduction") === "true",
     },
   };
@@ -178,6 +182,7 @@ function buildEngineInputs(fields: ParsedQuoteFields, rates: QuoteRates): QuoteE
     deliveryPricingMode: fields.deliveryPricingMode,
     cargoCategoryKey: fields.cargoCategoryKey,
     cargoDiscountUsd: fields.cargoDiscountUsd,
+    cargoRateUsdOverride: fields.cargoRateUsdOverride,
     densityTiers: rates.densityTiers,
     volumeTariffs: rates.volumeTariffs,
     searchServiceFeeRub: rates.searchServiceFeeRub,

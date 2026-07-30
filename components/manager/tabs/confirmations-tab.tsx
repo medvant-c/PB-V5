@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Archive, CheckCircle2, ChevronDown, Loader2, UserCheck, Wallet } from "lucide-react";
+import { Archive, CheckCircle2, ChevronDown, Loader2, Ruler, UserCheck, Wallet } from "lucide-react";
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -30,6 +30,18 @@ interface PendingClient {
   company: string | null;
   selfSourcedClaimedAt: string | null;
   createdByManager: { id: string; name: string } | null;
+}
+
+interface PendingCargoRate {
+  id: string;
+  displayId: number;
+  productName: string;
+  createdAt: string;
+  cargoRateUsd: string;
+  cargoRateUsdOverride: string;
+  deliveryPricingMode: string;
+  manager: { id: string; name: string };
+  client: { name: string; company: string | null };
 }
 
 function formatDate(value: string): string {
@@ -249,11 +261,16 @@ function BuyoutArchive() {
 function ManagerConfirmationsTab() {
   const [pendingBuyouts, setPendingBuyouts] = useState<PendingBuyout[]>([]);
   const [pendingClients, setPendingClients] = useState<PendingClient[]>([]);
+  const [pendingCargoRates, setPendingCargoRates] = useState<PendingCargoRate[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [drafts, setDrafts] = useState<Record<string, { cny: string; rate: string; rub: string; rateRub: string }>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [cargoRateDrafts, setCargoRateDrafts] = useState<Record<string, { cost: string; file: File | null }>>({});
+  const [busyCargoRateId, setBusyCargoRateId] = useState<string | null>(null);
+  const [cargoRateError, setCargoRateError] = useState<string | null>(null);
 
   function load() {
     setLoading(true);
@@ -262,8 +279,43 @@ function ManagerConfirmationsTab() {
       .then((data) => {
         setPendingBuyouts(data.pendingBuyouts ?? []);
         setPendingClients(data.pendingClients ?? []);
+        setPendingCargoRates(data.pendingCargoRates ?? []);
       })
       .finally(() => setLoading(false));
+  }
+
+  async function handleConfirmCargoRate(quoteId: string) {
+    const draft = cargoRateDrafts[quoteId];
+    const cost = parseNum(draft?.cost ?? "");
+    if (!Number.isFinite(cost) || cost < 0) {
+      setCargoRateError("Укажите цену закупки за 1 кг/м³.");
+      return;
+    }
+    if (!draft?.file) {
+      setCargoRateError("Приложите скриншот переписки с поставщиком.");
+      return;
+    }
+    setBusyCargoRateId(quoteId);
+    setCargoRateError(null);
+    try {
+      const formData = new FormData();
+      formData.append("cargoRateOverrideCostUsd", String(cost));
+      formData.append("file", draft.file);
+      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-cargo-rate`, { method: "PATCH", body: formData });
+      if (res.ok) {
+        setCargoRateDrafts((current) => {
+          const { [quoteId]: _omit, ...rest } = current;
+          void _omit;
+          return rest;
+        });
+        await load();
+      } else {
+        const data = await res.json();
+        setCargoRateError(data.error ?? "Не удалось подтвердить ставку.");
+      }
+    } finally {
+      setBusyCargoRateId(null);
+    }
   }
 
   useEffect(() => {
@@ -351,7 +403,7 @@ function ManagerConfirmationsTab() {
 
   if (loading) return <p className="text-sm text-text-secondary">Загрузка…</p>;
 
-  const isEmpty = pendingBuyouts.length === 0 && pendingClients.length === 0;
+  const isEmpty = pendingBuyouts.length === 0 && pendingClients.length === 0 && pendingCargoRates.length === 0;
 
   return (
     <div className="space-y-6">
@@ -480,6 +532,76 @@ function ManagerConfirmationsTab() {
                           Подтвердить
                         </button>
                       </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {pendingCargoRates.length > 0 && (
+            <div>
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
+                <Ruler className="h-3.5 w-3.5" /> Ручные ставки карго ({pendingCargoRates.length})
+              </h3>
+              <p className="mt-1 text-xs text-text-secondary">
+                Менеджер вписал ставку карго вручную, не из тарифов. Укажите реальную цену закупки за 1 кг/м³ и
+                приложите скриншот переписки с поставщиком, подтверждающий эту ставку.
+              </p>
+              {cargoRateError && <p className="mt-1 text-xs text-error">{cargoRateError}</p>}
+              <ul className="mt-2 space-y-2">
+                {pendingCargoRates.map((quote) => {
+                  const draft = cargoRateDrafts[quote.id] ?? { cost: "", file: null };
+                  const unit = quote.deliveryPricingMode === "density" ? "кг" : "м³";
+                  return (
+                    <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <span className="font-medium text-text">
+                            №{quote.displayId} · {quote.productName}
+                          </span>
+                          <span className="ml-2 text-xs text-text-secondary">
+                            {quote.client.name}
+                            {quote.client.company ? ` · ${quote.client.company}` : ""} · менеджер {quote.manager.name}
+                          </span>
+                        </div>
+                        <span className="text-xs font-medium text-warning">
+                          ставка: ${Number(quote.cargoRateUsdOverride).toFixed(2)}/{unit}
+                        </span>
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="w-52 shrink-0 text-xs text-text-secondary">Цена закупки, $/{unit}:</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={draft.cost}
+                          onChange={(e) => setCargoRateDrafts((c) => ({ ...c, [quote.id]: { ...draft, cost: e.target.value } }))}
+                          className="w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                        <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки:</span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/gif"
+                          onChange={(e) =>
+                            setCargoRateDrafts((c) => ({ ...c, [quote.id]: { ...draft, file: e.target.files?.[0] ?? null } }))
+                          }
+                          className="text-xs text-text-secondary"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmCargoRate(quote.id)}
+                        disabled={busyCargoRateId === quote.id}
+                        className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
+                      >
+                        {busyCargoRateId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        Подтвердить
+                      </button>
                     </li>
                   );
                 })}

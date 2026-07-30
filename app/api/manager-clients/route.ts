@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
       selfSourcedClaimedAt: true,
       selfSourcedConfirmed: true,
       contactsHiddenFromManager: true,
+      vladShareRatePercentOverride: true,
       active: true,
       archivedAt: true,
       createdAt: true,
@@ -51,14 +52,21 @@ export async function GET(req: NextRequest) {
   // senior/owner has explicitly hidden (see Client.contactsHiddenFromManager)
   // — stripped here, server-side, not just hidden in the UI, since the API
   // response itself must never carry the real values in that case.
+  // vladShareRatePercentOverride is a separate, stricter boundary — owner-
+  // only, same confidentiality as the rest of "Доля партнёров" in
+  // manager-dashboard.tsx, never sent to senior/plain-manager sessions
+  // regardless of contactsHiddenFromManager.
   const responseClients = clients.map((client) => {
     const shouldMask = session.role === "manager" && client.contactsHiddenFromManager;
-    if (!shouldMask) return { ...client, contactsHidden: false };
-    const { phone, email, messenger, ...rest } = client;
-    void phone;
-    void email;
-    void messenger;
-    return { ...rest, phone: null, email: null, messenger: null, contactsHidden: true };
+    const { phone, email, messenger, vladShareRatePercentOverride, ...rest } = client;
+    return {
+      ...rest,
+      phone: shouldMask ? null : phone,
+      email: shouldMask ? null : email,
+      messenger: shouldMask ? null : messenger,
+      contactsHidden: shouldMask,
+      ...(session.role === "owner" ? { vladShareRatePercentOverride } : {}),
+    };
   });
 
   return Response.json({ clients: responseClients });

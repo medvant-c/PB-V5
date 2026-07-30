@@ -35,6 +35,12 @@ enum DeskFileTab {
   // own draft quote request from /account. relatedId is the
   // QuoteDraftRequest id. See PB-V5 chat 2026-07-29.
   quote_draft_request
+  // Proof (a screenshot of the supplier chat, usually) that a manual cargo
+  // rate override (Quote.cargoRateUsdOverride) is a real quoted rate, not
+  // guessed — attached by the owner/senior at confirmation time, alongside
+  // Quote.cargoRateOverrideCostUsd. relatedId is the Quote id. See PB-V5
+  // chat 2026-07-30.
+  quote_cargo_rate_proof
 }
 
 model DeskFile {
@@ -145,6 +151,18 @@ model Client {
   // is transferred to a new manager (see PATCH .../[id]); senior/owner can
   // flip it back at any time from the client card.
   contactsHiddenFromManager Boolean @default(false)
+  // Owner-only override of SystemSettings.vladShareRatePercent for this one
+  // client — Влад occasionally asks to waive or reduce his cut on a
+  // specific deal (a personal friend/acquaintance of his, or just a favor),
+  // rare enough that it's a per-client exception, not a policy change.
+  // null = use the global rate from Настройки; a number (including 0)
+  // overrides it for every quote/fulfillment order this client has, live
+  // (not snapshotted — same "always today's rate" behavior the global
+  // vladShareRatePercent already has, see app/api/manager-dashboard's own
+  // per-item Влад-share calc). Never exposed to a non-owner session — same
+  // confidentiality boundary as the rest of "Доля партнёров". See PB-V5
+  // chat 2026-07-30.
+  vladShareRatePercentOverride Decimal?
   // Null until the client opens their activation link and sets a password —
   // an account can exist (created by staff) before it's ever activated.
   passwordHash String?
@@ -522,6 +540,39 @@ model Quote {
   // tables that may have since changed. This is the undiscounted per-unit
   // sell rate; cargoDiscountUsd below is applied on top of it.
   cargoRateUsd        Decimal
+  // Manager-entered manual $/кг or $/м³ rate — when set, cargoRateUsd above
+  // is THIS value instead of a DensityTariff/VolumeTariff catalog lookup
+  // (a one-off negotiated rate, or a category/density bracket with no
+  // catalog entry yet). null = normal catalog lookup, same as before this
+  // field existed. Kept separately from cargoRateUsd itself so PATCH/
+  // recalculate can tell "the manager typed this on purpose" apart from
+  // "this came from the tariff table" and re-apply it rather than
+  // silently reverting to auto-lookup — same reasoning as cargoDiscountUsd
+  // below. See PB-V5 chat 2026-07-30.
+  cargoRateUsdOverride Decimal?
+  // A manual cargoRateUsdOverride needs owner/senior sign-off before it's
+  // trusted for profit accounting — the sell rate is usable immediately
+  // (the client sees a real, final price the moment the quote is made),
+  // but cargoCostRub below stays on the generic tariff-margin fallback
+  // until confirmed, same "usable now, audited later" split as
+  // buyoutFactConfirmed/actualBuyoutCny on this same model. false/null on
+  // every quote without an override at all — only meaningful alongside
+  // cargoRateUsdOverride being set. A NEW override value (or clearing one)
+  // resets all four of these fields back to unconfirmed — see
+  // app/api/manager-quotes for where that reset happens.
+  cargoRateOverrideConfirmed          Boolean   @default(false)
+  // The real supplier cost per кг/м³ (whichever basis this quote's cargo
+  // is priced on) the owner/senior enters at confirmation time — replaces
+  // the generic DensityTariff/VolumeTariff-derived margin for THIS quote's
+  // cargoCostRub once confirmed, since a one-off negotiated rate has no
+  // real cost basis in the catalog to fall back on.
+  cargoRateOverrideCostUsd            Decimal?
+  // Plain string, no Prisma relation — same convention as
+  // buyoutConfirmedByManagerId below (resolved with one extra manager
+  // lookup where needed, not an include), so Manager doesn't need a
+  // dedicated back-relation array for every confirmation-type action.
+  cargoRateOverrideConfirmedByManagerId String?
+  cargoRateOverrideConfirmedAt        DateTime?
   // Manager-entered discount off the computed cargo charge (e.g. for a big
   // client) — already subtracted into cargoDeliveryUsd/cargoDeliveryRub
   // below, kept here separately so the discount itself stays visible/

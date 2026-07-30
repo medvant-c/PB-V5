@@ -334,7 +334,7 @@ function StatCardsRow({
         label="Конверсия"
         value={`${stats.conversionPercent}%`}
         valueClassName={isHighConversion ? "text-success" : "text-error"}
-        subtitle="справочно — на премию больше не влияет"
+        subtitle="чем выше конверсия — тем больше твой доход!"
         tooltip={
           <p>
             Общая конверсия по всем сотрудникам вместе: выкупленные просчёты ÷ просчёты без учёта отказов. Не среднее

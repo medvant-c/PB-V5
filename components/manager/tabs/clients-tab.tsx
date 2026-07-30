@@ -92,6 +92,11 @@ interface ClientRecord {
   selfSourcedConfirmed: boolean;
   contactsHiddenFromManager: boolean;
   contactsHidden: boolean;
+  // Owner-only — absent entirely for a senior/plain-manager session (see
+  // GET /api/manager-clients), not just null. undefined here means "I'm
+  // not the owner, I can't see this," while null means "I am, and no
+  // override is set."
+  vladShareRatePercentOverride?: string | null;
   archivedAt: string | null;
   createdAt: string;
 }
@@ -1575,6 +1580,41 @@ function ManagerClientsTab() {
     }
   }
 
+  // Owner-only override of Влад's cut for this one client — see
+  // Client.vladShareRatePercentOverride in prisma/schema.prisma. Own
+  // draft/busy state (not folded into editDraft/handleSaveEdit) since it
+  // saves independently on blur, same pattern as the contacts-hidden
+  // toggle above rather than the name/phone/etc. batch-edit form.
+  const [vladShareDrafts, setVladShareDrafts] = useState<Record<string, string>>({});
+  const [vladShareBusyId, setVladShareBusyId] = useState<string | null>(null);
+  async function handleSaveVladShareOverride(clientId: string, currentValue: string | null | undefined) {
+    const draft = vladShareDrafts[clientId];
+    if (draft === undefined) return;
+    const trimmed = draft.trim();
+    if (trimmed === (currentValue ?? "")) return;
+    let value: number | null;
+    if (trimmed === "") {
+      value = null;
+    } else {
+      value = Number(trimmed);
+      if (!Number.isFinite(value) || value < 0 || value > 100) {
+        setVladShareDrafts((c) => ({ ...c, [clientId]: currentValue ?? "" }));
+        return;
+      }
+    }
+    setVladShareBusyId(clientId);
+    try {
+      const res = await fetch(`/api/manager-clients/${clientId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vladShareRatePercentOverride: value }),
+      });
+      if (res.ok) await loadClients();
+    } finally {
+      setVladShareBusyId(null);
+    }
+  }
+
   const [selfSourcedBusyId, setSelfSourcedBusyId] = useState<string | null>(null);
   const [selfSourcedError, setSelfSourcedError] = useState<string | null>(null);
 
@@ -1958,6 +1998,11 @@ function ManagerClientsTab() {
                             <AlertTriangle className="h-3 w-3" /> нужна замена: {needsReplacementCounts[client.id]}
                           </span>
                         )}
+                        {client.vladShareRatePercentOverride !== null && client.vladShareRatePercentOverride !== undefined && (
+                          <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+                            доля Влада: {client.vladShareRatePercentOverride}%
+                          </span>
+                        )}
                         {client.archivedAt && <span className="text-xs font-normal text-error">архив</span>}
                       </div>
                       <div className="text-xs text-text-secondary">
@@ -2000,6 +2045,27 @@ function ManagerClientsTab() {
                           Контакты скрыты старшим менеджером или руководителем.
                         </p>
                       )
+                    )}
+                    {allManagers && (
+                      <label className="flex flex-wrap items-center gap-1.5 text-xs text-text-secondary">
+                        Доля Влада для этого клиента, % (пусто — обычная ставка из «Настроек»):
+                        <Input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step="0.1"
+                          placeholder="—"
+                          value={vladShareDrafts[client.id] ?? client.vladShareRatePercentOverride ?? ""}
+                          onChange={(e) => setVladShareDrafts((c) => ({ ...c, [client.id]: e.target.value }))}
+                          onBlur={() => handleSaveVladShareOverride(client.id, client.vladShareRatePercentOverride)}
+                          disabled={vladShareBusyId === client.id}
+                          className="h-7 w-20 px-1.5 text-sm"
+                        />
+                        {vladShareBusyId === client.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {client.vladShareRatePercentOverride !== null && client.vladShareRatePercentOverride !== undefined && (
+                          <span className="font-medium text-warning">переопределено</span>
+                        )}
+                      </label>
                     )}
                     {client.selfSourcedConfirmed ? (
                       <p className="text-xs font-medium text-success">✓ Личный клиент менеджера — повышенная премия с даты подтверждения</p>

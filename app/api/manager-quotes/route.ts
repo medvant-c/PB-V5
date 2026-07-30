@@ -212,6 +212,11 @@ export async function POST(req: NextRequest) {
       // (see VolumeTariff), not just "по плотности".
       cargoCategoryKey,
       cargoRateUsd: computed.cargoRateUsd,
+      // A manual rate always starts unconfirmed — see
+      // Quote.cargoRateOverrideConfirmed in prisma/schema.prisma, needs
+      // owner/senior sign-off with the real supplier cost before it's
+      // trusted for profit accounting.
+      cargoRateUsdOverride: fields.cargoRateUsdOverride ?? null,
       cargoDiscountUsd: computed.cargoDiscountUsd,
       cargoDeliveryUsd: computed.cargoDeliveryUsd,
       cargoDeliveryRub: computed.cargoDeliveryRub,

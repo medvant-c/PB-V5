@@ -71,6 +71,12 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       deliveryPricingMode: existing.deliveryPricingMode,
       cargoCategoryKey: existing.cargoCategoryKey,
       cargoRateUsd: existing.cargoRateUsd,
+      // Value carried over (so the manager doesn't retype it), but
+      // confirmation always resets — a duplicate is its own document and
+      // needs its own proof screenshot, even if the rate itself started
+      // the same. See Quote.cargoRateOverrideConfirmed in
+      // prisma/schema.prisma.
+      cargoRateUsdOverride: existing.cargoRateUsdOverride,
       cargoDiscountUsd: existing.cargoDiscountUsd,
       cargoDeliveryUsd: existing.cargoDeliveryUsd,
       cargoDeliveryRub: existing.cargoDeliveryRub,

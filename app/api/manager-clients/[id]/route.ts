@@ -38,18 +38,29 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { name, company, phone, messenger, email, source, archived, transferToManagerId, contactsHiddenFromManager } =
-    (body as {
-      name?: unknown;
-      company?: unknown;
-      phone?: unknown;
-      messenger?: unknown;
-      email?: unknown;
-      source?: unknown;
-      archived?: unknown;
-      transferToManagerId?: unknown;
-      contactsHiddenFromManager?: unknown;
-    }) ?? {};
+  const {
+    name,
+    company,
+    phone,
+    messenger,
+    email,
+    source,
+    archived,
+    transferToManagerId,
+    contactsHiddenFromManager,
+    vladShareRatePercentOverride,
+  } = (body as {
+    name?: unknown;
+    company?: unknown;
+    phone?: unknown;
+    messenger?: unknown;
+    email?: unknown;
+    source?: unknown;
+    archived?: unknown;
+    transferToManagerId?: unknown;
+    contactsHiddenFromManager?: unknown;
+    vladShareRatePercentOverride?: unknown;
+  }) ?? {};
 
   // Owner or senior; senior can only hand off to their own subordinate —
   // a separate atomic step (not folded into the `data` object below)
@@ -119,6 +130,34 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   }
   if (typeof archived === "boolean") data.archivedAt = archived ? new Date() : null;
 
+  // Owner-only, same as everywhere else "Доля партнёров" shows up — a
+  // senior manager can transfer clients and hide contacts above, but never
+  // touch what Влад gets paid on one. undefined (key absent) leaves it
+  // untouched; null explicitly clears back to the global Настройки rate.
+  if (vladShareRatePercentOverride !== undefined) {
+    if (session.role !== "owner") {
+      return Response.json({ error: "Долю Влада может менять только руководитель." }, { status: 403 });
+    }
+    if (vladShareRatePercentOverride === null) {
+      data.vladShareRatePercentOverride = null;
+    } else {
+      const percent = Number(vladShareRatePercentOverride);
+      if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+        return Response.json({ error: "Доля Влада должна быть числом от 0 до 100." }, { status: 400 });
+      }
+      data.vladShareRatePercentOverride = percent;
+    }
+  }
+
   const client = await prisma.client.update({ where: { id }, data });
+  // Never leak vladShareRatePercentOverride to a non-owner response, even
+  // when this PATCH was about something else entirely (name, phone, etc.)
+  // — Prisma returns every scalar field by default, same reasoning as the
+  // GET route's stripping.
+  if (session.role !== "owner") {
+    const { vladShareRatePercentOverride: _omit, ...rest } = client;
+    void _omit;
+    return Response.json({ client: rest });
+  }
   return Response.json({ client });
 }
