@@ -55,6 +55,11 @@ interface ReportRow {
 interface ReportTotals {
   totalRevenueRub: number;
   totalProfitRub: number;
+  totalProscetRub: number;
+  totalBuyoutRub: number;
+  totalDiscountRub: number;
+  totalFxProfitRub: number;
+  totalCargoProfitRub: number;
   profitPoolRub: number;
   vladShareRub: number;
   managerPremiumRub: number;
@@ -389,6 +394,36 @@ function ManagerProfitReportTab() {
                 <div className="text-xs text-text-secondary">Доступно для распределения</div>
                 <div className="mt-1 text-lg font-bold text-primary">
                   {fmtBoth(report.totals.profitPoolRub - report.totals.managerPremiumRub, cnyRateRub)}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-dashed border-border p-3.5">
+              <div className="text-xs font-semibold text-text-secondary">Из чего складывается прибыль компании</div>
+              <div className="mt-2 space-y-1.5 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-text-secondary">Просчёт (услуга поиска + производство под заказ)</span>
+                  <span className="font-medium text-text">{fmtBoth(report.totals.totalProscetRub, cnyRateRub)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-text-secondary">Выкуп (комиссия + разница план/факт)</span>
+                  <span className="font-medium text-text">{fmtBoth(report.totals.totalBuyoutRub, cnyRateRub)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-text-secondary">Скидка поставщика</span>
+                  <span className="font-medium text-text">{fmtBoth(report.totals.totalDiscountRub, cnyRateRub)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-text-secondary">Курсовая разница</span>
+                  <span className="font-medium text-text">{fmtBoth(report.totals.totalFxProfitRub, cnyRateRub)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-text-secondary">Карго-маржа</span>
+                  <span className="font-medium text-text">{fmtBoth(report.totals.totalCargoProfitRub, cnyRateRub)}</span>
+                </div>
+                <div className="flex items-center justify-between border-t border-border pt-1.5 font-bold text-text">
+                  <span>Итого</span>
+                  <span>{fmtBoth(report.totals.totalProfitRub, cnyRateRub)}</span>
                 </div>
               </div>
             </div>

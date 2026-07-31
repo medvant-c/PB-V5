@@ -176,9 +176,32 @@ async function buildProfitReport(quoteIds: string[]) {
   // not the combined pool.
   const founderShareRub = (profitPoolRub - vladShareRub - managerPremiumRub) / 2;
 
+  // Per-source breakdown of totalProfitRub above — so "Прибыль компании"
+  // doesn't stay one opaque number, same "show what it's made of" instinct
+  // as pipelineGoodsRub/pipelineCargoRub etc. in app/api/manager-dashboard/
+  // route.ts. Always reconciles exactly to totalProfitRub by construction
+  // (each row's rawTotalRub is defined as the sum of these five fields).
+  const totalProscetRub = rows.reduce((sum, r) => sum + r.proscetRub, 0);
+  const totalBuyoutRub = rows.reduce((sum, r) => sum + r.buyoutRub, 0);
+  const totalDiscountRub = rows.reduce((sum, r) => sum + r.discountRub, 0);
+  const totalFxProfitRub = rows.reduce((sum, r) => sum + r.fxProfitRub, 0);
+  const totalCargoProfitRub = rows.reduce((sum, r) => sum + r.cargoProfitRub, 0);
+
   return {
     rows,
-    totals: { totalRevenueRub, totalProfitRub, profitPoolRub, vladShareRub, managerPremiumRub, founderShareRub },
+    totals: {
+      totalRevenueRub,
+      totalProfitRub,
+      totalProscetRub,
+      totalBuyoutRub,
+      totalDiscountRub,
+      totalFxProfitRub,
+      totalCargoProfitRub,
+      profitPoolRub,
+      vladShareRub,
+      managerPremiumRub,
+      founderShareRub,
+    },
   };
 }
 

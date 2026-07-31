@@ -80,6 +80,11 @@ interface ProfitReportPdfRow {
 interface ProfitReportPdfTotals {
   totalRevenueRub: number;
   totalProfitRub: number;
+  totalProscetRub: number;
+  totalBuyoutRub: number;
+  totalDiscountRub: number;
+  totalFxProfitRub: number;
+  totalCargoProfitRub: number;
   profitPoolRub: number;
   vladShareRub: number;
   managerPremiumRub: number;
@@ -147,6 +152,31 @@ function ProfitReportPdfDocument({ rows, totals }: ProfitReportPdfProps) {
             <Text style={styles.summaryLabel}>Прибыль компании (Просчёт + Выкуп + Скидка + Курсовая разница + Карго)</Text>
             <Text style={styles.summaryValue}>{fmt(totals.totalProfitRub)} ₽</Text>
           </View>
+
+          <View style={styles.splitBox}>
+            <Text style={styles.splitTitle}>Из чего складывается прибыль компании</Text>
+            <View style={styles.splitRow}>
+              <Text style={styles.splitLabel}>Просчёт (услуга поиска + производство под заказ)</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalProscetRub)} ₽</Text>
+            </View>
+            <View style={styles.splitRow}>
+              <Text style={styles.splitLabel}>Выкуп (комиссия + разница план/факт)</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalBuyoutRub)} ₽</Text>
+            </View>
+            <View style={styles.splitRow}>
+              <Text style={styles.splitLabel}>Скидка поставщика</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalDiscountRub)} ₽</Text>
+            </View>
+            <View style={styles.splitRow}>
+              <Text style={styles.splitLabel}>Курсовая разница</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalFxProfitRub)} ₽</Text>
+            </View>
+            <View style={styles.splitRow}>
+              <Text style={styles.splitLabel}>Карго-маржа</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalCargoProfitRub)} ₽</Text>
+            </View>
+          </View>
+
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Премии менеджеров (уже вычтены ниже)</Text>
             <Text style={styles.summaryValue}>{fmt(totals.managerPremiumRub)} ₽</Text>
