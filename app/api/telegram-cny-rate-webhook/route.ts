@@ -34,7 +34,14 @@ export async function POST(req: NextRequest) {
     return Response.json({ ok: true });
   }
 
-  const text = (update as { message?: { text?: unknown } })?.message?.text;
+  // The rates are posted in a channel, not a group — Telegram delivers
+  // those as `channel_post`, not `message` (that shape is for regular
+  // chats/groups). The bot has to be a channel *administrator* to receive
+  // channel_post updates at all; there's no privacy-mode toggle for
+  // channels the way there is for groups. Checking both keeps this working
+  // if the source ever moves to a group instead.
+  const body = update as { message?: { text?: unknown }; channel_post?: { text?: unknown } };
+  const text = body?.channel_post?.text ?? body?.message?.text;
   if (typeof text !== "string") {
     return Response.json({ ok: true });
   }
