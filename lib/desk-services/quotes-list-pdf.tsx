@@ -52,6 +52,7 @@ const styles = StyleSheet.create({
   colQty: { width: 50, textAlign: "right" },
   colWeight: { width: 52, textAlign: "right" },
   colVolume: { width: 54, textAlign: "right" },
+  colDensity: { width: 68, textAlign: "right" },
   colTariff: { width: 62, textAlign: "right" },
   // Wide enough for the full one-line header "ЦЕНА/ЕД. ПОД КЛЮЧ, ₽" at
   // headCell's 8.5pt bold uppercase — 84 clipped it to "…ПОД" with nothing
@@ -94,6 +95,7 @@ interface QuoteListRow {
   photoBuffer: Buffer | null;
   totalWeightKg: number;
   totalVolumeM3: number;
+  densityKgM3: number;
   // Both optional and only ever set together — the manager-side route
   // populates them and passes showTariff (see QuotesListPdfProps below),
   // the client-facing route leaves them out entirely. The $ rate is an
@@ -147,6 +149,7 @@ function QuotesListPdfDocument({ client, rows, showTariff }: QuotesListPdfProps)
             <Text style={[styles.headCell, styles.colQty]}>Кол-во</Text>
             <Text style={[styles.headCell, styles.colWeight]}>Вес, кг</Text>
             <Text style={[styles.headCell, styles.colVolume]}>Объём, м³</Text>
+            <Text style={[styles.headCell, styles.colDensity]}>Плотн., кг/м³</Text>
             {showTariff && <Text style={[styles.headCell, styles.colTariff]}>Тариф, $</Text>}
             <Text style={[styles.headCell, styles.colPerUnit]}>Цена/ед. под ключ, ₽</Text>
             <Text style={[styles.headCell, styles.colTotal]}>Итого, ₽</Text>
@@ -174,6 +177,7 @@ function QuotesListPdfDocument({ client, rows, showTariff }: QuotesListPdfProps)
               <Text style={[styles.cell, styles.cellText, styles.colQty]}>{row.quantity} шт</Text>
               <Text style={[styles.cell, styles.cellText, styles.colWeight]}>{row.totalWeightKg.toFixed(1)}</Text>
               <Text style={[styles.cell, styles.cellText, styles.colVolume]}>{row.totalVolumeM3.toFixed(3)}</Text>
+              <Text style={[styles.cell, styles.cellText, styles.colDensity]}>{fmt(row.densityKgM3)}</Text>
               {showTariff && (
                 <Text style={[styles.cell, styles.cellText, styles.colTariff]}>
                   {row.cargoRateUsd !== undefined

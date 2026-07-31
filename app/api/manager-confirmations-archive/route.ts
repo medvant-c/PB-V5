@@ -24,6 +24,11 @@ interface ArchiveEntry {
   confirmedByManagerName: string | null;
   manager: { id: string; name: string };
   client: { id: string; name: string; company: string | null };
+  // The proof screenshot uploaded at confirm time, if any (it's optional —
+  // see confirm-cargo-rate/confirm-cny-rate routes). Served by
+  // /api/manager-quote-rate-proof/[id]. null for types that never had one
+  // (buyout, self_sourced_client) or where none was attached.
+  proofFileId: string | null;
 }
 
 function fmt(value: number): string {
@@ -171,6 +176,24 @@ export async function GET(req: NextRequest) {
     : [];
   const nameById = new Map(confirmedByManagers.map((m) => [m.id, m.name]));
 
+  // Proof screenshots are optional (see confirm-cargo-rate/confirm-cny-rate
+  // routes) — one batch DeskFile query for both tabs rather than N+1, keyed
+  // by "tab:relatedId" and keeping only the newest upload per quote in case
+  // it was re-confirmed more than once.
+  const proofFiles = await prisma.deskFile.findMany({
+    where: {
+      tab: { in: ["quote_cargo_rate_proof", "quote_cny_rate_proof"] },
+      relatedId: { in: [...cargoRates.map((q) => q.id), ...cnyRates.map((q) => q.id)] },
+    },
+    orderBy: { uploadedAt: "desc" },
+    select: { id: true, tab: true, relatedId: true },
+  });
+  const proofFileIdByKey = new Map<string, string>();
+  for (const file of proofFiles) {
+    const key = `${file.tab}:${file.relatedId}`;
+    if (!proofFileIdByKey.has(key)) proofFileIdByKey.set(key, file.id);
+  }
+
   const entries: ArchiveEntry[] = [
     ...buyouts.map((b): ArchiveEntry => ({
       type: "buyout",
@@ -182,6 +205,7 @@ export async function GET(req: NextRequest) {
       confirmedByManagerName: b.buyoutConfirmedByManagerId ? (nameById.get(b.buyoutConfirmedByManagerId) ?? null) : null,
       manager: b.manager,
       client: b.client,
+      proofFileId: null,
     })),
     ...cargoRates.map((q): ArchiveEntry => {
       const unit = q.deliveryPricingMode === "density" ? "кг" : "м³";
@@ -195,6 +219,7 @@ export async function GET(req: NextRequest) {
         confirmedByManagerName: q.cargoRateOverrideConfirmedByManagerId ? (nameById.get(q.cargoRateOverrideConfirmedByManagerId) ?? null) : null,
         manager: q.manager,
         client: q.client,
+        proofFileId: proofFileIdByKey.get(`quote_cargo_rate_proof:${q.id}`) ?? null,
       };
     }),
     ...cnyRates.map((q): ArchiveEntry => ({
@@ -207,6 +232,7 @@ export async function GET(req: NextRequest) {
       confirmedByManagerName: q.cnyRateOverrideConfirmedByManagerId ? (nameById.get(q.cnyRateOverrideConfirmedByManagerId) ?? null) : null,
       manager: q.manager,
       client: q.client,
+      proofFileId: proofFileIdByKey.get(`quote_cny_rate_proof:${q.id}`) ?? null,
     })),
     ...selfSourcedClients.map((c): ArchiveEntry => ({
       type: "self_sourced_client",
@@ -218,6 +244,7 @@ export async function GET(req: NextRequest) {
       confirmedByManagerName: c.selfSourcedConfirmedByManagerId ? (nameById.get(c.selfSourcedConfirmedByManagerId) ?? null) : null,
       manager: c.createdByManager ?? { id: "", name: "—" },
       client: { id: c.id, name: c.name, company: c.company },
+      proofFileId: null,
     })),
   ].sort((a, b) => new Date(b.confirmedAt).getTime() - new Date(a.confirmedAt).getTime());
 

@@ -54,6 +54,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
         photoBuffer: firstPhoto ? await storage.get(firstPhoto.storageKey) : null,
         totalWeightKg: Number(quote.totalWeightKg),
         totalVolumeM3: Number(quote.totalVolumeM3),
+        densityKgM3: Number(quote.densityKgM3),
         cargoRateUsd: Number(quote.cargoRateUsd),
         deliveryPricingMode: quote.deliveryPricingMode,
       };

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Archive, CheckCircle2, ChevronDown, Coins, Loader2, Ruler, UserCheck, Wallet } from "lucide-react";
+import { Archive, CheckCircle2, ChevronDown, Coins, Loader2, Paperclip, Ruler, UserCheck, Wallet } from "lucide-react";
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -111,6 +111,7 @@ interface ArchiveEntry {
   confirmedByManagerName: string | null;
   manager: { id: string; name: string };
   client: { id: string; name: string; company: string | null };
+  proofFileId: string | null;
 }
 
 const ARCHIVE_TYPE_LABEL: Record<ArchiveEntryType, string> = {
@@ -295,6 +296,19 @@ function ConfirmationsArchive({ onReverted }: { onReverted: () => void }) {
                     <p className="mt-0.5 text-xs text-text-secondary">{entry.summary}</p>
                     <p className="text-[11px] text-text-secondary">
                       Подтвердил {entry.confirmedByManagerName ?? "—"} · {formatDate(entry.confirmedAt)}
+                      {entry.proofFileId && (
+                        <>
+                          {" · "}
+                          <a
+                            href={`/api/manager-quote-rate-proof/${entry.proofFileId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                          >
+                            <Paperclip className="h-3 w-3" /> скриншот
+                          </a>
+                        </>
+                      )}
                     </p>
                   </div>
                   <button
