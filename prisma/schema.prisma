@@ -186,6 +186,7 @@ model Client {
   cashOrders   CashOrder[]
   fulfillmentOrders FulfillmentOrder[]
   quoteDraftRequests QuoteDraftRequest[]
+  dailyPlanItems DailyPlanItem[]
 
   @@index([createdByManagerId])
 }
@@ -245,6 +246,7 @@ model Manager {
   fulfillmentOrders FulfillmentOrder[]
   completedFulfillmentServices FulfillmentOrderItemService[]
   quoteDraftRequests QuoteDraftRequest[]
+  dailyPlanItems DailyPlanItem[]
 }
 
 // Which tier of the "Поиск товара" service a quote is billed under — the
@@ -1058,7 +1060,47 @@ model QuoteDraftRequest {
   done      Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  dailyPlanItems DailyPlanItem[]
 
   @@index([clientId])
   @@index([managerId])
+}
+
+// A manager's personal day plan — "who am I making quotes for today" — a
+// lightweight checklist, not a workflow gate; nothing else in the system
+// reads doneAt. Deliberately NOT the same thing as QuoteDraftRequest
+// ("Черновики"): a plan item can point at a client and/or an existing
+// draft for quick context/navigation, but can just as easily be free text
+// for a client not in the system yet, or a stray thought — the whole
+// point is not forcing structure on a manager jotting things down first
+// thing in the morning. See PB-V5 chat 2026-07-31.
+model DailyPlanItem {
+  id        String   @id @default(cuid())
+  managerId String
+  manager   Manager  @relation(fields: [managerId], references: [id])
+  // The calendar day this item belongs to, stored as that day's UTC
+  // midnight — same "day boundary" convention as CashOrder.date. Not the
+  // same as createdAt: the UI only ever adds items for today right now,
+  // but the field exists so a manager's plan history is genuinely
+  // per-day, not just "everything ever added."
+  planDate  DateTime
+  // Always shown as-is, a snapshot at add time — for a client/draft pick
+  // this starts as their name/note, for a free entry it's whatever the
+  // manager typed. Not re-derived live from the linked row (renaming a
+  // client later shouldn't silently reword an old plan item) — same
+  // snapshot reasoning as QuoteAttachedService.name.
+  note      String
+  // Both optional and independent of each other — a plan item may link
+  // neither (pure free text), just a client, just a draft, or both.
+  clientId  String?
+  client    Client?  @relation(fields: [clientId], references: [id])
+  quoteDraftRequestId String?
+  quoteDraftRequest   QuoteDraftRequest? @relation(fields: [quoteDraftRequestId], references: [id])
+  // Timestamp doubles as the "done" checkbox + who/when it was checked —
+  // same pattern as buyoutConfirmedAt/cargoActualizedAt elsewhere in this
+  // schema, rather than a separate boolean.
+  doneAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([managerId, planDate])
 }

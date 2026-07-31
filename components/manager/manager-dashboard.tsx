@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   Inbox,
   Clock,
+  ListChecks,
 } from "lucide-react";
 import { QUOTE_STATUSES, QUOTE_STATUS_LABEL, QUOTE_STATUS_BADGE_CLASSES, QUOTE_STATUS_DOT_COLOR } from "@/lib/quote-statuses";
 import { cn } from "@/lib/utils";
@@ -650,6 +651,93 @@ function SearchDraftsWidget() {
   );
 }
 
+interface DailyPlanSummaryItem {
+  id: string;
+  note: string;
+  doneAt: string | null;
+  quoteDraftRequest: { id: string; displayId: number } | null;
+}
+
+interface DailyPlanSummaryRow {
+  manager: { id: string; name: string };
+  total: number;
+  done: number;
+  items: DailyPlanSummaryItem[];
+}
+
+// Owner/senior only — read-only roll-up of every visible manager's own
+// "План на сегодня" (see components/manager/daily-plan-panel.tsx), so a
+// руководитель can see who's on track without impersonating each manager
+// to check their personal panel. Same self-fetch-and-render-null-if-
+// nothing pattern as SearchDraftsWidget above; a 403 (plain manager
+// viewing their own dashboard) is indistinguishable here from "nothing to
+// show" — the panel just doesn't render, no separate role check needed.
+// See PB-V5 chat 2026-07-31.
+function TeamDailyPlanWidget() {
+  const [rows, setRows] = useState<DailyPlanSummaryRow[] | null>(null);
+  const [openManagerId, setOpenManagerId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/manager-daily-plan-summary")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((d) => setRows(d?.summary ?? []));
+  }, []);
+
+  if (!rows || rows.length === 0) return null;
+
+  return (
+    <div className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
+      <h3 className="flex items-center gap-1.5 text-sm font-bold text-text">
+        <ListChecks className="h-4 w-4 text-text-secondary" /> Планы на сегодня по менеджерам
+      </h3>
+      <ul className="mt-3 space-y-1.5">
+        {rows.map((row) => {
+          const isOpen = openManagerId === row.manager.id;
+          const pct = row.total > 0 ? Math.round((row.done / row.total) * 100) : 0;
+          return (
+            <li key={row.manager.id} className="rounded-xl border border-border bg-bg">
+              <button
+                type="button"
+                onClick={() => setOpenManagerId(isOpen ? null : row.manager.id)}
+                className="flex w-full items-center gap-3 p-2.5 text-left"
+              >
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-text">{row.manager.name}</span>
+                <span className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-border">
+                  <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+                </span>
+                <span className="shrink-0 text-xs font-semibold text-text-secondary">
+                  {row.done} из {row.total}
+                </span>
+                <ChevronDown className={cn("h-4 w-4 shrink-0 text-text-secondary transition-transform", isOpen && "rotate-180")} />
+              </button>
+              {isOpen && (
+                <ul className="space-y-1 border-t border-border p-2.5 pt-2">
+                  {row.items.map((item) => (
+                    <li key={item.id} className="flex items-center gap-2 text-xs">
+                      <span
+                        className={cn(
+                          "h-3.5 w-3.5 shrink-0 rounded-sm border",
+                          item.doneAt ? "border-success bg-success" : "border-border",
+                        )}
+                      />
+                      <span className={cn("min-w-0 flex-1 truncate text-text", item.doneAt && "text-text-secondary line-through")}>
+                        {item.note}
+                      </span>
+                      {item.quoteDraftRequest && (
+                        <span className="shrink-0 text-text-secondary">№{item.quoteDraftRequest.displayId}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 interface QuoteWidgetProps {
   refreshKey: number;
   onOpenQuote: (quote: QuoteListItem) => void;
@@ -834,6 +922,7 @@ function ManagerDashboard() {
           onOpenQuote={(quote) => setEditingQuote({ clientId: quote.clientId, clientName: quote.client.name, quoteId: quote.id })}
         />
         <SearchDraftsWidget />
+        <TeamDailyPlanWidget />
         <NeedsReplacementWidget
           refreshKey={quotesRefreshKey}
           onOpenQuote={(quote) => setEditingQuote({ clientId: quote.clientId, clientName: quote.client.name, quoteId: quote.id })}

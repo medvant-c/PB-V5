@@ -15,6 +15,7 @@ import { ManagerCashTab } from "@/components/manager/tabs/cash-tab";
 import { ManagerFulfillmentTab } from "@/components/manager/tabs/fulfillment-tab";
 import { ManagerSettingsTab } from "@/components/manager/tabs/settings-tab";
 import { ManagerDashboard } from "@/components/manager/manager-dashboard";
+import { DailyPlanPanel } from "@/components/manager/daily-plan-panel";
 
 interface ManagerWorkspaceProps {
   name: string;
@@ -214,6 +215,11 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
         </Card>
       </div>
     </div>
+    {/* Sibling of the max-w-7xl content column, still inside
+        .manager-cabinet-theme for its color tokens — fixed-position, so it
+        stays visible and in place while switching tabs instead of being
+        remounted/scrolled away with whichever tab is active. */}
+    <DailyPlanPanel />
     </div>
   );
 }
