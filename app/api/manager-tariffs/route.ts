@@ -98,9 +98,39 @@ export async function POST(req: NextRequest) {
     cargoVolumeMarginUsdPerCbm = vm;
   }
 
+  // Volume tiers above "от 1000¥": usually set automatically by the
+  // Telegram webhook (app/api/telegram-cny-rate-webhook/route.ts), not
+  // through this form. Only touched here when the request actually sends
+  // a value for that field (manual edit from Тарифы) — otherwise carried
+  // forward from the previous row, same convention as cargo margin above,
+  // so a plain "save tariffs" never wipes out the last Telegram-applied
+  // tiers. Sending an explicit null/"" clears a tier back to "unset"
+  // (falls back to the base rate for that quote).
+  const tierOverrides: { cnyRateRubTier3000: number | null; cnyRateRubTier10000: number | null; cnyRateRubTier30000: number | null } = {
+    cnyRateRubTier3000: previous?.cnyRateRubTier3000 !== null && previous?.cnyRateRubTier3000 !== undefined ? Number(previous.cnyRateRubTier3000) : null,
+    cnyRateRubTier10000: previous?.cnyRateRubTier10000 !== null && previous?.cnyRateRubTier10000 !== undefined ? Number(previous.cnyRateRubTier10000) : null,
+    cnyRateRubTier30000: previous?.cnyRateRubTier30000 !== null && previous?.cnyRateRubTier30000 !== undefined ? Number(previous.cnyRateRubTier30000) : null,
+  };
+  for (const key of ["cnyRateRubTier3000", "cnyRateRubTier10000", "cnyRateRubTier30000"] as const) {
+    const value = raw[key];
+    if (value === undefined) continue;
+    if (value === null || value === "") {
+      tierOverrides[key] = null;
+      continue;
+    }
+    const parsed = toPositiveNumber(value);
+    if (parsed === null) {
+      return Response.json({ error: `Поле «${key}» должно быть неотрицательным числом.` }, { status: 400 });
+    }
+    tierOverrides[key] = parsed;
+  }
+
   const settings = await prisma.tariffSettings.create({
     data: {
       cnyRateRub: validated.cnyRateRub,
+      cnyRateRubTier3000: tierOverrides.cnyRateRubTier3000,
+      cnyRateRubTier10000: tierOverrides.cnyRateRubTier10000,
+      cnyRateRubTier30000: tierOverrides.cnyRateRubTier30000,
       usdRateRub: validated.usdRateRub,
       volumeRateUsdPerCbm: validated.volumeRateUsdPerCbm,
       standardPriceRub: validated.standardPriceRub,

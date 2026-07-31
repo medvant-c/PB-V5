@@ -12,6 +12,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { PhotoPicker } from "@/components/manager/photo-picker";
 import {
   computeQuote,
+  computeQuoteWithAutoCnyTier,
+  type CnyRateTiers,
   type DensityTierInput,
   type VolumeTierInput,
   type BuyoutCommissionTierInput,
@@ -24,6 +26,9 @@ import { cn } from "@/lib/utils";
 
 interface TariffSettingsRecord {
   cnyRateRub: string;
+  cnyRateRubTier3000: string | null;
+  cnyRateRubTier10000: string | null;
+  cnyRateRubTier30000: string | null;
   usdRateRub: string;
   volumeRateUsdPerCbm: string;
   standardPriceRub: string;
@@ -473,34 +478,57 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           commissionPercent: Number(tier.commissionPercent),
         }));
 
+    const inputsWithoutRate = {
+      quantity: quantityNum,
+      priceCnyPerUnit: priceNum,
+      chinaDeliveryCny: num(chinaDeliveryCny) ?? 0,
+      weightPerUnitKg: weightNum,
+      volumeInputMode,
+      unitLengthCm: num(unitLengthCm),
+      unitWidthCm: num(unitWidthCm),
+      unitHeightCm: num(unitHeightCm),
+      totalLengthCm: num(totalLengthCm),
+      totalWidthCm: num(totalWidthCm),
+      totalHeightCm: num(totalHeightCm),
+      manualTotalVolumeM3: num(manualTotalVolumeM3),
+      deliveryPricingMode,
+      cargoCategoryKey: cargoCategoryKey || undefined,
+      densityTiers,
+      volumeTariffs: volumeTariffInputs,
+      searchServiceFeeRub,
+      buyoutCommissionTiers,
+      usdRateRub: isFrozen ? frozenRates.usdRateRub : Number(tariffs.usdRateRub),
+      attachedServicesTotalRub,
+      customProductionFeeRub,
+      cargoDiscountUsd: num(cargoDiscountUsd),
+      cargoRateUsdOverride: num(cargoRateUsdOverride),
+      lowDensityVolumeThresholdKgM3,
+    };
+
+    const manualOverride = num(cnyRateRubOverride);
     try {
-      return computeQuote({
-        quantity: quantityNum,
-        priceCnyPerUnit: priceNum,
-        chinaDeliveryCny: num(chinaDeliveryCny) ?? 0,
-        weightPerUnitKg: weightNum,
-        volumeInputMode,
-        unitLengthCm: num(unitLengthCm),
-        unitWidthCm: num(unitWidthCm),
-        unitHeightCm: num(unitHeightCm),
-        totalLengthCm: num(totalLengthCm),
-        totalWidthCm: num(totalWidthCm),
-        totalHeightCm: num(totalHeightCm),
-        manualTotalVolumeM3: num(manualTotalVolumeM3),
-        deliveryPricingMode,
-        cargoCategoryKey: cargoCategoryKey || undefined,
-        densityTiers,
-        volumeTariffs: volumeTariffInputs,
-        searchServiceFeeRub,
-        buyoutCommissionTiers,
-        cnyRateRub: num(cnyRateRubOverride) ?? (isFrozen ? frozenRates.cnyRateRub : Number(tariffs.cnyRateRub)),
-        usdRateRub: isFrozen ? frozenRates.usdRateRub : Number(tariffs.usdRateRub),
-        attachedServicesTotalRub,
-        customProductionFeeRub,
-        cargoDiscountUsd: num(cargoDiscountUsd),
-        cargoRateUsdOverride: num(cargoRateUsdOverride),
-        lowDensityVolumeThresholdKgM3,
-      });
+      if (manualOverride !== undefined) {
+        return { ...computeQuote({ ...inputsWithoutRate, cnyRateRub: manualOverride }), cnyRateRubResolved: manualOverride };
+      }
+      if (isFrozen) {
+        return {
+          ...computeQuote({ ...inputsWithoutRate, cnyRateRub: frozenRates.cnyRateRub }),
+          cnyRateRubResolved: frozenRates.cnyRateRub,
+        };
+      }
+      // New quote, no manual override: pick the ¥→₽ bracket the quote's
+      // own total actually falls into (product + China delivery + buyout
+      // commission + services + custom-production, all converted at the
+      // base tier) rather than always pricing off the "от 1000¥" tier —
+      // see computeQuoteWithAutoCnyTier in lib/quote-engine.ts.
+      const cnyTiers: CnyRateTiers = {
+        base: Number(tariffs.cnyRateRub),
+        tier3000: tariffs.cnyRateRubTier3000 !== null ? Number(tariffs.cnyRateRubTier3000) : null,
+        tier10000: tariffs.cnyRateRubTier10000 !== null ? Number(tariffs.cnyRateRubTier10000) : null,
+        tier30000: tariffs.cnyRateRubTier30000 !== null ? Number(tariffs.cnyRateRubTier30000) : null,
+      };
+      const result = computeQuoteWithAutoCnyTier(inputsWithoutRate, cnyTiers);
+      return { ...result.computed, cnyRateRubResolved: result.cnyRateRub };
     } catch {
       return null;
     }
@@ -834,6 +862,11 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                 value={cnyRateRubOverride}
                 onChange={(e) => setCnyRateRubOverride(e.target.value)}
               />
+              {!cnyRateRubOverride.trim() && !isEditing && preview && (
+                <p className="text-xs text-text-secondary">
+                  Курс сейчас: {preview.cnyRateRubResolved.toFixed(2)} ₽ за ¥ (подбирается автоматически по сумме просчёта)
+                </p>
+              )}
               {cnyRateRubOverride.trim() &&
                 (isEditing ? (
                   <p className={cn("text-xs", cnyRateOverrideConfirmed ? "text-success" : "text-warning")}>

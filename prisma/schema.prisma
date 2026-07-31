@@ -286,7 +286,23 @@ enum DeliveryPricingMode {
 // same snapshot-over-silent-recompute philosophy as Order.price.
 model TariffSettings {
   id                       String   @id @default(cuid())
+  // The "от 1000¥" tier — the floor/default rate, and the only one
+  // that's always required. Used as-is by everything in the app that
+  // doesn't care about volume tiers; a NEW quote (not yet knowing its own
+  // final ¥ total) starts priced off this one too, before
+  // pickCnyRateForTotal in lib/quote-engine.ts can pick a better tier once
+  // there's a quantity/price to compute a total from. See PB-V5 chat
+  // 2026-07-31.
   cnyRateRub               Decimal
+  // The other three volume tiers the exchange group posts (от 3000¥/
+  // 10000¥/30000¥) — nullable because they only ever get populated by the
+  // Telegram webhook (see TelegramCnyRateUpdate below); a manually-edited
+  // Тарифы save can leave them unset, in which case pickCnyRateForTotal
+  // just always falls back to cnyRateRub above, same as before this
+  // feature existed.
+  cnyRateRubTier3000       Decimal?
+  cnyRateRubTier10000      Decimal?
+  cnyRateRubTier30000      Decimal?
   usdRateRub               Decimal
   // Flat rate used when a quote's delivery is priced "по объёму" instead of
   // by density — spec explicitly calls this a temporary placeholder value
@@ -1109,4 +1125,36 @@ model DailyPlanItem {
   assignedByManagerId String?
 
   @@index([managerId, planDate])
+}
+
+// One row per Telegram group message the ¥→₽ exchange webhook received and
+// recognized as a rate post — logged whether or not it actually applied,
+// so a failed parse is visible/debuggable instead of silently vanishing.
+// See app/api/telegram-cny-rate-webhook/route.ts and PB-V5 chat
+// 2026-07-31. Deliberately NOT a confirm-then-apply queue like the manual
+// cargo/¥ rate overrides elsewhere in this schema — the owner explicitly
+// asked for this one to apply automatically (a new TariffSettings row the
+// moment a valid message arrives), just never touching already-issued
+// quotes, which the existing "TariffSettings is append-only, a quote
+// freezes its own rate at creation" design already guarantees for free.
+model TelegramCnyRateUpdate {
+  id             String    @id @default(cuid())
+  // All four volume tiers the group actually posts, kept for reference/
+  // troubleshooting even though only one of them is ever applied.
+  rateFrom1000   Decimal?
+  rateFrom3000   Decimal?
+  rateFrom10000  Decimal?
+  rateFrom30000  Decimal?
+  // Which tier was actually used — see PARSE_TIER_TO_APPLY in
+  // lib/telegram-cny-rate.ts. Null alongside parseError below when the
+  // message didn't parse cleanly enough to apply anything.
+  appliedRateRub Decimal?
+  parseError     String?
+  // The TariffSettings row this update created, when successful — kept as
+  // a plain string (no relation) since nothing ever needs to query
+  // "updates by settings row," only the reverse (which this ID already
+  // gives directly).
+  tariffSettingsId String?
+  rawMessage     String
+  receivedAt     DateTime  @default(now())
 }

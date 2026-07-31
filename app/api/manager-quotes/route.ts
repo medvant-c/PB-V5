@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { storage } from "@/lib/storage";
 import { nextQuoteDisplayId } from "@/lib/display-ids";
 import { getSystemSettings } from "@/lib/system-settings";
-import { computeQuote, computeCargoCost } from "@/lib/quote-engine";
+import { computeQuote, computeCargoCost, computeQuoteWithAutoCnyTier, type CnyRateTiers } from "@/lib/quote-engine";
 import {
   buildEngineInputs,
   buyoutCommissionTariffsToEngineInput,
@@ -121,10 +121,20 @@ export async function POST(req: NextRequest) {
   const attachedServicesTotalRub = attachedServices.reduce((sum, s) => sum + s.priceRub, 0);
   const customProductionFeeRub = customProductionFeeForTier(tariffSettings, fields.quoteType, fields.isCustomProduction);
 
+  // A manual override is usable immediately, same as cargoRateUsdOverride
+  // below — confirmation only gates the sign-off, not the price itself.
+  // Without one, a new quote doesn't just take today's flat cnyRateRub —
+  // it picks whichever of the four volume tiers its own ¥ total actually
+  // falls into (see computeQuoteWithAutoCnyTier in lib/quote-engine.ts).
+  const cnyTiers: CnyRateTiers = {
+    base: Number(tariffSettings.cnyRateRub),
+    tier3000: tariffSettings.cnyRateRubTier3000 !== null ? Number(tariffSettings.cnyRateRubTier3000) : null,
+    tier10000: tariffSettings.cnyRateRubTier10000 !== null ? Number(tariffSettings.cnyRateRubTier10000) : null,
+    tier30000: tariffSettings.cnyRateRubTier30000 !== null ? Number(tariffSettings.cnyRateRubTier30000) : null,
+  };
+
   const engineInputs = buildEngineInputs(fields, {
-    // A manual override is usable immediately, same as cargoRateUsdOverride
-    // below — confirmation only gates the sign-off, not the price itself.
-    cnyRateRub: fields.cnyRateRubOverride ?? Number(tariffSettings.cnyRateRub),
+    cnyRateRub: fields.cnyRateRubOverride ?? cnyTiers.base,
     usdRateRub: Number(tariffSettings.usdRateRub),
     buyoutCommissionTiers: buyoutCommissionTariffsToEngineInput(buyoutCommissionTiers),
     searchServiceFeeRub: searchFeeWaived ? 0 : searchServiceFeeByType[fields.quoteType],
@@ -136,8 +146,18 @@ export async function POST(req: NextRequest) {
   });
 
   let computed;
+  let resolvedCnyRateRub: number;
   try {
-    computed = computeQuote(engineInputs);
+    if (fields.cnyRateRubOverride !== undefined) {
+      resolvedCnyRateRub = fields.cnyRateRubOverride;
+      computed = computeQuote(engineInputs);
+    } else {
+      const { cnyRateRub: _placeholder, ...inputsWithoutRate } = engineInputs;
+      void _placeholder;
+      const result = computeQuoteWithAutoCnyTier(inputsWithoutRate, cnyTiers);
+      computed = result.computed;
+      resolvedCnyRateRub = result.cnyRateRub;
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Не удалось рассчитать просчёт.";
     return Response.json({ error: message }, { status: 400 });
@@ -227,7 +247,7 @@ export async function POST(req: NextRequest) {
       buyoutCommissionPercent: computed.buyoutCommissionPercent,
       buyoutCommissionRub: computed.buyoutCommissionRub,
       totalRub: computed.totalRub,
-      cnyRateUsed: engineInputs.cnyRateRub,
+      cnyRateUsed: resolvedCnyRateRub,
       usdRateUsed: engineInputs.usdRateRub,
       // A manual rate always starts unconfirmed — see
       // Quote.cnyRateOverrideConfirmed in prisma/schema.prisma.

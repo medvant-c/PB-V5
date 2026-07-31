@@ -8,6 +8,9 @@ import { Button } from "@/components/ui/button";
 
 interface TariffSettingsRecord {
   cnyRateRub: string;
+  cnyRateRubTier3000: string | null;
+  cnyRateRubTier10000: string | null;
+  cnyRateRubTier30000: string | null;
   usdRateRub: string;
   volumeRateUsdPerCbm: string;
   standardPriceRub: string;
@@ -53,11 +56,25 @@ interface BuyoutCommissionTariffRecord {
   commissionPercent: string;
 }
 
+interface TelegramCnyRateUpdateRecord {
+  id: string;
+  rateFrom1000: string | null;
+  rateFrom3000: string | null;
+  rateFrom10000: string | null;
+  rateFrom30000: string | null;
+  appliedRateRub: string | null;
+  parseError: string | null;
+  receivedAt: string;
+}
+
 const FIELD_LABELS: Record<
-  keyof Omit<TariffSettingsRecord, "createdAt" | "cargoDensityMarginUsdPerKg" | "cargoVolumeMarginUsdPerCbm">,
+  keyof Omit<
+    TariffSettingsRecord,
+    "createdAt" | "cargoDensityMarginUsdPerKg" | "cargoVolumeMarginUsdPerCbm" | "cnyRateRubTier3000" | "cnyRateRubTier10000" | "cnyRateRubTier30000"
+  >,
   string
 > = {
-  cnyRateRub: "Курс юаня (CNY → RUB)",
+  cnyRateRub: "Курс юаня (CNY → RUB) — от 1¥",
   usdRateRub: "Курс доллара (USD → RUB)",
   volumeRateUsdPerCbm: "Резервная ставка за м³ (если для категории нет своего тарифа), $",
   standardPriceRub: "Поиск товара Standart, ₽",
@@ -68,6 +85,16 @@ const FIELD_LABELS: Record<
   customProductionProRub: "Производство под заказ (Pro), ₽",
   managerCargoRateUsdPerKg: "Премия менеджеру за карго (свой клиент), $/кг",
   managerCargoRateUsdPerM3: "Премия менеджеру за карго (свой клиент), $/м³",
+};
+
+// Optional volume-based ¥ brackets — see CnyRateTiers in lib/quote-engine.ts.
+// A quote's own total (product + China delivery + buyout commission +
+// services, all in ¥) picks whichever bracket it reaches; usually filled in
+// automatically by the Telegram webhook, editable by hand here too.
+const CNY_TIER_FIELD_LABELS: Record<"cnyRateRubTier3000" | "cnyRateRubTier10000" | "cnyRateRubTier30000", string> = {
+  cnyRateRubTier3000: "от 3000¥, ₽",
+  cnyRateRubTier10000: "от 10 000¥, ₽",
+  cnyRateRubTier30000: "от 30 000¥, ₽",
 };
 
 // Owner-only — never rendered for anyone else (see TariffSettingsRecord).
@@ -114,6 +141,9 @@ function ManagerTariffsTab() {
   const [busyBuyoutCommissionTariffId, setBusyBuyoutCommissionTariffId] = useState<string | null>(null);
   const [buyoutCommissionPercentDrafts, setBuyoutCommissionPercentDrafts] = useState<Record<string, string>>({});
 
+  const [telegramUpdates, setTelegramUpdates] = useState<TelegramCnyRateUpdateRecord[]>([]);
+  const [loadingTelegramUpdates, setLoadingTelegramUpdates] = useState(false);
+
   const loadSettings = useCallback(async () => {
     setLoading(true);
     try {
@@ -126,10 +156,28 @@ function ManagerTariffsTab() {
         const keys = isOwner
           ? [...Object.keys(FIELD_LABELS), ...Object.keys(OWNER_FIELD_LABELS)]
           : Object.keys(FIELD_LABELS);
-        setForm(Object.fromEntries(keys.map((key) => [key, String(data.settings[key])])));
+        const baseForm = Object.fromEntries(keys.map((key) => [key, String(data.settings[key])]));
+        const tierForm = Object.fromEntries(
+          Object.keys(CNY_TIER_FIELD_LABELS).map((key) => [
+            key,
+            data.settings[key] !== null && data.settings[key] !== undefined ? String(data.settings[key]) : "",
+          ]),
+        );
+        setForm({ ...baseForm, ...tierForm });
       }
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const loadTelegramUpdates = useCallback(async () => {
+    setLoadingTelegramUpdates(true);
+    try {
+      const res = await fetch("/api/telegram-cny-rate-updates");
+      const data = await res.json();
+      if (res.ok) setTelegramUpdates(data.updates);
+    } finally {
+      setLoadingTelegramUpdates(false);
     }
   }, []);
 
@@ -195,6 +243,10 @@ function ManagerTariffsTab() {
     loadVolumeTariffs();
     loadBuyoutCommissionTariffs();
   }, [loadSettings, loadTiers, loadVolumeTariffs, loadBuyoutCommissionTariffs]);
+
+  useEffect(() => {
+    if (settings?.cargoDensityMarginUsdPerKg !== undefined) loadTelegramUpdates();
+  }, [settings, loadTelegramUpdates]);
 
   async function handleSave(event: React.FormEvent) {
     event.preventDefault();
@@ -471,6 +523,35 @@ function ManagerTariffsTab() {
               />
             </div>
           ))}
+
+          <div className="space-y-3 rounded-xl border border-dashed border-border bg-bg p-3 sm:col-span-2">
+            <div className="text-xs font-semibold text-text-secondary">
+              Курс юаня по сумме просчёта (необязательно)
+            </div>
+            <p className="text-xs text-text-secondary">
+              Если сумма НОВОГО просчёта (товар + доставка по Китаю + комиссия за выкуп + услуги, в ¥) достигает
+              одного из этих порогов, просчёт автоматически считается по указанному здесь курсу вместо курса «от
+              1¥» выше. Обновляется само из телеграм-группы с курсами каждое утро — трогать вручную нужно, только
+              если хотите поправить конкретную ступень. Пустое поле = ступени пока нет.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {Object.entries(CNY_TIER_FIELD_LABELS).map(([key, label]) => (
+                <div key={key} className="space-y-1.5">
+                  <Label htmlFor={`tariff-${key}`}>{label}</Label>
+                  <Input
+                    id={`tariff-${key}`}
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    placeholder="не задано"
+                    value={form[key] ?? ""}
+                    onChange={(e) => setForm((current) => ({ ...current, [key]: e.target.value }))}
+                    disabled={!canEdit}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
 
           {isOwner && (
             <div className="space-y-3 rounded-xl border border-dashed border-border bg-bg p-3 sm:col-span-2">
@@ -888,6 +969,56 @@ function ManagerTariffsTab() {
           </div>
         )}
       </div>
+
+      {isOwner && (
+        <div className="border-t border-border pt-6">
+          <h3 className="text-sm font-bold text-text">Автообновления курса из Телеграм-группы</h3>
+          <p className="mt-1 text-sm text-text-secondary">
+            Последние 20 сообщений с курсом, которые получил webhook — видно, применился ли курс и почему нет, если
+            не применился. Видно только руководителю.
+          </p>
+          {loadingTelegramUpdates ? (
+            <p className="mt-3 text-sm text-text-secondary">Загрузка…</p>
+          ) : telegramUpdates.length === 0 ? (
+            <p className="mt-3 text-sm text-text-secondary">Пока не было ни одного сообщения с курсом.</p>
+          ) : (
+            <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+              <table className="w-full min-w-150 border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-bg text-left text-xs text-text-secondary">
+                    <th className="px-3 py-1.5 font-medium">Получено</th>
+                    <th className="px-3 py-1.5 font-medium">от 1000¥</th>
+                    <th className="px-3 py-1.5 font-medium">от 3000¥</th>
+                    <th className="px-3 py-1.5 font-medium">от 10 000¥</th>
+                    <th className="px-3 py-1.5 font-medium">от 30 000¥</th>
+                    <th className="px-3 py-1.5 font-medium">Статус</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {telegramUpdates.map((update) => (
+                    <tr key={update.id} className="border-b border-border last:border-0">
+                      <td className="px-3 py-1.5 text-text-secondary">
+                        {new Date(update.receivedAt).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}
+                      </td>
+                      <td className="px-3 py-1.5 text-text">{update.rateFrom1000 ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-text">{update.rateFrom3000 ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-text">{update.rateFrom10000 ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-text">{update.rateFrom30000 ?? "—"}</td>
+                      <td className="px-3 py-1.5">
+                        {update.parseError ? (
+                          <span className="text-error">{update.parseError}</span>
+                        ) : (
+                          <span className="text-success">✓ Применён</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

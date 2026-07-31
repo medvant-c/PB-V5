@@ -345,9 +345,69 @@ function computeCargoCost(inputs: CargoCostInputs): CargoCostOutputs {
   return { cargoCostUsd, cargoCostRub };
 }
 
+// The four ¥→₽ rates the exchange group posts, by minimum ¥ volume — see
+// TariffSettings.cnyRateRub/cnyRateRubTier3000/10000/30000 in
+// prisma/schema.prisma. `base` (the "от 1000¥" tier) is always required;
+// the other three are each independently optional (a manually-edited
+// Тарифы save can leave them unset).
+interface CnyRateTiers {
+  base: number;
+  tier3000: number | null;
+  tier10000: number | null;
+  tier30000: number | null;
+}
+
+// Which of the four tiers applies to a ¥ volume — highest qualifying
+// tier wins, falling through to the next one down if that tier's rate
+// isn't set, and finally to `base` (always available).
+function pickCnyRateForTotal(cnyVolume: number, tiers: CnyRateTiers): number {
+  if (cnyVolume >= 30000 && tiers.tier30000 !== null) return tiers.tier30000;
+  if (cnyVolume >= 10000 && tiers.tier10000 !== null) return tiers.tier10000;
+  if (cnyVolume >= 3000 && tiers.tier3000 !== null) return tiers.tier3000;
+  return tiers.base;
+}
+
+// A NEW quote doesn't know which volume tier it should price at until its
+// own ¥ total is known — but that total depends on quantity/price, not on
+// the rate itself, so this isn't actually circular for the goods/China-
+// delivery part. The one genuine wrinkle is buyoutCommissionRub, which IS
+// rate-dependent (it's graduated by totalPriceRub) — resolved with a
+// two-pass estimate: compute once at the base (от 1000¥) rate, use THAT
+// result to estimate how many ¥ this deal is really worth (goods +
+// China delivery, both already ¥, plus every ₽ fee the client pays —
+// search/просчёт fee, buyout commission, производство под заказ, attached
+// services — converted back to a ¥-equivalent at that same base rate;
+// cargo is deliberately excluded, it's priced in USD and has nothing to
+// do with ¥ purchasing volume), pick the tier that ¥ total actually lands
+// in, then recompute once more at that rate if it differs from the base.
+// A boundary-case commission-bracket shift from the ~1-2% difference
+// between tiers is accepted as negligible rather than chased with true
+// fixed-point iteration. Used for a brand-new quote and by /recalculate;
+// an edited quote keeps its already-frozen rate untouched, same as every
+// other frozen field on PATCH. See PB-V5 chat 2026-07-31.
+function computeQuoteWithAutoCnyTier(
+  inputsWithoutRate: Omit<QuoteEngineInputs, "cnyRateRub">,
+  tiers: CnyRateTiers,
+): { computed: QuoteEngineOutputs; cnyRateRub: number } {
+  const provisional = computeQuote({ ...inputsWithoutRate, cnyRateRub: tiers.base });
+  const cnyVolume =
+    provisional.totalPriceCny +
+    inputsWithoutRate.chinaDeliveryCny +
+    (inputsWithoutRate.searchServiceFeeRub +
+      provisional.buyoutCommissionRub +
+      (inputsWithoutRate.customProductionFeeRub ?? 0) +
+      (inputsWithoutRate.attachedServicesTotalRub ?? 0)) /
+      tiers.base;
+  const cnyRateRub = pickCnyRateForTotal(cnyVolume, tiers);
+  if (cnyRateRub === tiers.base) return { computed: provisional, cnyRateRub };
+  return { computed: computeQuote({ ...inputsWithoutRate, cnyRateRub }), cnyRateRub };
+}
+
 export {
   computeQuote,
   computeCargoCost,
+  computeQuoteWithAutoCnyTier,
+  pickCnyRateForTotal,
   lookupDensityRate,
   lookupVolumeRate,
   lookupBuyoutCommissionRate,
@@ -362,4 +422,5 @@ export type {
   BuyoutCommissionTierInput,
   VolumeInputMode,
   DeliveryPricingMode,
+  CnyRateTiers,
 };

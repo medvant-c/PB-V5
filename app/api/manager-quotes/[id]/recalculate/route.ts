@@ -2,7 +2,13 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canAccessManagerQuote } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
-import { computeQuote, computeCargoCost, type QuoteEngineInputs } from "@/lib/quote-engine";
+import {
+  computeQuote,
+  computeQuoteWithAutoCnyTier,
+  computeCargoCost,
+  type CnyRateTiers,
+  type QuoteEngineInputs,
+} from "@/lib/quote-engine";
 import {
   buyoutCommissionTariffsToEngineInput,
   customProductionFeeForTier,
@@ -61,7 +67,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const attachedServices = await prisma.quoteAttachedService.findMany({ where: { quoteId: id } });
   const attachedServicesTotalRub = attachedServices.reduce((sum, s) => sum + Number(s.priceRub), 0);
 
-  const engineInputs: QuoteEngineInputs = {
+  const engineInputsWithoutRate: Omit<QuoteEngineInputs, "cnyRateRub"> = {
     quantity: existing.quantity,
     priceCnyPerUnit: Number(existing.priceCnyPerUnit),
     chinaDeliveryCny: Number(existing.chinaDeliveryCny),
@@ -82,10 +88,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     volumeTariffs: volumeTariffsToEngineInput(volumeTariffs),
     searchServiceFeeRub,
     buyoutCommissionTiers: buyoutCommissionTariffsToEngineInput(buyoutCommissionTiers),
-    // Reused as-is if set, same as cargoRateUsdOverride below — recalculate
-    // re-prices tariff-driven numbers against today's rates, it doesn't
-    // touch the manual override itself or its confirmation state.
-    cnyRateRub: existing.cnyRateRubOverride !== null ? Number(existing.cnyRateRubOverride) : Number(tariffSettings.cnyRateRub),
     usdRateRub: Number(tariffSettings.usdRateRub),
     lowDensityVolumeThresholdKgM3: Number(systemSettings.lowDensityVolumeThresholdKgM3),
     attachedServicesTotalRub,
@@ -98,8 +100,25 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   };
 
   let computed;
+  let resolvedCnyRateRub: number;
   try {
-    computed = computeQuote(engineInputs);
+    if (existing.cnyRateRubOverride !== null) {
+      // Reused as-is, same as cargoRateUsdOverride above — recalculate
+      // re-prices tariff-driven numbers against today's rates, it doesn't
+      // touch the manual override itself or its confirmation state.
+      resolvedCnyRateRub = Number(existing.cnyRateRubOverride);
+      computed = computeQuote({ ...engineInputsWithoutRate, cnyRateRub: resolvedCnyRateRub });
+    } else {
+      const cnyTiers: CnyRateTiers = {
+        base: Number(tariffSettings.cnyRateRub),
+        tier3000: tariffSettings.cnyRateRubTier3000 !== null ? Number(tariffSettings.cnyRateRubTier3000) : null,
+        tier10000: tariffSettings.cnyRateRubTier10000 !== null ? Number(tariffSettings.cnyRateRubTier10000) : null,
+        tier30000: tariffSettings.cnyRateRubTier30000 !== null ? Number(tariffSettings.cnyRateRubTier30000) : null,
+      };
+      const result = computeQuoteWithAutoCnyTier(engineInputsWithoutRate, cnyTiers);
+      computed = result.computed;
+      resolvedCnyRateRub = result.cnyRateRub;
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Не удалось пересчитать просчёт.";
     return Response.json({ error: message }, { status: 400 });
@@ -135,7 +154,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     totalVolumeM3: computed.totalVolumeM3,
     cargoDensityMarginUsdPerKg: densityMarginForThisQuote,
     cargoVolumeMarginUsdPerCbm: volumeMarginForThisQuote,
-    usdRateRub: engineInputs.usdRateRub,
+    usdRateRub: engineInputsWithoutRate.usdRateRub,
   });
 
   const quote = await prisma.quote.update({
@@ -159,8 +178,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       buyoutCommissionPercent: computed.buyoutCommissionPercent,
       buyoutCommissionRub: computed.buyoutCommissionRub,
       totalRub: computed.totalRub,
-      cnyRateUsed: engineInputs.cnyRateRub,
-      usdRateUsed: engineInputs.usdRateRub,
+      cnyRateUsed: resolvedCnyRateRub,
+      usdRateUsed: engineInputsWithoutRate.usdRateRub,
     },
   });
 
