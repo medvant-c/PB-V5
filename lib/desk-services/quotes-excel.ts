@@ -14,6 +14,16 @@ const HEADER_FILL = "FF1F3864"; // dark navy
 const HEADER_FONT_COLOR = "FFFFFFFF";
 const STRIPE_FILL = "FFDCE6F1"; // light blue, alternates with white
 
+// Every money column in this sheet is ₽ (see COLUMNS below — the only
+// currency this export ever shows), so one format covers all of them.
+// Thousands-separated, no decimals (every value is already Math.round()'d
+// before it's written), ₽ suffix. See PB-V5 chat 2026-07-31.
+const MONEY_FORMAT = '#,##0" ₽"';
+// Approximate default-font line height in points, for the row-height
+// estimate below — not pixel-perfect, just enough that a long Описание
+// isn't silently clipped by the fixed photo-aligned row height.
+const LINE_HEIGHT_PT = 14;
+
 const QUOTE_TYPE_LABEL: Record<string, string> = {
   standard: "Standart",
   expert: "Expert",
@@ -26,27 +36,27 @@ const QUOTE_TYPE_LABEL: Record<string, string> = {
 // total. Column at index i corresponds 1:1 with the values pushed in the
 // row array below — keep both in sync if either changes.
 const COLUMNS = [
-  { header: "Тип поиска", width: 12, wrap: false },
-  { header: "Фото 1", width: PHOTO_COL_WIDTH, wrap: false },
-  { header: "Фото 2", width: PHOTO_COL_WIDTH, wrap: false },
-  { header: "Фото 3", width: PHOTO_COL_WIDTH, wrap: false },
-  { header: "Наименование", width: 28, wrap: true },
-  { header: "Описание", width: 30, wrap: true },
-  { header: "Цвет", width: 12, wrap: false },
-  { header: "Размеры", width: 16, wrap: true },
-  { header: "Количество", width: 11, wrap: false },
-  { header: "Цена, ₽", width: 12, wrap: false },
-  { header: "Общая стоимость, ₽", width: 16, wrap: false },
-  { header: "Доставка по Китаю, ₽", width: 16, wrap: false },
-  { header: "Вес, кг", width: 10, wrap: false },
-  { header: "Плотность, кг/м³", width: 14, wrap: false },
-  { header: "Объём, м³", width: 11, wrap: false },
-  { header: "Услуга поиска, ₽", width: 14, wrap: false },
-  { header: "Производство под заказ, ₽", width: 16, wrap: false },
-  { header: "Комиссия за выкуп, ₽", width: 16, wrap: false },
-  { header: "Доп. услуги, ₽", width: 13, wrap: false },
-  { header: "Доставка карго, ₽", width: 14, wrap: false },
-  { header: "ИТОГО, ₽", width: 13, wrap: false },
+  { header: "Тип поиска", width: 12, wrap: false, money: false },
+  { header: "Фото 1", width: PHOTO_COL_WIDTH, wrap: false, money: false },
+  { header: "Фото 2", width: PHOTO_COL_WIDTH, wrap: false, money: false },
+  { header: "Фото 3", width: PHOTO_COL_WIDTH, wrap: false, money: false },
+  { header: "Наименование", width: 28, wrap: true, money: false },
+  { header: "Описание", width: 30, wrap: true, money: false },
+  { header: "Цвет", width: 12, wrap: false, money: false },
+  { header: "Размеры", width: 16, wrap: true, money: false },
+  { header: "Количество", width: 11, wrap: false, money: false },
+  { header: "Цена, ₽", width: 12, wrap: false, money: true },
+  { header: "Общая стоимость, ₽", width: 16, wrap: false, money: true },
+  { header: "Доставка по Китаю, ₽", width: 16, wrap: false, money: true },
+  { header: "Вес, кг", width: 10, wrap: false, money: false },
+  { header: "Плотность, кг/м³", width: 14, wrap: false, money: false },
+  { header: "Объём, м³", width: 11, wrap: false, money: false },
+  { header: "Услуга поиска, ₽", width: 14, wrap: false, money: true },
+  { header: "Производство под заказ, ₽", width: 16, wrap: false, money: true },
+  { header: "Комиссия за выкуп, ₽", width: 16, wrap: false, money: true },
+  { header: "Доп. услуги, ₽", width: 13, wrap: false, money: true },
+  { header: "Доставка карго, ₽", width: 14, wrap: false, money: true },
+  { header: "ИТОГО, ₽", width: 13, wrap: false, money: true },
 ] as const;
 const TOTAL_COLUMN_INDEX = COLUMNS.length; // 1-indexed — last column is ИТОГО
 
@@ -71,6 +81,20 @@ interface QuoteExcelRow {
   attachedServicesTotalRub: number;
   cargoDeliveryRub: number;
   totalRub: number;
+}
+
+// Crude but sufficient estimate of how many lines `text` wraps to inside a
+// column `widthChars` characters wide — ExcelJS/Excel itself won't
+// auto-grow a row that already has an explicit height set (needed here so
+// every row stays tall enough for the fixed-size photos), so a long
+// Описание would otherwise render with wrapText on but visibly clipped
+// after ~4 lines. See PB-V5 chat 2026-07-31.
+function estimateWrappedLines(text: string, widthChars: number): number {
+  if (!text) return 1;
+  const usableWidth = Math.max(widthChars - 2, 4);
+  return text
+    .split("\n")
+    .reduce((sum, paragraph) => sum + Math.max(1, Math.ceil(paragraph.length / usableWidth)), 0);
 }
 
 async function fitPhotoToSquare(buffer: Buffer): Promise<Buffer> {
@@ -98,7 +122,7 @@ async function renderQuotesExcel(props: { client: { name: string; company: strin
 
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
     const row = rows[rowIndex];
-    const excelRow = sheet.addRow([
+    const values = [
       QUOTE_TYPE_LABEL[row.quoteType] ?? row.quoteType,
       null,
       null,
@@ -120,8 +144,14 @@ async function renderQuotesExcel(props: { client: { name: string; company: strin
       Math.round(row.attachedServicesTotalRub),
       Math.round(row.cargoDeliveryRub),
       Math.round(row.totalRub),
-    ]);
-    excelRow.height = ROW_HEIGHT;
+    ];
+    const excelRow = sheet.addRow(values);
+
+    const neededLines = Math.max(
+      1,
+      ...COLUMNS.map((c, i) => (c.wrap ? estimateWrappedLines(String(values[i] ?? ""), c.width) : 1)),
+    );
+    excelRow.height = Math.max(ROW_HEIGHT, neededLines * LINE_HEIGHT_PT + 8);
 
     const stripeFill: ExcelJS.Fill | undefined =
       rowIndex % 2 === 1 ? { type: "pattern", pattern: "solid", fgColor: { argb: STRIPE_FILL } } : undefined;
@@ -131,6 +161,7 @@ async function renderQuotesExcel(props: { client: { name: string; company: strin
         vertical: "middle",
         wrapText: Boolean(COLUMNS[colNumber - 1]?.wrap),
       };
+      if (COLUMNS[colNumber - 1]?.money) cell.numFmt = MONEY_FORMAT;
       if (stripeFill) cell.fill = stripeFill;
       if (colNumber === TOTAL_COLUMN_INDEX) cell.font = { bold: true };
     });

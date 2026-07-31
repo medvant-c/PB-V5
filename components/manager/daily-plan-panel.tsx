@@ -66,6 +66,17 @@ function DailyPlanPanel() {
     load();
   }, []);
 
+  // Periodic nudge — a manager who collapses the panel and gets absorbed
+  // in something else could otherwise go the whole day without opening it
+  // again. Force it back open once an hour regardless of whether they'd
+  // collapsed it since the last tick; doesn't re-fetch on its own since
+  // load() already runs on every add/toggle/delete, so the list is never
+  // stale by the time this fires. See PB-V5 chat 2026-07-31.
+  useEffect(() => {
+    const interval = setInterval(() => setOpen(true), 60 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     if (clients.length === 0) {
