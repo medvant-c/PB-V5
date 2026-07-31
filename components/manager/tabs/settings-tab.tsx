@@ -13,6 +13,7 @@ interface SystemSettingsRecord {
   selfSourcedBuyoutDiscountRatePercent: string;
   vladShareRatePercent: string;
   fulfillmentPremiumRatePercent: string;
+  yuraCargoRateUsdPerKg: string;
   freeStandardQuoteLimit: number;
   lowDensityVolumeThresholdKgM3: string;
   premiumExplanationText: string;
@@ -85,6 +86,7 @@ function ManagerSettingsTab() {
           selfSourcedBuyoutDiscountRatePercent: data.settings.selfSourcedBuyoutDiscountRatePercent,
           vladShareRatePercent: data.settings.vladShareRatePercent,
           fulfillmentPremiumRatePercent: data.settings.fulfillmentPremiumRatePercent,
+          yuraCargoRateUsdPerKg: data.settings.yuraCargoRateUsdPerKg,
           freeStandardQuoteLimit: String(data.settings.freeStandardQuoteLimit),
           lowDensityVolumeThresholdKgM3: data.settings.lowDensityVolumeThresholdKgM3,
           premiumExplanationText: data.settings.premiumExplanationText,
@@ -172,6 +174,29 @@ function ManagerSettingsTab() {
                   <p className="text-xs text-text-secondary">{hint}</p>
                 </div>
               ))}
+            </div>
+          </div>
+
+          <div className="space-y-3 border-t border-border pt-6">
+            <h3 className="text-sm font-bold text-text">Доля инвесторов</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="settings-yuraCargoRateUsdPerKg">Юра (Инвестор) — за карго, $/кг</Label>
+                <Input
+                  id="settings-yuraCargoRateUsdPerKg"
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={form.yuraCargoRateUsdPerKg ?? ""}
+                  onChange={(e) => setForm((current) => ({ ...current, yuraCargoRateUsdPerKg: e.target.value }))}
+                  disabled={!canEdit}
+                  required
+                />
+                <p className="text-xs text-text-secondary">
+                  Флат-ставка с каждого доставленного килограмма карго, независимо от источника клиента — не % от
+                  прибыли, как у Влада выше, и берётся только с карго.
+                </p>
+              </div>
             </div>
           </div>
 

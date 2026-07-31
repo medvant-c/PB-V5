@@ -47,6 +47,7 @@ interface ReportRow {
   cargoProfitRub: number;
   rawTotalRub: number;
   vladShareRub: number;
+  yuraShareRub: number;
   managerPremiumRub: number;
   manager: { id: string; name: string };
   client: { id: string; name: string; company: string | null };
@@ -62,6 +63,7 @@ interface ReportTotals {
   totalCargoProfitRub: number;
   profitPoolRub: number;
   vladShareRub: number;
+  yuraShareRub: number;
   managerPremiumRub: number;
   founderShareRub: number;
 }
@@ -434,13 +436,18 @@ function ManagerProfitReportTab() {
               <Lock className="h-4 w-4 text-text-secondary" /> Доля партнёров — видно только руководителю
             </div>
             <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
-              10% от прибыли по каждой подтверждённой сделке (со всех источников, включая курсовую разницу) — Владу.
-              Остаток после доли Влада и премий всех менеджеров делится 50/50 между Александром и Антоном.
+              10% от прибыли по каждой сделке (со всех источников, включая курсовую разницу) — Владу. Юре — фикс
+              $/кг с каждого доставленного карго, отдельно от остальной прибыли. Остаток после доли Влада, доли
+              Юры и премий менеджеров делится 50/50 между Александром и Антоном.
             </p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div className="mt-3 grid gap-3 sm:grid-cols-4">
               <div className="rounded-xl border border-border bg-surface p-3.5">
                 <div className="text-xs text-text-secondary">Влад (Партнёр) — 10%</div>
                 <div className="mt-1 text-lg font-bold text-text">{fmtBoth(report.totals.vladShareRub, cnyRateRub)}</div>
+              </div>
+              <div className="rounded-xl border border-border bg-surface p-3.5">
+                <div className="text-xs text-text-secondary">Юра (Инвестор) — карго</div>
+                <div className="mt-1 text-lg font-bold text-text">{fmtBoth(report.totals.yuraShareRub, cnyRateRub)}</div>
               </div>
               <div className="rounded-xl border border-border bg-surface p-3.5">
                 <div className="text-xs text-text-secondary">Александр (Основатель/Инвестор)</div>

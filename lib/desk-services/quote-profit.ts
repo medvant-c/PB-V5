@@ -117,6 +117,76 @@ function flatCargoBonusRub(
   return basisIsDensity ? Number(q.totalWeightKg) * rates.usdPerKg * usdRateUsed : Number(q.totalVolumeM3) * rates.usdPerM3 * usdRateUsed;
 }
 
+// Four-tier bracket lookup by ¥ volume — same shape/threshold convention as
+// pickCnyRateForTotal in lib/quote-engine.ts, kept as its own copy here
+// (not imported) since that file is deliberately NOT server-only (shared
+// with the client-side quote preview) and this is profit data that must
+// never ship to the browser.
+interface CnyProfitTiers {
+  base: number;
+  tier3000: number | null;
+  tier10000: number | null;
+  tier30000: number | null;
+}
+
+function pickCnyProfitForVolume(cnyVolume: number, tiers: CnyProfitTiers): number {
+  if (cnyVolume >= 30000 && tiers.tier30000 !== null) return tiers.tier30000;
+  if (cnyVolume >= 10000 && tiers.tier10000 !== null) return tiers.tier10000;
+  if (cnyVolume >= 3000 && tiers.tier3000 !== null) return tiers.tier3000;
+  return tiers.base;
+}
+
+interface CnyVolumeFields {
+  totalPriceCny: unknown;
+  chinaDeliveryCny: unknown;
+  searchServiceFeeRub: unknown;
+  buyoutCommissionRub: unknown;
+  customProductionFeeRub: unknown;
+  cnyRateUsed: unknown;
+}
+
+// Reconstructs the same ¥ "volume" figure computeQuoteWithAutoCnyTier used
+// to pick this quote's own cnyRateUsed (see lib/quote-engine.ts) — from the
+// quote's own stored/frozen numbers, not live tariffs, so this stays
+// correct regardless of what today's tariffs look like later.
+// attachedServicesTotalRub isn't a Quote column (lives on
+// QuoteAttachedService rows), so it's passed in by the caller — one batched
+// query per report, not one query per quote.
+function estimateCnyVolume(q: CnyVolumeFields, attachedServicesTotalRub: number): number {
+  const cnyRateUsed = Number(q.cnyRateUsed);
+  return (
+    Number(q.totalPriceCny) +
+    Number(q.chinaDeliveryCny) +
+    (Number(q.searchServiceFeeRub) + Number(q.buyoutCommissionRub) + Number(q.customProductionFeeRub) + attachedServicesTotalRub) /
+      cnyRateUsed
+  );
+}
+
+// Estimated (pre-confirmation) курсовая разница — a known, fixed margin per
+// ¥ actually converted (owner-set in Тарифы, see
+// TariffSettings.cnyProfitPerYuanRub* in prisma/schema.prisma), applied to
+// this quote's own ¥ volume. fxProfitRub() above only knows the REAL spread
+// once actualBuyoutCny/actualBuyoutRateUsed exist after a confirmed
+// buyout — this is what to show before that, same "estimate now, replace
+// with fact later" spirit as estimatedSourceProfits() vs
+// factualSourceProfits(). See PB-V5 chat 2026-07-31.
+function estimatedFxProfitRub(q: CnyVolumeFields, attachedServicesTotalRub: number, tiers: CnyProfitTiers): number {
+  const cnyVolume = estimateCnyVolume(q, attachedServicesTotalRub);
+  return cnyVolume * pickCnyProfitForVolume(cnyVolume, tiers);
+}
+
+// Юра (investor #2) — flat $/kg on delivered cargo weight, on every cargo
+// delivery regardless of self-sourced status (unlike a manager's own
+// flatCargoBonusRub above, which is self-sourced-only and switches basis
+// density/volume — Юра's cut is always per-kg). totalWeightKg is the same
+// field cargoProfitRub implicitly relies on: an estimate before cargo is
+// actualized, the real delivered weight after — no separate
+// estimated/factual formula needed here for the same reason cargoProfitRub
+// itself doesn't need one. See PB-V5 chat 2026-07-31.
+function yuraCargoShareRub(totalWeightKg: unknown, usdPerKg: number, usdRateUsed: unknown): number {
+  return Number(totalWeightKg) * usdPerKg * Number(usdRateUsed);
+}
+
 export {
   proscetProfitRub,
   estimatedSourceProfits,
@@ -127,5 +197,9 @@ export {
   effectiveVladRatePercent,
   isSelfSourcedFor,
   flatCargoBonusRub,
+  pickCnyProfitForVolume,
+  estimateCnyVolume,
+  estimatedFxProfitRub,
+  yuraCargoShareRub,
 };
-export type { QuoteProfitFields, SourceProfits };
+export type { QuoteProfitFields, SourceProfits, CnyProfitTiers, CnyVolumeFields };

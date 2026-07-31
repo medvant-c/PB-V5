@@ -12,6 +12,9 @@ import {
   cargoProfitRub,
   isSelfSourcedFor,
   flatCargoBonusRub,
+  estimatedFxProfitRub,
+  yuraCargoShareRub,
+  type CnyProfitTiers,
 } from "@/lib/desk-services/quote-profit";
 
 // Statuses that imply the buyout has actually happened — client's money
@@ -58,10 +61,15 @@ interface PremiumRates {
 }
 
 interface QuoteForStats {
+  id: string;
   managerId: string;
   status: QuoteStatus;
   totalRub: unknown;
   totalPriceRub: unknown;
+  // ¥-denominated (not chinaDeliveryRub/totalPriceRub's ₽ conversion) —
+  // needed only for estimateCnyVolume in lib/desk-services/quote-profit.ts.
+  totalPriceCny: unknown;
+  chinaDeliveryCny: unknown;
   chinaDeliveryRub: unknown;
   cargoDeliveryRub: unknown;
   // The real cargo cost snapshotted on the quote (Quote.cargoCostRub) —
@@ -91,7 +99,13 @@ interface QuoteForStats {
   client: { selfSourcedConfirmed: boolean; createdByManagerId: string | null; vladShareRatePercentOverride: unknown };
 }
 
-function summarize(quotes: QuoteForStats[], cargoRates: { usdPerKg: number; usdPerM3: number }, premiumRates: PremiumRates) {
+function summarize(
+  quotes: QuoteForStats[],
+  cargoRates: { usdPerKg: number; usdPerM3: number },
+  premiumRates: PremiumRates,
+  cnyProfitTiers: CnyProfitTiers,
+  attachedServicesByQuoteId: Map<string, number>,
+) {
   const statusCounts: Record<string, number> = {};
   for (const status of QUOTE_STATUSES) statusCounts[status] = 0;
   let boughtRub = 0;
@@ -126,6 +140,11 @@ function summarize(quotes: QuoteForStats[], cargoRates: { usdPerKg: number; usdP
   let factualCargoProfitRub = 0;
   let potentialCargoBonusRub = 0;
   let factualCargoBonusRub = 0;
+  // Estimated курсовая разница, pre-confirmation — see estimatedFxProfitRub
+  // in lib/desk-services/quote-profit.ts. Only a projection: the factual
+  // fxProfitRub() (confirmed deals) never runs through this bucket at all,
+  // same as it's never shown anywhere else on this dashboard.
+  let potentialFxProfitRub = 0;
 
   for (const q of quotes) {
     statusCounts[q.status] = (statusCounts[q.status] ?? 0) + 1;
@@ -171,6 +190,7 @@ function summarize(quotes: QuoteForStats[], cargoRates: { usdPerKg: number; usdP
       const { proscetRub, buyoutRub } = estimatedSourceProfits(q);
       potentialProscetRub += proscetRub;
       potentialBuyoutRub += buyoutRub;
+      potentialFxProfitRub += estimatedFxProfitRub(q, attachedServicesByQuoteId.get(q.id) ?? 0, cnyProfitTiers);
       const isBoosted = isSelfSourcedFor(q.client, q.managerId);
       const proscetRate = isBoosted ? premiumRates.selfSourcedProscetRatePercent : premiumRates.normalRatePercent;
       const buyoutRate = isBoosted ? premiumRates.selfSourcedBuyoutDiscountRatePercent : premiumRates.normalRatePercent;
@@ -224,6 +244,7 @@ function summarize(quotes: QuoteForStats[], cargoRates: { usdPerKg: number; usdP
     factualCargoProfitRub,
     potentialCargoBonusRub,
     factualCargoBonusRub,
+    potentialFxProfitRub,
     estimatedPremiumRub,
     factualPremiumRub: totalFactualPremiumRub,
     conversionPercent,
@@ -251,15 +272,25 @@ export async function GET(req: NextRequest) {
   };
   const vladShareRatePercent = Number(systemSettings.vladShareRatePercent);
   const fulfillmentPremiumRatePercent = Number(systemSettings.fulfillmentPremiumRatePercent);
+  const yuraCargoRateUsdPerKg = Number(systemSettings.yuraCargoRateUsdPerKg);
+  const cnyProfitTiers: CnyProfitTiers = {
+    base: tariffSettings?.cnyProfitPerYuanRub !== undefined && tariffSettings?.cnyProfitPerYuanRub !== null ? Number(tariffSettings.cnyProfitPerYuanRub) : 0,
+    tier3000: tariffSettings?.cnyProfitPerYuanRubTier3000 !== undefined && tariffSettings?.cnyProfitPerYuanRubTier3000 !== null ? Number(tariffSettings.cnyProfitPerYuanRubTier3000) : null,
+    tier10000: tariffSettings?.cnyProfitPerYuanRubTier10000 !== undefined && tariffSettings?.cnyProfitPerYuanRubTier10000 !== null ? Number(tariffSettings.cnyProfitPerYuanRubTier10000) : null,
+    tier30000: tariffSettings?.cnyProfitPerYuanRubTier30000 !== undefined && tariffSettings?.cnyProfitPerYuanRubTier30000 !== null ? Number(tariffSettings.cnyProfitPerYuanRubTier30000) : null,
+  };
 
   const visibleManagerIds = await getVisibleManagerIds(session);
   const quotes = await prisma.quote.findMany({
     where: visibleManagerIds === "all" ? undefined : { managerId: { in: visibleManagerIds } },
     select: {
+      id: true,
       managerId: true,
       status: true,
       totalRub: true,
       totalPriceRub: true,
+      totalPriceCny: true,
+      chinaDeliveryCny: true,
       chinaDeliveryRub: true,
       cargoDeliveryRub: true,
       cargoCostRub: true,
@@ -282,6 +313,15 @@ export async function GET(req: NextRequest) {
       client: { select: { selfSourcedConfirmed: true, createdByManagerId: true, vladShareRatePercentOverride: true } },
     },
   });
+
+  // Needed only for estimateCnyVolume (see lib/desk-services/quote-profit.ts)
+  // — one batched sum per quote instead of a query per quote.
+  const attachedServiceSums = await prisma.quoteAttachedService.groupBy({
+    by: ["quoteId"],
+    where: { quoteId: { in: quotes.map((q) => q.id) } },
+    _sum: { priceRub: true },
+  });
+  const attachedServicesByQuoteId = new Map(attachedServiceSums.map((s) => [s.quoteId, Number(s._sum.priceRub ?? 0)]));
 
   // "Готовые просчёты" — how many quotes each manager marked complete
   // (first reached pending_approval) today/this week/this month, per PB-V5
@@ -332,7 +372,10 @@ export async function GET(req: NextRequest) {
     return { ...row, factualFulfillmentPremiumRub: premium, factualPremiumRub: row.factualPremiumRub + premium };
   }
 
-  const overall = withFulfillmentPremium(summarize(quotes, cargoRates, premiumRates), "all");
+  const overall = withFulfillmentPremium(
+    summarize(quotes, cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId),
+    "all",
+  );
 
   // Per-manager breakdown — meaningful for owner (sees everyone) and senior
   // (sees their team); a plain manager only ever sees themself here, so
@@ -356,7 +399,10 @@ export async function GET(req: NextRequest) {
     perManager = managers.map((m) => ({
       managerId: m.id,
       managerName: m.name,
-      ...withFulfillmentPremium(summarize(byManager.get(m.id) ?? [], cargoRates, premiumRates), m.id),
+      ...withFulfillmentPremium(
+        summarize(byManager.get(m.id) ?? [], cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId),
+        m.id,
+      ),
       completedToday: countCompletedSince(m.id, startOfDay),
       completedWeek: countCompletedSince(m.id, startOfWeek),
       completedMonth: countCompletedSince(m.id, startOfMonth),
@@ -394,12 +440,17 @@ export async function GET(req: NextRequest) {
   // so one loss-making deal never eats into shares already earned
   // elsewhere.
   let vladShareRub: number | null = null;
+  let yuraShareRub: number | null = null;
   let founderShareRub: number | null = null;
   if (session.role === "owner" && perManager) {
     const totalManagerPotentialPremiumsRub = perManager.reduce((sum, m) => sum + m.estimatedPremiumRub, 0);
     const totalManagerFactualPremiumsRub = perManager.reduce((sum, m) => sum + m.factualPremiumRub, 0);
     expectedIncomeRub =
-      overall.potentialProscetRub + overall.potentialBuyoutRub + overall.potentialCargoProfitRub - totalManagerPotentialPremiumsRub;
+      overall.potentialProscetRub +
+      overall.potentialBuyoutRub +
+      overall.potentialCargoProfitRub +
+      overall.potentialFxProfitRub -
+      totalManagerPotentialPremiumsRub;
     actualIncomeRub =
       overall.factualProscetRub +
       overall.factualBuyoutRub +
@@ -448,7 +499,17 @@ export async function GET(req: NextRequest) {
       return sum + Number(o.totalRub) * (rate / 100);
     }, 0);
     vladShareRub = vladShareFromQuotesRub + vladShareFromFulfillmentRub;
-    founderShareRub = (totalProfitPoolRub - vladShareRub - totalManagerFactualPremiumsRub) / 2;
+
+    // Юра — flat $/kg on delivered cargo weight only, gated the same way
+    // as factualCargoBonusRub above (cargoBonusRatePercent locked in at
+    // handed_to_client), not on buyoutFactConfirmed — cargo delivery and
+    // buyout confirmation are independent events. Comes off the top same
+    // as Влад's cut, before the founders split what's left.
+    yuraShareRub = quotes
+      .filter((q) => q.cargoBonusRatePercent !== null && q.cargoBonusRatePercent !== undefined)
+      .reduce((sum, q) => sum + yuraCargoShareRub(q.totalWeightKg, yuraCargoRateUsdPerKg, q.usdRateUsed), 0);
+
+    founderShareRub = (totalProfitPoolRub - vladShareRub - yuraShareRub - totalManagerFactualPremiumsRub) / 2;
   }
 
   // Owner-confidential cargo-margin signal — never leaves the server for
@@ -481,6 +542,7 @@ export async function GET(req: NextRequest) {
     searchFeeRub,
     buyoutCommissionRub,
     vladShareRub,
+    yuraShareRub,
     founderShareRub,
     // Every ₽ figure on the dashboard is DISPLAYED in ¥ (per PB-V5 chat
     // 2026-07-28) — the frontend converts using this rate rather than the

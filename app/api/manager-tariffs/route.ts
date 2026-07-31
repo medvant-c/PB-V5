@@ -3,20 +3,50 @@ import { getManagerSessionFromRequest, type ManagerSession } from "@/lib/manager
 import { canEditTariffs } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 
-// Cargo margin is owner-confidential — a manager needs the sell rate to
-// price a quote, never the profit baked into it, so these two fields never
-// leave the server for anyone else's session. Shared by GET and POST (the
-// POST response echoes back the created row the same way GET reads it —
-// forgetting to strip it there would leak the margin the moment a non-owner
-// with canEditTariffs saves the form).
-function stripMarginForNonOwner<T extends { cargoDensityMarginUsdPerKg: unknown; cargoVolumeMarginUsdPerCbm: unknown }>(
+// Cargo margin AND the CNY profit-per-yuan tiers are both owner-confidential
+// — a manager needs the sell rate (cnyRateRub*) to price a quote, never the
+// profit baked into it, so these fields never leave the server for anyone
+// else's session. Shared by GET and POST (the POST response echoes back the
+// created row the same way GET reads it — forgetting to strip it there
+// would leak the margin the moment a non-owner with canEditTariffs saves
+// the form).
+function stripMarginForNonOwner<
+  T extends {
+    cargoDensityMarginUsdPerKg: unknown;
+    cargoVolumeMarginUsdPerCbm: unknown;
+    cnyProfitPerYuanRub: unknown;
+    cnyProfitPerYuanRubTier3000: unknown;
+    cnyProfitPerYuanRubTier10000: unknown;
+    cnyProfitPerYuanRubTier30000: unknown;
+  },
+>(
   settings: T,
   session: ManagerSession,
-): T | Omit<T, "cargoDensityMarginUsdPerKg" | "cargoVolumeMarginUsdPerCbm"> {
+): T | Omit<
+  T,
+  | "cargoDensityMarginUsdPerKg"
+  | "cargoVolumeMarginUsdPerCbm"
+  | "cnyProfitPerYuanRub"
+  | "cnyProfitPerYuanRubTier3000"
+  | "cnyProfitPerYuanRubTier10000"
+  | "cnyProfitPerYuanRubTier30000"
+> {
   if (session.role === "owner") return settings;
-  const { cargoDensityMarginUsdPerKg, cargoVolumeMarginUsdPerCbm, ...publicSettings } = settings;
+  const {
+    cargoDensityMarginUsdPerKg,
+    cargoVolumeMarginUsdPerCbm,
+    cnyProfitPerYuanRub,
+    cnyProfitPerYuanRubTier3000,
+    cnyProfitPerYuanRubTier10000,
+    cnyProfitPerYuanRubTier30000,
+    ...publicSettings
+  } = settings;
   void cargoDensityMarginUsdPerKg;
   void cargoVolumeMarginUsdPerCbm;
+  void cnyProfitPerYuanRub;
+  void cnyProfitPerYuanRubTier3000;
+  void cnyProfitPerYuanRubTier10000;
+  void cnyProfitPerYuanRubTier30000;
   return publicSettings;
 }
 
@@ -98,6 +128,53 @@ export async function POST(req: NextRequest) {
     cargoVolumeMarginUsdPerCbm = vm;
   }
 
+  // Курсовая разница margin per ¥ — owner-only, same carry-forward-unless-
+  // owner-sends-it rule as cargo margin above. Independent of the
+  // cnyRateRubTier* fields below (those are what the CLIENT is charged;
+  // these are pure internal profit accounting — see
+  // lib/desk-services/quote-profit.ts). Sending an explicit null/""
+  // clears a tier back to "unset" (0 contribution from that bracket).
+  const cnyProfitOverrides: {
+    cnyProfitPerYuanRub: number | null;
+    cnyProfitPerYuanRubTier3000: number | null;
+    cnyProfitPerYuanRubTier10000: number | null;
+    cnyProfitPerYuanRubTier30000: number | null;
+  } = {
+    cnyProfitPerYuanRub: previous?.cnyProfitPerYuanRub !== null && previous?.cnyProfitPerYuanRub !== undefined ? Number(previous.cnyProfitPerYuanRub) : null,
+    cnyProfitPerYuanRubTier3000:
+      previous?.cnyProfitPerYuanRubTier3000 !== null && previous?.cnyProfitPerYuanRubTier3000 !== undefined
+        ? Number(previous.cnyProfitPerYuanRubTier3000)
+        : null,
+    cnyProfitPerYuanRubTier10000:
+      previous?.cnyProfitPerYuanRubTier10000 !== null && previous?.cnyProfitPerYuanRubTier10000 !== undefined
+        ? Number(previous.cnyProfitPerYuanRubTier10000)
+        : null,
+    cnyProfitPerYuanRubTier30000:
+      previous?.cnyProfitPerYuanRubTier30000 !== null && previous?.cnyProfitPerYuanRubTier30000 !== undefined
+        ? Number(previous.cnyProfitPerYuanRubTier30000)
+        : null,
+  };
+  if (session.role === "owner") {
+    for (const key of [
+      "cnyProfitPerYuanRub",
+      "cnyProfitPerYuanRubTier3000",
+      "cnyProfitPerYuanRubTier10000",
+      "cnyProfitPerYuanRubTier30000",
+    ] as const) {
+      const value = raw[key];
+      if (value === undefined) continue;
+      if (value === null || value === "") {
+        cnyProfitOverrides[key] = null;
+        continue;
+      }
+      const parsed = toPositiveNumber(value);
+      if (parsed === null) {
+        return Response.json({ error: `Поле «${key}» должно быть неотрицательным числом.` }, { status: 400 });
+      }
+      cnyProfitOverrides[key] = parsed;
+    }
+  }
+
   // Volume tiers above "от 1000¥": usually set automatically by the
   // Telegram webhook (app/api/telegram-cny-rate-webhook/route.ts), not
   // through this form. Only touched here when the request actually sends
@@ -143,6 +220,10 @@ export async function POST(req: NextRequest) {
       managerCargoRateUsdPerM3: validated.managerCargoRateUsdPerM3,
       cargoDensityMarginUsdPerKg,
       cargoVolumeMarginUsdPerCbm,
+      cnyProfitPerYuanRub: cnyProfitOverrides.cnyProfitPerYuanRub,
+      cnyProfitPerYuanRubTier3000: cnyProfitOverrides.cnyProfitPerYuanRubTier3000,
+      cnyProfitPerYuanRubTier10000: cnyProfitOverrides.cnyProfitPerYuanRubTier10000,
+      cnyProfitPerYuanRubTier30000: cnyProfitOverrides.cnyProfitPerYuanRubTier30000,
       createdByManagerId: session.managerId,
     },
   });

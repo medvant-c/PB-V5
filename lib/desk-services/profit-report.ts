@@ -4,11 +4,14 @@ import { getSystemSettings } from "@/lib/system-settings";
 import {
   cargoProfitRub,
   effectiveVladRatePercent,
+  estimatedFxProfitRub,
   estimatedSourceProfits,
   factualSourceProfits,
   flatCargoBonusRub,
   fxProfitRub,
   isSelfSourcedFor,
+  yuraCargoShareRub,
+  type CnyProfitTiers,
   type QuoteProfitFields,
 } from "@/lib/desk-services/quote-profit";
 
@@ -29,6 +32,10 @@ const PROFIT_SELECT = {
   managerId: true,
   totalRub: true,
   totalPriceRub: true,
+  // ¥-denominated — needed only for estimateCnyVolume (see
+  // lib/desk-services/quote-profit.ts), distinct from the ₽ figures above.
+  totalPriceCny: true,
+  chinaDeliveryCny: true,
   chinaDeliveryRub: true,
   cargoDeliveryRub: true,
   cargoCostRub: true,
@@ -81,16 +88,27 @@ function computeQuoteBreakdown(
   cargoRates: { usdPerKg: number; usdPerM3: number },
   premiumRates: PremiumRates,
   vladShareRatePercent: number,
+  cnyProfitTiers: CnyProfitTiers,
+  attachedServicesTotalRub: number,
+  yuraCargoRateUsdPerKg: number,
 ) {
   const fields: QuoteProfitFields = q;
   const { proscetRub, buyoutRub, discountRub } = q.buyoutFactConfirmed ? factualSourceProfits(fields) : estimatedSourceProfits(fields);
-  const fx = q.buyoutFactConfirmed ? fxProfitRub(fields) : 0;
+  // Real spread once a buyout is confirmed; before that, the known
+  // per-¥ margin from Тарифы (see estimatedFxProfitRub in
+  // lib/desk-services/quote-profit.ts) instead of silently showing 0.
+  const fx = q.buyoutFactConfirmed ? fxProfitRub(fields) : estimatedFxProfitRub(q, attachedServicesTotalRub, cnyProfitTiers);
   const cargo = cargoProfitRub(fields);
   const rawTotalRub = proscetRub + buyoutRub + discountRub + fx + cargo;
   const clampedTotalRub = Math.max(0, rawTotalRub);
 
   const vladRatePercent = effectiveVladRatePercent(q.client, vladShareRatePercent);
   const vladShareRub = clampedTotalRub * (vladRatePercent / 100);
+  // Юра — flat $/kg on delivered cargo weight, independent of profit/
+  // confirmation status (totalWeightKg is itself an estimate before
+  // actualization, the real delivered weight after — same as
+  // cargoProfitRub above needs no separate estimated/factual branch).
+  const yuraShareRub = yuraCargoShareRub(q.totalWeightKg, yuraCargoRateUsdPerKg, q.usdRateUsed);
 
   let managerPremiumRub: number;
   if (q.buyoutFactConfirmed) {
@@ -136,6 +154,7 @@ function computeQuoteBreakdown(
     cargoProfitRub: cargo,
     rawTotalRub,
     vladShareRub,
+    yuraShareRub,
     managerPremiumRub,
   };
 }
@@ -156,25 +175,63 @@ async function loadRatesAndQuotes(quoteIds: string[]) {
     selfSourcedBuyoutDiscountRatePercent: Number(systemSettings.selfSourcedBuyoutDiscountRatePercent),
   };
   const vladShareRatePercent = Number(systemSettings.vladShareRatePercent);
-  return { quotes, cargoRates, premiumRates, vladShareRatePercent };
+  const yuraCargoRateUsdPerKg = Number(systemSettings.yuraCargoRateUsdPerKg);
+  const cnyProfitTiers: CnyProfitTiers = {
+    base: tariffSettings?.cnyProfitPerYuanRub !== undefined && tariffSettings?.cnyProfitPerYuanRub !== null ? Number(tariffSettings.cnyProfitPerYuanRub) : 0,
+    tier3000:
+      tariffSettings?.cnyProfitPerYuanRubTier3000 !== undefined && tariffSettings?.cnyProfitPerYuanRubTier3000 !== null
+        ? Number(tariffSettings.cnyProfitPerYuanRubTier3000)
+        : null,
+    tier10000:
+      tariffSettings?.cnyProfitPerYuanRubTier10000 !== undefined && tariffSettings?.cnyProfitPerYuanRubTier10000 !== null
+        ? Number(tariffSettings.cnyProfitPerYuanRubTier10000)
+        : null,
+    tier30000:
+      tariffSettings?.cnyProfitPerYuanRubTier30000 !== undefined && tariffSettings?.cnyProfitPerYuanRubTier30000 !== null
+        ? Number(tariffSettings.cnyProfitPerYuanRubTier30000)
+        : null,
+  };
+
+  // Needed only for estimateCnyVolume — one batched sum per quote instead
+  // of a query per quote.
+  const attachedServiceSums = await prisma.quoteAttachedService.groupBy({
+    by: ["quoteId"],
+    where: { quoteId: { in: quotes.map((q) => q.id) } },
+    _sum: { priceRub: true },
+  });
+  const attachedServicesByQuoteId = new Map(attachedServiceSums.map((s) => [s.quoteId, Number(s._sum.priceRub ?? 0)]));
+
+  return { quotes, cargoRates, premiumRates, vladShareRatePercent, yuraCargoRateUsdPerKg, cnyProfitTiers, attachedServicesByQuoteId };
 }
 
 // The single entry point both routes call — guarantees the on-screen report
 // and the downloaded PDF can never show different numbers for the same
 // selection.
 async function buildProfitReport(quoteIds: string[]) {
-  const { quotes, cargoRates, premiumRates, vladShareRatePercent } = await loadRatesAndQuotes(quoteIds);
-  const rows = quotes.map((q) => computeQuoteBreakdown(q, cargoRates, premiumRates, vladShareRatePercent));
+  const { quotes, cargoRates, premiumRates, vladShareRatePercent, yuraCargoRateUsdPerKg, cnyProfitTiers, attachedServicesByQuoteId } =
+    await loadRatesAndQuotes(quoteIds);
+  const rows = quotes.map((q) =>
+    computeQuoteBreakdown(
+      q,
+      cargoRates,
+      premiumRates,
+      vladShareRatePercent,
+      cnyProfitTiers,
+      attachedServicesByQuoteId.get(q.id) ?? 0,
+      yuraCargoRateUsdPerKg,
+    ),
+  );
 
   const totalRevenueRub = rows.reduce((sum, r) => sum + r.totalRub, 0);
   const totalProfitRub = rows.reduce((sum, r) => sum + r.rawTotalRub, 0);
   const profitPoolRub = rows.reduce((sum, r) => sum + Math.max(0, r.rawTotalRub), 0);
   const vladShareRub = rows.reduce((sum, r) => sum + r.vladShareRub, 0);
+  const yuraShareRub = rows.reduce((sum, r) => sum + r.yuraShareRub, 0);
   const managerPremiumRub = rows.reduce((sum, r) => sum + r.managerPremiumRub, 0);
   // Same 50/50 split as app/api/manager-dashboard/route.ts's founderShareRub
   // — this value IS one founder's share already (Александр's or Антон's),
   // not the combined pool.
-  const founderShareRub = (profitPoolRub - vladShareRub - managerPremiumRub) / 2;
+  const founderShareRub = (profitPoolRub - vladShareRub - yuraShareRub - managerPremiumRub) / 2;
 
   // Per-source breakdown of totalProfitRub above — so "Прибыль компании"
   // doesn't stay one opaque number, same "show what it's made of" instinct
@@ -199,6 +256,7 @@ async function buildProfitReport(quoteIds: string[]) {
       totalCargoProfitRub,
       profitPoolRub,
       vladShareRub,
+      yuraShareRub,
       managerPremiumRub,
       founderShareRub,
     },

@@ -307,6 +307,20 @@ model TariffSettings {
   cnyRateRubTier3000       Decimal?
   cnyRateRubTier10000      Decimal?
   cnyRateRubTier30000      Decimal?
+
+  // Owner-only profit accounting — how many ₽ of profit PB actually earns
+  // per ¥ converted at each of the same four volume tiers above. NOT part
+  // of what the client is charged (that's cnyRateRub* above) — this is
+  // purely internal: what to show as "курсовая разница" for a quote
+  // BEFORE a real buyout is confirmed (see estimatedFxProfitRub in
+  // lib/desk-services/quote-profit.ts), since the factual formula only
+  // knows the real spread once actualBuyoutCny/actualBuyoutRateUsed exist.
+  // All nullable — missing tier = 0 contribution from that bracket, same
+  // convention as cnyRateRubTier3000 etc. See PB-V5 chat 2026-07-31.
+  cnyProfitPerYuanRub          Decimal?
+  cnyProfitPerYuanRubTier3000  Decimal?
+  cnyProfitPerYuanRubTier10000 Decimal?
+  cnyProfitPerYuanRubTier30000 Decimal?
   usdRateRub               Decimal
   // Flat rate used when a quote's delivery is priced "по объёму" instead of
   // by density — spec explicitly calls this a temporary placeholder value
@@ -375,6 +389,11 @@ model SystemSettings {
   selfSourcedBuyoutDiscountRatePercent Decimal @default(50)
   vladShareRatePercent                 Decimal @default(10)
   fulfillmentPremiumRatePercent        Decimal @default(10)
+  // Second investor — Юра gets a flat $/kg on delivered cargo weight only
+  // (not a % of Просчёт/Выкуп/Скидка/Курсовая разница like Влад's cut
+  // above, and not self-sourced-gated like a manager's own cargo bonus —
+  // every cargo delivery counts). See PB-V5 chat 2026-07-31.
+  yuraCargoRateUsdPerKg                Decimal @default(0.1)
 
   // How many of a client's first Standard-tier quotes get the search fee
   // waived — see FREE_STANDARD_QUOTE_LIMIT's old home in quote-request.ts.

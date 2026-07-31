@@ -145,6 +145,10 @@ interface DashboardData {
   // (Александр/Антон, 50/50) after Влад and every manager's premium — see
   // PB-V5 chat 2026-07-28.
   vladShareRub: number | null;
+  // Юра (Инвестор #2) — flat $/kg on delivered cargo weight only, comes
+  // off the top same as Влад's cut before founderShareRub is split. See
+  // PB-V5 chat 2026-07-31.
+  yuraShareRub: number | null;
   founderShareRub: number | null;
   // Every ₽ amount on this dashboard is displayed converted to ¥ using this
   // rate (see PB-V5 chat 2026-07-28) — underlying storage/math stays RUB,
@@ -1123,13 +1127,20 @@ function ManagerDashboard() {
             </div>
             <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
               10% от прибыли по каждой подтверждённой сделке (со всех источников, включая курсовую разницу) —
-              Владу. Остаток после доли Влада и премий всех менеджеров делится 50/50 между Александром и Антоном.
+              Владу. Юре — фикс $/кг с каждого доставленного карго, отдельно от остальной прибыли. Остаток после
+              доли Влада, доли Юры и премий всех менеджеров делится 50/50 между Александром и Антоном.
             </p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div className="mt-3 grid gap-3 sm:grid-cols-4">
               <div className="rounded-xl border border-border bg-surface p-3.5">
                 <div className="text-xs text-text-secondary">Влад (Партнёр) — 10%</div>
                 <div className="mt-1 text-lg font-bold text-text">{fmtBoth(data.vladShareRub, data.cnyRateRub)}</div>
               </div>
+              {data.yuraShareRub != null && (
+                <div className="rounded-xl border border-border bg-surface p-3.5">
+                  <div className="text-xs text-text-secondary">Юра (Инвестор) — карго</div>
+                  <div className="mt-1 text-lg font-bold text-text">{fmtBoth(data.yuraShareRub, data.cnyRateRub)}</div>
+                </div>
+              )}
               <div className="rounded-xl border border-border bg-surface p-3.5">
                 <div className="text-xs text-text-secondary">Александр (Основатель/Инвестор)</div>
                 <div className="mt-1 text-lg font-bold text-text">{fmtBoth(data.founderShareRub, data.cnyRateRub)}</div>

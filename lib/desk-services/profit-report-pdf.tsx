@@ -87,6 +87,7 @@ interface ProfitReportPdfTotals {
   totalCargoProfitRub: number;
   profitPoolRub: number;
   vladShareRub: number;
+  yuraShareRub: number;
   managerPremiumRub: number;
   founderShareRub: number;
 }
@@ -191,6 +192,10 @@ function ProfitReportPdfDocument({ rows, totals }: ProfitReportPdfProps) {
             <View style={styles.splitRow}>
               <Text style={styles.splitLabel}>Влад (Партнёр) — 10%</Text>
               <Text style={styles.splitValue}>{fmt(totals.vladShareRub)} ₽</Text>
+            </View>
+            <View style={styles.splitRow}>
+              <Text style={styles.splitLabel}>Юра (Инвестор) — карго</Text>
+              <Text style={styles.splitValue}>{fmt(totals.yuraShareRub)} ₽</Text>
             </View>
             <View style={styles.splitRow}>
               <Text style={styles.splitLabel}>Александр (Основатель/Инвестор)</Text>

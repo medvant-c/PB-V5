@@ -26,6 +26,11 @@ interface TariffSettingsRecord {
   // for everyone else, so their presence here doubles as "am I the owner."
   cargoDensityMarginUsdPerKg?: string;
   cargoVolumeMarginUsdPerCbm?: string;
+  // Owner-only profit-per-¥ tiers — same stripping convention as above.
+  cnyProfitPerYuanRub?: string | null;
+  cnyProfitPerYuanRubTier3000?: string | null;
+  cnyProfitPerYuanRubTier10000?: string | null;
+  cnyProfitPerYuanRubTier30000?: string | null;
 }
 
 interface DensityTierRecord {
@@ -70,7 +75,16 @@ interface TelegramCnyRateUpdateRecord {
 const FIELD_LABELS: Record<
   keyof Omit<
     TariffSettingsRecord,
-    "createdAt" | "cargoDensityMarginUsdPerKg" | "cargoVolumeMarginUsdPerCbm" | "cnyRateRubTier3000" | "cnyRateRubTier10000" | "cnyRateRubTier30000"
+    | "createdAt"
+    | "cargoDensityMarginUsdPerKg"
+    | "cargoVolumeMarginUsdPerCbm"
+    | "cnyRateRubTier3000"
+    | "cnyRateRubTier10000"
+    | "cnyRateRubTier30000"
+    | "cnyProfitPerYuanRub"
+    | "cnyProfitPerYuanRubTier3000"
+    | "cnyProfitPerYuanRubTier10000"
+    | "cnyProfitPerYuanRubTier30000"
   >,
   string
 > = {
@@ -101,6 +115,20 @@ const CNY_TIER_FIELD_LABELS: Record<"cnyRateRubTier3000" | "cnyRateRubTier10000"
 const OWNER_FIELD_LABELS: Record<"cargoDensityMarginUsdPerKg" | "cargoVolumeMarginUsdPerCbm", string> = {
   cargoDensityMarginUsdPerKg: "Стартовая маржа для новой категории (плотность), $/кг",
   cargoVolumeMarginUsdPerCbm: "Стартовая маржа для новой категории (объём), $/м³",
+};
+
+// Owner-only profit accounting — ₽ of profit per ¥ actually converted at
+// each volume tier, separate from CNY_TIER_FIELD_LABELS above (what the
+// client is charged). See TariffSettings.cnyProfitPerYuanRub* in
+// prisma/schema.prisma.
+const CNY_PROFIT_TIER_FIELD_LABELS: Record<
+  "cnyProfitPerYuanRub" | "cnyProfitPerYuanRubTier3000" | "cnyProfitPerYuanRubTier10000" | "cnyProfitPerYuanRubTier30000",
+  string
+> = {
+  cnyProfitPerYuanRub: "от 1¥, ₽/¥",
+  cnyProfitPerYuanRubTier3000: "от 3000¥, ₽/¥",
+  cnyProfitPerYuanRubTier10000: "от 10 000¥, ₽/¥",
+  cnyProfitPerYuanRubTier30000: "от 30 000¥, ₽/¥",
 };
 
 function ManagerTariffsTab() {
@@ -158,7 +186,7 @@ function ManagerTariffsTab() {
           : Object.keys(FIELD_LABELS);
         const baseForm = Object.fromEntries(keys.map((key) => [key, String(data.settings[key])]));
         const tierForm = Object.fromEntries(
-          Object.keys(CNY_TIER_FIELD_LABELS).map((key) => [
+          [...Object.keys(CNY_TIER_FIELD_LABELS), ...Object.keys(CNY_PROFIT_TIER_FIELD_LABELS)].map((key) => [
             key,
             data.settings[key] !== null && data.settings[key] !== undefined ? String(data.settings[key]) : "",
           ]),
@@ -585,6 +613,35 @@ function ManagerTariffsTab() {
                   Себестоимость резервной ставки: ${(Number(form.volumeRateUsdPerCbm) - Number(form.cargoVolumeMarginUsdPerCbm)).toFixed(2)}/м³
                 </p>
               )}
+            </div>
+          )}
+
+          {isOwner && (
+            <div className="space-y-3 rounded-xl border border-dashed border-border bg-bg p-3 sm:col-span-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
+                <Lock className="h-3.5 w-3.5" /> Ваша прибыль с курса юаня — видно только руководителю
+              </div>
+              <p className="text-xs text-text-secondary">
+                Сколько ₽ прибыли приносит каждый реально переведённый ¥ на этой ступени — не то, что берётся с
+                клиента (это курс выше), а внутренний расчёт для «Отчёта о прибыли» и «Курсовой разницы» на
+                дашборде. Пустое поле = 0 на этой ступени.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-4">
+                {Object.entries(CNY_PROFIT_TIER_FIELD_LABELS).map(([key, label]) => (
+                  <div key={key} className="space-y-1.5">
+                    <Label htmlFor={`tariff-${key}`}>{label}</Label>
+                    <Input
+                      id={`tariff-${key}`}
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      placeholder="0"
+                      value={form[key] ?? ""}
+                      onChange={(e) => setForm((current) => ({ ...current, [key]: e.target.value }))}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

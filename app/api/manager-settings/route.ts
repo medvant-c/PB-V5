@@ -64,6 +64,14 @@ export async function PATCH(req: NextRequest) {
     data[field] = value;
   }
 
+  if (raw.yuraCargoRateUsdPerKg !== undefined) {
+    const value = toPositiveNumber(raw.yuraCargoRateUsdPerKg);
+    if (value === null) {
+      return Response.json({ error: "Ставка Юры за карго должна быть неотрицательным числом." }, { status: 400 });
+    }
+    data.yuraCargoRateUsdPerKg = value;
+  }
+
   if (raw.freeStandardQuoteLimit !== undefined) {
     const value = toPositiveNumber(raw.freeStandardQuoteLimit);
     if (value === null || !Number.isInteger(value)) {
