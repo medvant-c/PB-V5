@@ -37,6 +37,8 @@ export async function GET(req: NextRequest) {
         totalRub: Number(quote.totalRub),
         searchFeeWaived: quote.searchFeeWaived,
         photoBuffer: firstPhoto ? await storage.get(firstPhoto.storageKey) : null,
+        totalWeightKg: Number(quote.totalWeightKg),
+        totalVolumeM3: Number(quote.totalVolumeM3),
       };
     }),
   );

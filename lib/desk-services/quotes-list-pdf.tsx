@@ -50,6 +50,9 @@ const styles = StyleSheet.create({
   colPhoto: { width: 52 },
   colName: { flex: 1, paddingRight: 8 },
   colQty: { width: 50, textAlign: "right" },
+  colWeight: { width: 52, textAlign: "right" },
+  colVolume: { width: 54, textAlign: "right" },
+  colTariff: { width: 62, textAlign: "right" },
   // Wide enough for the full one-line header "ЦЕНА/ЕД. ПОД КЛЮЧ, ₽" at
   // headCell's 8.5pt bold uppercase — 84 clipped it to "…ПОД" with nothing
   // after (maxLines: 1 has no ellipsis fallback, so it just vanished).
@@ -60,6 +63,8 @@ const styles = StyleSheet.create({
   totalCellValue: { fontWeight: 700, maxLines: 1, textOverflow: "ellipsis" },
   freeTag: { fontSize: 7.5, fontWeight: 700, color: "#1f9d55", maxLines: 1, textOverflow: "ellipsis" },
   totalsRow: { flexDirection: "row", marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: "#23252b", justifyContent: "flex-end", alignItems: "center", gap: 12 },
+  totalsSubLabel: { fontSize: 9, color: "#63666f" },
+  totalsSubValue: { fontSize: 9, fontWeight: 700, marginRight: 12 },
   totalsLabel: { fontSize: 11, fontWeight: 700 },
   totalsValue: { fontSize: 16, fontWeight: 700, color: "#2454cc" },
   footer: { position: "absolute", bottom: 10, left: 28, right: 28, fontSize: 8, color: "#9a9c9f", textAlign: "center" },
@@ -87,6 +92,18 @@ interface QuoteListRow {
   totalRub: number;
   searchFeeWaived: boolean;
   photoBuffer: Buffer | null;
+  totalWeightKg: number;
+  totalVolumeM3: number;
+  // Both optional and only ever set together — the manager-side route
+  // populates them and passes showTariff (see QuotesListPdfProps below),
+  // the client-facing route leaves them out entirely. The $ rate is an
+  // internal costing figure (what Panda Bridge quotes/pays for cargo, not
+  // a number the client's own copy of this table needs), unlike
+  // weight/volume which the client already sees on their own single-quote
+  // PDF (see quote-pdf.tsx's "Доставка карго" line) and needs for their
+  // own shipping/customs planning.
+  cargoRateUsd?: number;
+  deliveryPricingMode?: "density" | "volume";
 }
 
 // "Под ключ" — the full all-in total (goods + delivery + fees + commission)
@@ -98,10 +115,14 @@ function perUnitTurnkeyRub(row: QuoteListRow): number {
 interface QuotesListPdfProps {
   client: { name: string; company: string | null };
   rows: QuoteListRow[];
+  // See QuoteListRow.cargoRateUsd above — manager route only.
+  showTariff?: boolean;
 }
 
-function QuotesListPdfDocument({ client, rows }: QuotesListPdfProps) {
+function QuotesListPdfDocument({ client, rows, showTariff }: QuotesListPdfProps) {
   const grandTotal = rows.reduce((sum, row) => sum + row.totalRub, 0);
+  const totalWeightKg = rows.reduce((sum, row) => sum + row.totalWeightKg, 0);
+  const totalVolumeM3 = rows.reduce((sum, row) => sum + row.totalVolumeM3, 0);
 
   return (
     <Document>
@@ -124,6 +145,9 @@ function QuotesListPdfDocument({ client, rows }: QuotesListPdfProps) {
             <Text style={[styles.headCell, styles.colPhoto]}>Фото</Text>
             <Text style={[styles.headCell, styles.colName]}>Наименование</Text>
             <Text style={[styles.headCell, styles.colQty]}>Кол-во</Text>
+            <Text style={[styles.headCell, styles.colWeight]}>Вес, кг</Text>
+            <Text style={[styles.headCell, styles.colVolume]}>Объём, м³</Text>
+            {showTariff && <Text style={[styles.headCell, styles.colTariff]}>Тариф, $</Text>}
             <Text style={[styles.headCell, styles.colPerUnit]}>Цена/ед. под ключ, ₽</Text>
             <Text style={[styles.headCell, styles.colTotal]}>Итого, ₽</Text>
           </View>
@@ -148,6 +172,15 @@ function QuotesListPdfDocument({ client, rows }: QuotesListPdfProps) {
               </View>
               <Text style={[styles.cell, styles.cellText, styles.colName]}>{row.productName}</Text>
               <Text style={[styles.cell, styles.cellText, styles.colQty]}>{row.quantity} шт</Text>
+              <Text style={[styles.cell, styles.cellText, styles.colWeight]}>{row.totalWeightKg.toFixed(1)}</Text>
+              <Text style={[styles.cell, styles.cellText, styles.colVolume]}>{row.totalVolumeM3.toFixed(3)}</Text>
+              {showTariff && (
+                <Text style={[styles.cell, styles.cellText, styles.colTariff]}>
+                  {row.cargoRateUsd !== undefined
+                    ? `$${row.cargoRateUsd.toFixed(2)}/${row.deliveryPricingMode === "volume" ? "м³" : "кг"}`
+                    : "—"}
+                </Text>
+              )}
               <Text style={[styles.cell, styles.cellText, styles.colPerUnit]}>{fmt(perUnitTurnkeyRub(row))}</Text>
               <View style={[styles.cell, styles.colTotal]}>
                 <Text style={styles.totalCellValue}>{fmt(row.totalRub)} ₽</Text>
@@ -158,6 +191,10 @@ function QuotesListPdfDocument({ client, rows }: QuotesListPdfProps) {
         </View>
 
         <View style={styles.totalsRow}>
+          <Text style={styles.totalsSubLabel}>Общий вес партии:</Text>
+          <Text style={styles.totalsSubValue}>{totalWeightKg.toFixed(1)} кг</Text>
+          <Text style={styles.totalsSubLabel}>Общий объём:</Text>
+          <Text style={styles.totalsSubValue}>{totalVolumeM3.toFixed(3)} м³</Text>
           <Text style={styles.totalsLabel}>ИТОГО ПО ВСЕМ ПРОСЧЁТАМ</Text>
           <Text style={styles.totalsValue}>{fmt(grandTotal)} ₽</Text>
         </View>

@@ -48,6 +48,7 @@ function DailyPlanPanel() {
   const [drafts, setDrafts] = useState<DraftOption[]>([]);
   const [addMode, setAddMode] = useState<AddMode>("client");
   const [clientPick, setClientPick] = useState("");
+  const [clientTask, setClientTask] = useState("");
   const [draftPick, setDraftPick] = useState("");
   const [noteText, setNoteText] = useState("");
   const [adding, setAdding] = useState(false);
@@ -112,7 +113,13 @@ function DailyPlanPanel() {
         setError("Выберите клиента.");
         return;
       }
-      payload = { note: client.company ? `${client.name} (${client.company})` : client.name, clientId: client.id };
+      const clientLabel = client.company ? `${client.name} (${client.company})` : client.name;
+      // "Клиент — задача" when a task was typed, so the to-do list itself
+      // says what to actually do for them, not just who — same reasoning
+      // as the draft/note modes always carrying their own description.
+      // Falls back to just the client name if left blank (fast path for
+      // "just remind me to deal with them today").
+      payload = { note: clientTask.trim() ? `${clientLabel} — ${clientTask.trim()}` : clientLabel, clientId: client.id };
     } else if (addMode === "draft") {
       const draft = drafts.find((d) => d.id === draftPick);
       if (!draft) {
@@ -142,6 +149,7 @@ function DailyPlanPanel() {
         return;
       }
       setClientPick("");
+      setClientTask("");
       setDraftPick("");
       setNoteText("");
       await load();
@@ -274,12 +282,12 @@ function DailyPlanPanel() {
                 ))}
               </div>
 
-              <div className="mt-2 flex gap-1.5">
-                {addMode === "client" && (
+              {addMode === "client" && (
+                <div className="mt-2 space-y-1.5">
                   <select
                     value={clientPick}
                     onChange={(e) => setClientPick(e.target.value)}
-                    className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-surface px-2 text-xs text-text"
+                    className="h-8 w-full rounded-lg border border-border bg-surface px-2 text-xs text-text"
                   >
                     <option value="">Выберите клиента…</option>
                     {clients.map((c) => (
@@ -289,40 +297,62 @@ function DailyPlanPanel() {
                       </option>
                     ))}
                   </select>
-                )}
-                {addMode === "draft" && (
-                  <select
-                    value={draftPick}
-                    onChange={(e) => setDraftPick(e.target.value)}
-                    className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-surface px-2 text-xs text-text"
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={clientTask}
+                      onChange={(e) => setClientTask(e.target.value)}
+                      placeholder="Что сделать для этого клиента (необязательно)"
+                      className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-surface px-2.5 text-xs text-text"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAdd}
+                      disabled={adding}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-secondary text-white disabled:opacity-50"
+                      aria-label="Добавить"
+                    >
+                      {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {addMode !== "client" && (
+                <div className="mt-2 flex gap-1.5">
+                  {addMode === "draft" && (
+                    <select
+                      value={draftPick}
+                      onChange={(e) => setDraftPick(e.target.value)}
+                      className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-surface px-2 text-xs text-text"
+                    >
+                      <option value="">Выберите черновик…</option>
+                      {drafts.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          №{d.displayId} · {d.client.name} · {d.note.slice(0, 40)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {addMode === "note" && (
+                    <input
+                      type="text"
+                      value={noteText}
+                      onChange={(e) => setNoteText(e.target.value)}
+                      placeholder="Например: клиент ещё не в базе, напишет вечером…"
+                      className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-surface px-2.5 text-xs text-text"
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleAdd}
+                    disabled={adding}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-secondary text-white disabled:opacity-50"
+                    aria-label="Добавить"
                   >
-                    <option value="">Выберите черновик…</option>
-                    {drafts.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        №{d.displayId} · {d.client.name} · {d.note.slice(0, 40)}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {addMode === "note" && (
-                  <input
-                    type="text"
-                    value={noteText}
-                    onChange={(e) => setNoteText(e.target.value)}
-                    placeholder="Например: клиент ещё не в базе, напишет вечером…"
-                    className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-surface px-2.5 text-xs text-text"
-                  />
-                )}
-                <button
-                  type="button"
-                  onClick={handleAdd}
-                  disabled={adding}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-secondary text-white disabled:opacity-50"
-                  aria-label="Добавить"
-                >
-                  {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
-                </button>
-              </div>
+                    {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  </button>
+                </div>
+              )}
               {error && <p className="mt-1.5 text-[11px] text-error">{error}</p>}
             </div>
           </div>

@@ -52,6 +52,10 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
         totalRub: Number(quote.totalRub),
         searchFeeWaived: quote.searchFeeWaived,
         photoBuffer: firstPhoto ? await storage.get(firstPhoto.storageKey) : null,
+        totalWeightKg: Number(quote.totalWeightKg),
+        totalVolumeM3: Number(quote.totalVolumeM3),
+        cargoRateUsd: Number(quote.cargoRateUsd),
+        deliveryPricingMode: quote.deliveryPricingMode,
       };
     }),
   );
@@ -59,6 +63,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   const buffer = await renderQuotesListPdf({
     client: { name: client.name, company: client.company },
     rows,
+    showTariff: true,
   });
 
   const fileName = `Все просчёты — ${client.name}.pdf`;
