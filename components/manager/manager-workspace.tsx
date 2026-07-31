@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, Calculator, CheckSquare, Database, Home, LogOut, Package, Settings, Tag, UserCog, Users, UsersRound, Wallet } from "lucide-react";
+import { Briefcase, Calculator, CheckSquare, Database, FileBarChart, Home, LogOut, Package, Settings, Tag, UserCog, Users, UsersRound, Wallet } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ManagerClientsTab } from "@/components/manager/tabs/clients-tab";
@@ -14,6 +14,7 @@ import { ManagerConfirmationsTab } from "@/components/manager/tabs/confirmations
 import { ManagerCashTab } from "@/components/manager/tabs/cash-tab";
 import { ManagerFulfillmentTab } from "@/components/manager/tabs/fulfillment-tab";
 import { ManagerSettingsTab } from "@/components/manager/tabs/settings-tab";
+import { ManagerProfitReportTab } from "@/components/manager/tabs/profit-report-tab";
 import { ManagerDashboard } from "@/components/manager/manager-dashboard";
 import { DailyPlanPanel } from "@/components/manager/daily-plan-panel";
 import { DailyPlanReviewModal } from "@/components/manager/daily-plan-review-modal";
@@ -49,6 +50,7 @@ const ALL_SECTIONS = [
   { id: "confirmations", label: "Подтверждения", icon: CheckSquare, Component: ManagerConfirmationsTab, ownerOnly: false, seniorOrOwnerOnly: true },
   { id: "price-list", label: "Прайс-лист", icon: Tag, Component: ManagerPriceListTab, ownerOnly: true, seniorOrOwnerOnly: false },
   { id: "cash", label: "Отчёты по дням", icon: Wallet, Component: ManagerCashTab, ownerOnly: true, seniorOrOwnerOnly: false },
+  { id: "profit-report", label: "Отчёт о прибыли", icon: FileBarChart, Component: ManagerProfitReportTab, ownerOnly: true, seniorOrOwnerOnly: false },
   { id: "database", label: "База данных", icon: Database, Component: ManagerDatabaseTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "staff", label: "Сотрудники", icon: UsersRound, Component: ManagerStaffTab, ownerOnly: true, seniorOrOwnerOnly: false },
   { id: "settings", label: "Настройки", icon: Settings, Component: ManagerSettingsTab, ownerOnly: true, seniorOrOwnerOnly: false },
