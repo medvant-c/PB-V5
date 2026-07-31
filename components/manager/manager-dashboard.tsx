@@ -665,31 +665,117 @@ interface DailyPlanSummaryRow {
   items: DailyPlanSummaryItem[];
 }
 
-// Owner/senior only — read-only roll-up of every visible manager's own
-// "План на сегодня" (see components/manager/daily-plan-panel.tsx), so a
+interface TeamManagerOption {
+  id: string;
+  name: string;
+}
+
+// Owner/senior only — roll-up of every visible manager's own "План на
+// сегодня" (see components/manager/daily-plan-panel.tsx), so a
 // руководитель can see who's on track without impersonating each manager
-// to check their personal panel. Same self-fetch-and-render-null-if-
-// nothing pattern as SearchDraftsWidget above; a 403 (plain manager
-// viewing their own dashboard) is indistinguishable here from "nothing to
-// show" — the panel just doesn't render, no separate role check needed.
-// See PB-V5 chat 2026-07-31.
+// to check their personal panel, PLUS a way to put a task directly onto
+// someone's list (see DailyPlanItem.assignedByManagerId in
+// prisma/schema.prisma) — the target manager still owns checking it off
+// themselves, same as anything they add for themselves. Gated on
+// teamManagers (not rows) so the widget — and the assign form — still
+// shows even on a day nobody's planned anything yet; a 403 (plain manager
+// viewing their own dashboard) leaves teamManagers null, same as
+// SearchDraftsWidget's render-nothing fallback above.
 function TeamDailyPlanWidget() {
   const [rows, setRows] = useState<DailyPlanSummaryRow[] | null>(null);
+  const [teamManagers, setTeamManagers] = useState<TeamManagerOption[] | null>(null);
   const [openManagerId, setOpenManagerId] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/manager-daily-plan-summary")
+  const [assignManagerId, setAssignManagerId] = useState("");
+  const [assignNote, setAssignNote] = useState("");
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+
+  function load() {
+    return fetch("/api/manager-daily-plan-summary")
       .then((res) => (res.ok ? res.json() : null))
-      .then((d) => setRows(d?.summary ?? []));
+      .then((d) => {
+        setRows(d?.summary ?? []);
+        setTeamManagers(d?.teamManagers ?? []);
+      });
+  }
+
+  useEffect(() => {
+    load();
   }, []);
 
-  if (!rows || rows.length === 0) return null;
+  async function handleAssign() {
+    if (!assignManagerId) {
+      setAssignError("Выберите менеджера.");
+      return;
+    }
+    if (!assignNote.trim()) {
+      setAssignError("Напишите задачу.");
+      return;
+    }
+    setAssigning(true);
+    setAssignError(null);
+    try {
+      const res = await fetch("/api/manager-daily-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ managerId: assignManagerId, note: assignNote.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setAssignError(data.error ?? "Не удалось поставить задачу.");
+        return;
+      }
+      setAssignNote("");
+      setOpenManagerId(assignManagerId);
+      await load();
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  if (!teamManagers || teamManagers.length === 0) return null;
 
   return (
     <div className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
       <h3 className="flex items-center gap-1.5 text-sm font-bold text-text">
         <ListChecks className="h-4 w-4 text-text-secondary" /> Планы на сегодня по менеджерам
       </h3>
+
+      <div className="mt-3 flex flex-wrap gap-1.5 rounded-xl border border-dashed border-border p-2.5">
+        <select
+          value={assignManagerId}
+          onChange={(e) => setAssignManagerId(e.target.value)}
+          className="h-8 rounded-lg border border-border bg-bg px-2 text-xs text-text"
+        >
+          <option value="">Поставить задачу…</option>
+          {teamManagers.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+        <input
+          type="text"
+          value={assignNote}
+          onChange={(e) => setAssignNote(e.target.value)}
+          placeholder="Что нужно сделать"
+          className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-bg px-2.5 text-xs text-text"
+        />
+        <button
+          type="button"
+          onClick={handleAssign}
+          disabled={assigning}
+          className="h-8 shrink-0 rounded-lg bg-gradient-to-br from-primary to-secondary px-3 text-xs font-bold text-white disabled:opacity-50"
+        >
+          {assigning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Поставить"}
+        </button>
+        {assignError && <p className="w-full text-[11px] text-error">{assignError}</p>}
+      </div>
+
+      {!rows || rows.length === 0 ? (
+        <p className="mt-3 text-xs text-text-secondary">Пока никто ничего не запланировал на сегодня.</p>
+      ) : (
       <ul className="mt-3 space-y-1.5">
         {rows.map((row) => {
           const isOpen = openManagerId === row.manager.id;
@@ -734,6 +820,7 @@ function TeamDailyPlanWidget() {
           );
         })}
       </ul>
+      )}
     </div>
   );
 }

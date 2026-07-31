@@ -67,5 +67,8 @@ export async function GET(req: NextRequest) {
     })
     .filter((row) => row.total > 0);
 
-  return Response.json({ summary });
+  // Full visible list (not just managers with items today) — the "assign
+  // a task" picker on this same dashboard block needs to target someone
+  // with an empty list too, not just whoever already has something on it.
+  return Response.json({ summary, teamManagers: managers });
 }

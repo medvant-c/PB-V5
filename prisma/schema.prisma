@@ -1101,6 +1101,12 @@ model DailyPlanItem {
   // schema, rather than a separate boolean.
   doneAt    DateTime?
   createdAt DateTime @default(now())
+  // Set only when an owner/senior added this to someone ELSE's plan (see
+  // POST /api/manager-daily-plan) — null means the manager whose list this
+  // is on added it themselves. Plain string, no Prisma relation — same
+  // convention as buyoutConfirmedByManagerId elsewhere in this schema
+  // (resolved with one extra manager lookup where needed, not an include).
+  assignedByManagerId String?
 
   @@index([managerId, planDate])
 }

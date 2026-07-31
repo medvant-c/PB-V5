@@ -10,6 +10,7 @@ interface PlanItem {
   doneAt: string | null;
   client: { id: string; name: string; company: string | null } | null;
   quoteDraftRequest: { id: string; displayId: number } | null;
+  assignedByManagerName: string | null;
 }
 
 interface ClientOption {
@@ -238,6 +239,11 @@ function DailyPlanPanel() {
                       >
                         {item.quoteDraftRequest ? "черновик" : item.client ? "клиент" : "заметка"}
                       </span>
+                      {item.assignedByManagerName && (
+                        <span className="rounded-full bg-secondary/15 px-1.5 py-0.5 text-[10px] font-bold text-secondary">
+                          🎯 от {item.assignedByManagerName}
+                        </span>
+                      )}
                       <span className={cn("text-xs font-semibold text-text", item.doneAt && "text-text-secondary line-through")}>
                         {item.note}
                       </span>

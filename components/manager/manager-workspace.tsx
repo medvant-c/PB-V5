@@ -16,6 +16,8 @@ import { ManagerFulfillmentTab } from "@/components/manager/tabs/fulfillment-tab
 import { ManagerSettingsTab } from "@/components/manager/tabs/settings-tab";
 import { ManagerDashboard } from "@/components/manager/manager-dashboard";
 import { DailyPlanPanel } from "@/components/manager/daily-plan-panel";
+import { DailyPlanReviewModal } from "@/components/manager/daily-plan-review-modal";
+import { AutoRefresh } from "@/components/manager/auto-refresh";
 
 interface ManagerWorkspaceProps {
   name: string;
@@ -220,6 +222,8 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
         stays visible and in place while switching tabs instead of being
         remounted/scrolled away with whichever tab is active. */}
     <DailyPlanPanel />
+    <DailyPlanReviewModal />
+    <AutoRefresh />
     </div>
   );
 }
