@@ -11,6 +11,7 @@ import {
 } from "@/lib/quote-engine";
 import {
   buyoutCommissionTariffsToEngineInput,
+  buyoutCommissionTiersForQuote,
   customProductionFeeForTier,
   densityTiersToEngineInput,
   findDensityTierCost,
@@ -87,7 +88,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     // today's rate, not whatever was frozen at creation.
     volumeTariffs: volumeTariffsToEngineInput(volumeTariffs),
     searchServiceFeeRub,
-    buyoutCommissionTiers: buyoutCommissionTariffsToEngineInput(buyoutCommissionTiers),
+    // Reused as-is if set, same as cargoRateUsdOverride below — recalculate
+    // re-prices tariff-driven numbers against today's rates, it doesn't
+    // touch the manual override itself or its confirmation state.
+    buyoutCommissionTiers: buyoutCommissionTiersForQuote(
+      existing.buyoutCommissionPercentOverride !== null ? Number(existing.buyoutCommissionPercentOverride) : undefined,
+      buyoutCommissionTariffsToEngineInput(buyoutCommissionTiers),
+    ),
     usdRateRub: Number(tariffSettings.usdRateRub),
     lowDensityVolumeThresholdKgM3: Number(systemSettings.lowDensityVolumeThresholdKgM3),
     attachedServicesTotalRub,

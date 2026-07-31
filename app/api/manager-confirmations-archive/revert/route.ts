@@ -69,6 +69,21 @@ export async function PATCH(req: NextRequest) {
     return Response.json({ ok: true });
   }
 
+  if (type === "buyout_commission") {
+    const quote = await prisma.quote.findUnique({ where: { id }, select: { buyoutCommissionOverrideConfirmed: true } });
+    if (!quote) return Response.json({ error: "Просчёт не найден." }, { status: 404 });
+    if (!quote.buyoutCommissionOverrideConfirmed) return Response.json({ error: "Комиссия за выкуп не подтверждена." }, { status: 400 });
+    await prisma.quote.update({
+      where: { id },
+      data: {
+        buyoutCommissionOverrideConfirmed: false,
+        buyoutCommissionOverrideConfirmedByManagerId: null,
+        buyoutCommissionOverrideConfirmedAt: null,
+      },
+    });
+    return Response.json({ ok: true });
+  }
+
   if (type === "self_sourced_client") {
     const client = await prisma.client.findUnique({ where: { id }, select: { selfSourcedConfirmed: true } });
     if (!client) return Response.json({ error: "Клиент не найден." }, { status: 404 });

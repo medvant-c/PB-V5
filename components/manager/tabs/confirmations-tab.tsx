@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Archive, CheckCircle2, ChevronDown, Coins, Loader2, Paperclip, Ruler, UserCheck, Wallet } from "lucide-react";
+import { Archive, CheckCircle2, ChevronDown, Coins, Loader2, Paperclip, Percent, Ruler, UserCheck, Wallet } from "lucide-react";
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -55,6 +55,17 @@ interface PendingCnyRate {
   client: { name: string; company: string | null };
 }
 
+interface PendingBuyoutCommission {
+  id: string;
+  displayId: number;
+  productName: string;
+  createdAt: string;
+  buyoutCommissionPercent: string;
+  buyoutCommissionPercentOverride: string;
+  manager: { id: string; name: string };
+  client: { name: string; company: string | null };
+}
+
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString("ru-RU");
 }
@@ -99,7 +110,7 @@ interface ClientOption {
   company: string | null;
 }
 
-type ArchiveEntryType = "buyout" | "cargo_rate" | "cny_rate" | "self_sourced_client";
+type ArchiveEntryType = "buyout" | "cargo_rate" | "cny_rate" | "buyout_commission" | "self_sourced_client";
 
 interface ArchiveEntry {
   type: ArchiveEntryType;
@@ -118,6 +129,7 @@ const ARCHIVE_TYPE_LABEL: Record<ArchiveEntryType, string> = {
   buyout: "Выкуп",
   cargo_rate: "Ставка карго",
   cny_rate: "Курс юаня",
+  buyout_commission: "Комиссия за выкуп",
   self_sourced_client: "Личный клиент",
 };
 
@@ -335,6 +347,7 @@ function ManagerConfirmationsTab() {
   const [pendingClients, setPendingClients] = useState<PendingClient[]>([]);
   const [pendingCargoRates, setPendingCargoRates] = useState<PendingCargoRate[]>([]);
   const [pendingCnyRates, setPendingCnyRates] = useState<PendingCnyRate[]>([]);
+  const [pendingBuyoutCommissions, setPendingBuyoutCommissions] = useState<PendingBuyoutCommission[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [drafts, setDrafts] = useState<Record<string, { cny: string; rate: string; rub: string; rateRub: string }>>({});
@@ -349,6 +362,10 @@ function ManagerConfirmationsTab() {
   const [busyCnyRateId, setBusyCnyRateId] = useState<string | null>(null);
   const [cnyRateError, setCnyRateError] = useState<string | null>(null);
 
+  const [buyoutCommissionFiles, setBuyoutCommissionFiles] = useState<Record<string, File | null>>({});
+  const [busyBuyoutCommissionId, setBusyBuyoutCommissionId] = useState<string | null>(null);
+  const [buyoutCommissionError, setBuyoutCommissionError] = useState<string | null>(null);
+
   function load() {
     setLoading(true);
     return fetch("/api/manager-confirmations")
@@ -358,6 +375,7 @@ function ManagerConfirmationsTab() {
         setPendingClients(data.pendingClients ?? []);
         setPendingCargoRates(data.pendingCargoRates ?? []);
         setPendingCnyRates(data.pendingCnyRates ?? []);
+        setPendingBuyoutCommissions(data.pendingBuyoutCommissions ?? []);
       })
       .finally(() => setLoading(false));
   }
@@ -413,6 +431,30 @@ function ManagerConfirmationsTab() {
       }
     } finally {
       setBusyCnyRateId(null);
+    }
+  }
+
+  async function handleConfirmBuyoutCommission(quoteId: string) {
+    const file = buyoutCommissionFiles[quoteId];
+    setBusyBuyoutCommissionId(quoteId);
+    setBuyoutCommissionError(null);
+    try {
+      const formData = new FormData();
+      if (file) formData.append("file", file);
+      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-buyout-commission`, { method: "PATCH", body: formData });
+      if (res.ok) {
+        setBuyoutCommissionFiles((current) => {
+          const { [quoteId]: _omit, ...rest } = current;
+          void _omit;
+          return rest;
+        });
+        await load();
+      } else {
+        const data = await res.json();
+        setBuyoutCommissionError(data.error ?? "Не удалось подтвердить комиссию.");
+      }
+    } finally {
+      setBusyBuyoutCommissionId(null);
     }
   }
 
@@ -502,7 +544,11 @@ function ManagerConfirmationsTab() {
   if (loading) return <p className="text-sm text-text-secondary">Загрузка…</p>;
 
   const isEmpty =
-    pendingBuyouts.length === 0 && pendingClients.length === 0 && pendingCargoRates.length === 0 && pendingCnyRates.length === 0;
+    pendingBuyouts.length === 0 &&
+    pendingClients.length === 0 &&
+    pendingCargoRates.length === 0 &&
+    pendingCnyRates.length === 0 &&
+    pendingBuyoutCommissions.length === 0;
 
   return (
     <div className="space-y-6">
@@ -753,6 +799,59 @@ function ManagerConfirmationsTab() {
                       className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
                     >
                       {busyCnyRateId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      Подтвердить
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {pendingBuyoutCommissions.length > 0 && (
+            <div>
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
+                <Percent className="h-3.5 w-3.5" /> Ручная комиссия за выкуп ({pendingBuyoutCommissions.length})
+              </h3>
+              <p className="mt-1 text-xs text-text-secondary">
+                Менеджер вписал комиссию за выкуп вручную, не из тарифов. Скриншот переписки, подтверждающий, что это
+                реально согласованная комиссия, — необязательно, но поможет при проверке.
+              </p>
+              {buyoutCommissionError && <p className="mt-1 text-xs text-error">{buyoutCommissionError}</p>}
+              <ul className="mt-2 space-y-2">
+                {pendingBuyoutCommissions.map((quote) => (
+                  <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <span className="font-medium text-text">
+                          №{quote.displayId} · {quote.productName}
+                        </span>
+                        <span className="ml-2 text-xs text-text-secondary">
+                          {quote.client.name}
+                          {quote.client.company ? ` · ${quote.client.company}` : ""} · менеджер {quote.manager.name}
+                        </span>
+                      </div>
+                      <span className="text-xs font-medium text-warning">
+                        комиссия: {Number(quote.buyoutCommissionPercentOverride).toFixed(2)}%
+                      </span>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки (необязательно):</span>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        onChange={(e) => setBuyoutCommissionFiles((c) => ({ ...c, [quote.id]: e.target.files?.[0] ?? null }))}
+                        className="text-xs text-text-secondary"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmBuyoutCommission(quote.id)}
+                      disabled={busyBuyoutCommissionId === quote.id}
+                      className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
+                    >
+                      {busyBuyoutCommissionId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                       Подтвердить
                     </button>
                   </li>

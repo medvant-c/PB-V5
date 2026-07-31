@@ -46,6 +46,10 @@ enum DeskFileTab {
   // agreed, not made up. relatedId is the Quote id. See PB-V5 chat
   // 2026-07-30.
   quote_cny_rate_proof
+  // Same idea again, for a manual buyout-commission % override
+  // (Quote.buyoutCommissionPercentOverride). relatedId is the Quote id.
+  // See PB-V5 chat 2026-07-31.
+  quote_buyout_commission_proof
 }
 
 model DeskFile {
@@ -643,6 +647,20 @@ model Quote {
   cnyRateOverrideConfirmed          Boolean   @default(false)
   cnyRateOverrideConfirmedByManagerId String?
   cnyRateOverrideConfirmedAt        DateTime?
+
+  // Manual commission-% override for the buyout — same idea as
+  // cargoRateUsdOverride/cnyRateRubOverride above: null = normal
+  // BuyoutCommissionTariff bracket lookup by totalPriceRub, same as before
+  // this field existed. When set, buyoutCommissionPercent/buyoutCommissionRub
+  // above ARE this value instead of a tariff-table lookup. See PB-V5 chat
+  // 2026-07-31.
+  buyoutCommissionPercentOverride Decimal?
+  // Same owner/senior sign-off gate as cnyRateOverrideConfirmed above —
+  // proof-only, no separate cost field (same reasoning as cny: the
+  // commission IS what the client is charged, nothing else to enter).
+  buyoutCommissionOverrideConfirmed            Boolean   @default(false)
+  buyoutCommissionOverrideConfirmedByManagerId String?
+  buyoutCommissionOverrideConfirmedAt          DateTime?
 
   // One line each, not a thread — the client and manager each have their
   // own comment slot under a quote, both visible to both sides, but each

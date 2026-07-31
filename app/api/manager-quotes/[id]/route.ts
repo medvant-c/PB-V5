@@ -6,6 +6,7 @@ import { storage } from "@/lib/storage";
 import { computeQuote, computeCargoCost } from "@/lib/quote-engine";
 import {
   buildEngineInputs,
+  buyoutCommissionTiersForQuote,
   customProductionFeeForTier,
   densityTiersToEngineInput,
   findDensityTierCost,
@@ -133,7 +134,16 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     // same tier-lookup code path in computeQuote while still resolving to
     // this quote's own already-snapshotted %, regardless of how
     // totalPriceRub itself changes from the edit.
-    buyoutCommissionTiers: [{ minAmountRub: 0, maxAmountRub: null, commissionPercent: Number(existing.buyoutCommissionPercent) }],
+    // A manual override (new, changed, or unchanged — the dialog always
+    // resends it while set) is usable immediately, same as
+    // cargoRateUsdOverride/cnyRateRubOverride above. No override: falls back
+    // to this quote's own already-snapshotted % via the same single-bracket
+    // trick, never a live tariff lookup — an edit never moves money the
+    // client was already quoted.
+    buyoutCommissionTiers: buyoutCommissionTiersForQuote(
+      fields.buyoutCommissionPercentOverride,
+      [{ minAmountRub: 0, maxAmountRub: null, commissionPercent: Number(existing.buyoutCommissionPercent) }],
+    ),
     searchServiceFeeRub,
     densityTiers: densityTiersToEngineInput(densityTiers),
     volumeTariffs: volumeTariffsToEngineInput(volumeTariffs),
@@ -172,6 +182,17 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const cnyRateOverrideConfirmed = cnyRateOverrideChanged ? false : existing.cnyRateOverrideConfirmed;
   const cnyRateOverrideConfirmedByManagerId = cnyRateOverrideChanged ? null : existing.cnyRateOverrideConfirmedByManagerId;
   const cnyRateOverrideConfirmedAt = cnyRateOverrideChanged ? null : existing.cnyRateOverrideConfirmedAt;
+
+  // Same reset-on-change rule again, for the manual buyout-commission % —
+  // see Quote.buyoutCommissionOverrideConfirmed in prisma/schema.prisma.
+  const existingBuyoutCommissionPercentOverride =
+    existing.buyoutCommissionPercentOverride !== null ? Number(existing.buyoutCommissionPercentOverride) : undefined;
+  const buyoutCommissionOverrideChanged = fields.buyoutCommissionPercentOverride !== existingBuyoutCommissionPercentOverride;
+  const buyoutCommissionOverrideConfirmed = buyoutCommissionOverrideChanged ? false : existing.buyoutCommissionOverrideConfirmed;
+  const buyoutCommissionOverrideConfirmedByManagerId = buyoutCommissionOverrideChanged
+    ? null
+    : existing.buyoutCommissionOverrideConfirmedByManagerId;
+  const buyoutCommissionOverrideConfirmedAt = buyoutCommissionOverrideChanged ? null : existing.buyoutCommissionOverrideConfirmedAt;
 
   // Same per-category cost lookup as the POST route — see its comment. A
   // confirmed manual rate's real supplier cost (confirmedCargoCostUsd)
@@ -249,7 +270,16 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       cargoDeliveryRub: computed.cargoDeliveryRub,
       cargoCostUsd: cargoCost.cargoCostUsd,
       cargoCostRub: cargoCost.cargoCostRub,
+      // Not persisted before this field existed (harmless then — frozen
+      // buyout% never actually changed on a plain edit) but a manual
+      // override now genuinely can change it, so this has to move with
+      // buyoutCommissionRub below rather than staying implicitly unchanged.
+      buyoutCommissionPercent: computed.buyoutCommissionPercent,
       buyoutCommissionRub: computed.buyoutCommissionRub,
+      buyoutCommissionPercentOverride: fields.buyoutCommissionPercentOverride ?? null,
+      buyoutCommissionOverrideConfirmed,
+      buyoutCommissionOverrideConfirmedByManagerId,
+      buyoutCommissionOverrideConfirmedAt,
       totalRub: computed.totalRub,
       cnyRateUsed: engineInputs.cnyRateRub,
       cnyRateRubOverride: fields.cnyRateRubOverride ?? null,

@@ -12,7 +12,7 @@ import { prisma } from "@/lib/prisma";
 // изобретать"). Each entry carries a `type` discriminator and a plain-text
 // `summary` instead of forcing every type's very different fields into
 // shared table columns.
-type ArchiveEntryType = "buyout" | "cargo_rate" | "cny_rate" | "self_sourced_client";
+type ArchiveEntryType = "buyout" | "cargo_rate" | "cny_rate" | "buyout_commission" | "self_sourced_client";
 
 interface ArchiveEntry {
   type: ArchiveEntryType;
@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
 
   const wantType = (t: ArchiveEntryType) => !typeParam || typeParam === "all" || typeParam === t;
 
-  const [buyouts, cargoRates, cnyRates, selfSourcedClients] = await Promise.all([
+  const [buyouts, cargoRates, cnyRates, buyoutCommissions, selfSourcedClients] = await Promise.all([
     wantType("buyout")
       ? prisma.quote.findMany({
           where: {
@@ -135,6 +135,29 @@ export async function GET(req: NextRequest) {
           },
         })
       : Promise.resolve([]),
+    wantType("buyout_commission")
+      ? prisma.quote.findMany({
+          where: {
+            buyoutCommissionPercentOverride: { not: null },
+            buyoutCommissionOverrideConfirmed: true,
+            ...managerScopeFilter,
+            ...(managerIdParam ? { managerId: managerIdParam } : {}),
+            ...(clientIdParam ? { clientId: clientIdParam } : {}),
+            ...dateFilter("buyoutCommissionOverrideConfirmedAt"),
+          },
+          orderBy: { buyoutCommissionOverrideConfirmedAt: "desc" },
+          select: {
+            id: true,
+            displayId: true,
+            productName: true,
+            buyoutCommissionPercentOverride: true,
+            buyoutCommissionOverrideConfirmedAt: true,
+            buyoutCommissionOverrideConfirmedByManagerId: true,
+            manager: { select: { id: true, name: true } },
+            client: { select: { id: true, name: true, company: true } },
+          },
+        })
+      : Promise.resolve([]),
     wantType("self_sourced_client")
       ? prisma.client.findMany({
           where: {
@@ -167,6 +190,7 @@ export async function GET(req: NextRequest) {
         ...buyouts.map((b) => b.buyoutConfirmedByManagerId),
         ...cargoRates.map((q) => q.cargoRateOverrideConfirmedByManagerId),
         ...cnyRates.map((q) => q.cnyRateOverrideConfirmedByManagerId),
+        ...buyoutCommissions.map((q) => q.buyoutCommissionOverrideConfirmedByManagerId),
         ...selfSourcedClients.map((c) => c.selfSourcedConfirmedByManagerId),
       ].filter((id): id is string => Boolean(id)),
     ),
@@ -182,8 +206,8 @@ export async function GET(req: NextRequest) {
   // it was re-confirmed more than once.
   const proofFiles = await prisma.deskFile.findMany({
     where: {
-      tab: { in: ["quote_cargo_rate_proof", "quote_cny_rate_proof"] },
-      relatedId: { in: [...cargoRates.map((q) => q.id), ...cnyRates.map((q) => q.id)] },
+      tab: { in: ["quote_cargo_rate_proof", "quote_cny_rate_proof", "quote_buyout_commission_proof"] },
+      relatedId: { in: [...cargoRates.map((q) => q.id), ...cnyRates.map((q) => q.id), ...buyoutCommissions.map((q) => q.id)] },
     },
     orderBy: { uploadedAt: "desc" },
     select: { id: true, tab: true, relatedId: true },
@@ -233,6 +257,20 @@ export async function GET(req: NextRequest) {
       manager: q.manager,
       client: q.client,
       proofFileId: proofFileIdByKey.get(`quote_cny_rate_proof:${q.id}`) ?? null,
+    })),
+    ...buyoutCommissions.map((q): ArchiveEntry => ({
+      type: "buyout_commission",
+      id: q.id,
+      displayId: q.displayId,
+      label: q.productName,
+      summary: `Комиссия: ${Number(q.buyoutCommissionPercentOverride).toFixed(2)}%`,
+      confirmedAt: q.buyoutCommissionOverrideConfirmedAt!.toISOString(),
+      confirmedByManagerName: q.buyoutCommissionOverrideConfirmedByManagerId
+        ? (nameById.get(q.buyoutCommissionOverrideConfirmedByManagerId) ?? null)
+        : null,
+      manager: q.manager,
+      client: q.client,
+      proofFileId: proofFileIdByKey.get(`quote_buyout_commission_proof:${q.id}`) ?? null,
     })),
     ...selfSourcedClients.map((c): ArchiveEntry => ({
       type: "self_sourced_client",

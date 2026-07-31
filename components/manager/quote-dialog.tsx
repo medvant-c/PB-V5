@@ -131,6 +131,8 @@ interface QuoteDetail {
   cnyRateOverrideConfirmed: boolean;
   usdRateUsed: string;
   buyoutCommissionPercent: string;
+  buyoutCommissionPercentOverride: string | null;
+  buyoutCommissionOverrideConfirmed: boolean;
   searchFeeWaived: boolean;
   isCustomProduction: boolean;
 }
@@ -188,6 +190,7 @@ const BLANK_FORM = {
   cargoDiscountUsd: "",
   cargoRateUsdOverride: "",
   cnyRateRubOverride: "",
+  buyoutCommissionPercentOverride: "",
 };
 
 function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: QuoteDialogProps) {
@@ -253,6 +256,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   const [cargoRateOverrideConfirmed, setCargoRateOverrideConfirmed] = useState(false);
   const [cnyRateRubOverride, setCnyRateRubOverride] = useState(BLANK_FORM.cnyRateRubOverride);
   const [cnyRateOverrideConfirmed, setCnyRateOverrideConfirmed] = useState(false);
+  const [buyoutCommissionPercentOverride, setBuyoutCommissionPercentOverride] = useState(BLANK_FORM.buyoutCommissionPercentOverride);
+  const [buyoutCommissionOverrideConfirmed, setBuyoutCommissionOverrideConfirmed] = useState(false);
 
   const [catalog, setCatalog] = useState<ServiceCatalogItemRecord[]>([]);
   const [attachedServices, setAttachedServices] = useState<AttachedServiceState[]>([]);
@@ -327,6 +332,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       setCargoRateOverrideConfirmed(false);
       setCnyRateRubOverride(BLANK_FORM.cnyRateRubOverride);
       setCnyRateOverrideConfirmed(false);
+      setBuyoutCommissionPercentOverride(BLANK_FORM.buyoutCommissionPercentOverride);
+      setBuyoutCommissionOverrideConfirmed(false);
       setFrozenRates(null);
       setExistingPhotos([]);
       return;
@@ -370,6 +377,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           setCargoRateOverrideConfirmed(q.cargoRateOverrideConfirmed);
           setCnyRateRubOverride(q.cnyRateRubOverride ?? "");
           setCnyRateOverrideConfirmed(q.cnyRateOverrideConfirmed);
+          setBuyoutCommissionPercentOverride(q.buyoutCommissionPercentOverride ?? "");
+          setBuyoutCommissionOverrideConfirmed(q.buyoutCommissionOverrideConfirmed);
           setFrozenRates({
             cnyRateRub: Number(q.cnyRateUsed),
             usdRateRub: Number(q.usdRateUsed),
@@ -466,17 +475,22 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       categoryKey: tariff.categoryKey,
       rateUsdPerCbm: Number(tariff.rateUsdPerCbm),
     }));
-    // Frozen (editing): a single bracket spanning the whole range, same
-    // trick as the PATCH route — always resolves to this quote's own
-    // already-snapshotted %, regardless of totalPriceRub. Live (new quote):
-    // today's actual bracket ladder from Тарифы.
-    const buyoutCommissionTiers: BuyoutCommissionTierInput[] = isFrozen
-      ? [{ minAmountRub: 0, maxAmountRub: null, commissionPercent: frozenRates.buyoutCommissionPercent }]
-      : buyoutCommissionTariffs.map((tier) => ({
-          minAmountRub: Number(tier.minAmountRub),
-          maxAmountRub: tier.maxAmountRub === null ? null : Number(tier.maxAmountRub),
-          commissionPercent: Number(tier.commissionPercent),
-        }));
+    // Manual override (any mode): a single bracket at that %, same as the
+    // server. Otherwise: frozen (editing) — a single bracket spanning the
+    // whole range, same trick as the PATCH route — always resolves to this
+    // quote's own already-snapshotted %, regardless of totalPriceRub. Live
+    // (new quote): today's actual bracket ladder from Тарифы.
+    const buyoutCommissionOverrideNum = num(buyoutCommissionPercentOverride);
+    const buyoutCommissionTiers: BuyoutCommissionTierInput[] =
+      buyoutCommissionOverrideNum !== undefined
+        ? [{ minAmountRub: 0, maxAmountRub: null, commissionPercent: buyoutCommissionOverrideNum }]
+        : isFrozen
+          ? [{ minAmountRub: 0, maxAmountRub: null, commissionPercent: frozenRates.buyoutCommissionPercent }]
+          : buyoutCommissionTariffs.map((tier) => ({
+              minAmountRub: Number(tier.minAmountRub),
+              maxAmountRub: tier.maxAmountRub === null ? null : Number(tier.maxAmountRub),
+              commissionPercent: Number(tier.commissionPercent),
+            }));
 
     const inputsWithoutRate = {
       quantity: quantityNum,
@@ -558,6 +572,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     cargoDiscountUsd,
     cargoRateUsdOverride,
     cnyRateRubOverride,
+    buyoutCommissionPercentOverride,
     isEditing,
     frozenRates,
   ]);
@@ -649,6 +664,9 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         if (cargoDiscountUsd.trim()) formData.append("cargoDiscountUsd", cargoDiscountUsd.trim());
         if (cargoRateUsdOverride.trim()) formData.append("cargoRateUsdOverride", cargoRateUsdOverride.trim());
         if (cnyRateRubOverride.trim()) formData.append("cnyRateRubOverride", cnyRateRubOverride.trim());
+        if (buyoutCommissionPercentOverride.trim()) {
+          formData.append("buyoutCommissionPercentOverride", buyoutCommissionPercentOverride.trim());
+        }
       }
 
       if (attachedServices.length > 0) {
@@ -852,34 +870,12 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               </div>
             )}
 
-            <div className="space-y-1.5">
-              <Label>Ручной курс юаня, ₽ (необязательно — иначе берётся из тарифов)</Label>
-              <Input
-                type="number"
-                min={0}
-                step="0.01"
-                placeholder="из тарифов"
-                value={cnyRateRubOverride}
-                onChange={(e) => setCnyRateRubOverride(e.target.value)}
-              />
-              {!cnyRateRubOverride.trim() && !isEditing && preview && (
-                <p className="text-xs text-text-secondary">
-                  Курс сейчас: {preview.cnyRateRubResolved.toFixed(2)} ₽ за ¥ (подбирается автоматически по сумме просчёта)
-                </p>
-              )}
-              {cnyRateRubOverride.trim() &&
-                (isEditing ? (
-                  <p className={cn("text-xs", cnyRateOverrideConfirmed ? "text-success" : "text-warning")}>
-                    {cnyRateOverrideConfirmed
-                      ? "✓ Курс подтверждён руководителем/старшим менеджером."
-                      : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — курс уже применяется в просчёте."}
-                  </p>
-                ) : (
-                  <p className="text-xs text-warning">
-                    После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
-                  </p>
-                ))}
-            </div>
+            {!cnyRateRubOverride.trim() && !isEditing && preview && (
+              <p className="text-xs text-text-secondary">
+                Курс сейчас: {preview.cnyRateRubResolved.toFixed(2)} ₽ за ¥ (подбирается автоматически по сумме просчёта;
+                ручная корректировка — в самом низу формы)
+              </p>
+            )}
 
             <div className="space-y-1.5">
               <Label htmlFor="china-delivery">Доставка по Китаю, ¥</Label>
@@ -990,37 +986,11 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               {preview && (
                 <p className="text-xs text-text-secondary">
                   Ставка: ${preview.cargoRateUsd.toFixed(2)}/{preview.cargoPricingBasis === "density" ? "кг" : "м³"}
-                  {cargoRateUsdOverride.trim() && " (вручную)"} →{" "}
+                  {cargoRateUsdOverride.trim() && " (вручную — корректировка в самом низу формы)"} →{" "}
                   {preview.cargoDeliveryUsd.toFixed(1)}$ / {fmt(preview.cargoDeliveryRub)} ₽
                   {preview.cargoDiscountUsd > 0 && ` (скидка -$${preview.cargoDiscountUsd.toFixed(1)})`}
                 </p>
               )}
-              <div className="space-y-1.5">
-                <Label>
-                  Ручная ставка, ${preview?.cargoPricingBasis === "volume" ? "м³" : "кг"} (необязательно — иначе берётся из
-                  тарифов)
-                </Label>
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  placeholder="из тарифов"
-                  value={cargoRateUsdOverride}
-                  onChange={(e) => setCargoRateUsdOverride(e.target.value)}
-                />
-                {cargoRateUsdOverride.trim() &&
-                  (isEditing ? (
-                    <p className={cn("text-xs", cargoRateOverrideConfirmed ? "text-success" : "text-warning")}>
-                      {cargoRateOverrideConfirmed
-                        ? "✓ Ставка подтверждена руководителем/старшим менеджером."
-                        : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — до этого прибыль по карго считается приблизительно."}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-warning">
-                      После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
-                    </p>
-                  ))}
-              </div>
               <div className="space-y-1.5">
                 <Label>Скидка на карго для клиента, $ (необязательно)</Label>
                 <Input
@@ -1099,7 +1069,10 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                   <span>{fmt(preview ? (quoteType === "standard" ? Number(tariffs.standardPriceRub) : quoteType === "expert" ? Number(tariffs.expertPriceRub) : Number(tariffs.proPriceRub)) : 0)} ₽</span>
                 </div>
                 <div className="flex justify-between text-text-secondary">
-                  <span>Комиссия за выкуп</span>
+                  <span>
+                    Комиссия за выкуп ({preview.buyoutCommissionPercent.toFixed(2)}%
+                    {buyoutCommissionPercentOverride.trim() && " — вручную"})
+                  </span>
                   <span>{fmt(preview.buyoutCommissionRub)} ₽</span>
                 </div>
                 {attachedServices.map((service, index) => (
@@ -1114,6 +1087,88 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                 </div>
               </div>
             )}
+
+            <div className="space-y-3 rounded-xl border border-warning/30 bg-warning/5 p-3">
+              <div className="text-xs font-semibold text-warning">
+                ⚠️ Ручная настройка тарифов — требуется подтверждение руководителя
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Ручной курс юаня, ₽ (необязательно — иначе берётся из тарифов)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="из тарифов"
+                  value={cnyRateRubOverride}
+                  onChange={(e) => setCnyRateRubOverride(e.target.value)}
+                />
+                {cnyRateRubOverride.trim() &&
+                  (isEditing ? (
+                    <p className={cn("text-xs", cnyRateOverrideConfirmed ? "text-success" : "text-warning")}>
+                      {cnyRateOverrideConfirmed
+                        ? "✓ Курс подтверждён руководителем/старшим менеджером."
+                        : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — курс уже применяется в просчёте."}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-warning">
+                      После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
+                    </p>
+                  ))}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>
+                  Ручная ставка карго, ${preview?.cargoPricingBasis === "volume" ? "м³" : "кг"} (необязательно — иначе
+                  берётся из тарифов)
+                </Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="из тарифов"
+                  value={cargoRateUsdOverride}
+                  onChange={(e) => setCargoRateUsdOverride(e.target.value)}
+                />
+                {cargoRateUsdOverride.trim() &&
+                  (isEditing ? (
+                    <p className={cn("text-xs", cargoRateOverrideConfirmed ? "text-success" : "text-warning")}>
+                      {cargoRateOverrideConfirmed
+                        ? "✓ Ставка подтверждена руководителем/старшим менеджером."
+                        : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — до этого прибыль по карго считается приблизительно."}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-warning">
+                      После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
+                    </p>
+                  ))}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Ручная комиссия за выкуп, % (необязательно — иначе берётся из тарифов)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  placeholder="из тарифов"
+                  value={buyoutCommissionPercentOverride}
+                  onChange={(e) => setBuyoutCommissionPercentOverride(e.target.value)}
+                />
+                {buyoutCommissionPercentOverride.trim() &&
+                  (isEditing ? (
+                    <p className={cn("text-xs", buyoutCommissionOverrideConfirmed ? "text-success" : "text-warning")}>
+                      {buyoutCommissionOverrideConfirmed
+                        ? "✓ Комиссия подтверждена руководителем/старшим менеджером."
+                        : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — комиссия уже применяется в просчёте."}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-warning">
+                      После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
+                    </p>
+                  ))}
+              </div>
+            </div>
 
             {error && <p className="text-xs text-error">{error}</p>}
             <div className="flex gap-2">

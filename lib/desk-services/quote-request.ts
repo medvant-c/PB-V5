@@ -80,6 +80,13 @@ interface ParsedQuoteFields {
   // rate), same as it already resolves cnyRateRub from either
   // TariffSettings or a frozen snapshot depending on create vs edit.
   cnyRateRubOverride?: number;
+  // Manual commission-% override for the buyout — see
+  // Quote.buyoutCommissionPercentOverride in prisma/schema.prisma. undefined
+  // = no override, normal BuyoutCommissionTariff bracket lookup. Same
+  // "not part of QuoteRates/buildEngineInputs" split as cnyRateRubOverride
+  // above — the route resolves the final buyoutCommissionTiers to pass the
+  // engine via buyoutCommissionTiersForQuote below.
+  buyoutCommissionPercentOverride?: number;
   // "Производство под заказ" — see Quote.isCustomProduction in
   // prisma/schema.prisma. The route (not this parser) looks up the actual
   // fee from TariffSettings once this is known, same pattern as
@@ -152,6 +159,7 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
       cargoDiscountUsd: optionalNumber(formData.get("cargoDiscountUsd")),
       cargoRateUsdOverride: optionalNumber(formData.get("cargoRateUsdOverride")),
       cnyRateRubOverride: optionalNumber(formData.get("cnyRateRubOverride")),
+      buyoutCommissionPercentOverride: optionalNumber(formData.get("buyoutCommissionPercentOverride")),
       isCustomProduction: formData.get("isCustomProduction") === "true",
     },
   };
@@ -298,6 +306,21 @@ function buyoutCommissionTariffsToEngineInput(
   }));
 }
 
+// A manual commission override collapses the whole bracket ladder into a
+// single flat rate spanning every amount — the same "one bracket spanning
+// the whole range" trick the PATCH route already used to freeze
+// buyoutCommissionPercent on an edit, just generalized so every route that
+// builds buyoutCommissionTiers (POST, PATCH, recalculate) shares one
+// implementation instead of three copies. undefined = no override, pass
+// the real tier ladder through unchanged.
+function buyoutCommissionTiersForQuote(
+  overridePercent: number | undefined,
+  liveTiers: BuyoutCommissionTierInput[],
+): BuyoutCommissionTierInput[] {
+  if (overridePercent === undefined) return liveTiers;
+  return [{ minAmountRub: 0, maxAmountRub: null, commissionPercent: overridePercent }];
+}
+
 // Same category-matching rule as lookupVolumeRate in lib/quote-engine.ts,
 // but returns costUsdPerCbm instead — server-only for the same
 // confidentiality reason as findDensityTierCost below.
@@ -355,6 +378,7 @@ export {
   densityTiersToEngineInput,
   volumeTariffsToEngineInput,
   buyoutCommissionTariffsToEngineInput,
+  buyoutCommissionTiersForQuote,
   BUYOUT_REVERT_DATA,
   findDensityTierCost,
   findVolumeTariffCost,

@@ -14,7 +14,7 @@ interface RouteParams {
 // DeskFileTab values so this route can't be used to fetch an arbitrary
 // file by guessing/enumerating ids. Served inline (not as a download) so
 // it opens straight in the browser. See PB-V5 chat 2026-07-31.
-const ALLOWED_TABS = new Set(["quote_cargo_rate_proof", "quote_cny_rate_proof"]);
+const ALLOWED_TABS = new Set(["quote_cargo_rate_proof", "quote_cny_rate_proof", "quote_buyout_commission_proof"]);
 
 export async function GET(req: NextRequest, { params }: RouteParams) {
   const session = await getManagerSessionFromRequest(req);

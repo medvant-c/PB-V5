@@ -9,6 +9,7 @@ import { computeQuote, computeCargoCost, computeQuoteWithAutoCnyTier, type CnyRa
 import {
   buildEngineInputs,
   buyoutCommissionTariffsToEngineInput,
+  buyoutCommissionTiersForQuote,
   customProductionFeeForTier,
   densityTiersToEngineInput,
   findDensityTierCost,
@@ -136,7 +137,14 @@ export async function POST(req: NextRequest) {
   const engineInputs = buildEngineInputs(fields, {
     cnyRateRub: fields.cnyRateRubOverride ?? cnyTiers.base,
     usdRateRub: Number(tariffSettings.usdRateRub),
-    buyoutCommissionTiers: buyoutCommissionTariffsToEngineInput(buyoutCommissionTiers),
+    // A manual override collapses today's live bracket ladder into one flat
+    // rate — same "usable immediately, confirmation only gates the sign-off"
+    // rule as cnyRateRubOverride/cargoRateUsdOverride. See
+    // Quote.buyoutCommissionPercentOverride in prisma/schema.prisma.
+    buyoutCommissionTiers: buyoutCommissionTiersForQuote(
+      fields.buyoutCommissionPercentOverride,
+      buyoutCommissionTariffsToEngineInput(buyoutCommissionTiers),
+    ),
     searchServiceFeeRub: searchFeeWaived ? 0 : searchServiceFeeByType[fields.quoteType],
     densityTiers: densityTiersToEngineInput(densityTiers),
     volumeTariffs: volumeTariffsToEngineInput(volumeTariffs),
@@ -246,6 +254,9 @@ export async function POST(req: NextRequest) {
       cargoCostRub: cargoCost.cargoCostRub,
       buyoutCommissionPercent: computed.buyoutCommissionPercent,
       buyoutCommissionRub: computed.buyoutCommissionRub,
+      // A manual rate always starts unconfirmed — see
+      // Quote.buyoutCommissionOverrideConfirmed in prisma/schema.prisma.
+      buyoutCommissionPercentOverride: fields.buyoutCommissionPercentOverride ?? null,
       totalRub: computed.totalRub,
       cnyRateUsed: resolvedCnyRateRub,
       usdRateUsed: engineInputs.usdRateRub,
