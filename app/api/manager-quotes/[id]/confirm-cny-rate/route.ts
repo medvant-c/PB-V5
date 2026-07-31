@@ -46,30 +46,30 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
 
+  // Proof screenshot is a nice-to-have, not a hard gate — same reasoning
+  // as confirm-cargo-rate/route.ts. See PB-V5 chat 2026-07-31.
   const file = formData.get("file");
-  if (!(file instanceof File)) {
-    return Response.json({ error: "Приложите подтверждение (скриншот переписки)." }, { status: 400 });
+  if (file instanceof File) {
+    if (file.size > MAX_FILE_SIZE) {
+      return Response.json({ error: "Файл слишком большой (максимум 8MB)." }, { status: 400 });
+    }
+    if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
+      return Response.json({ error: "Недопустимый тип файла. Разрешены: PNG, JPG, WEBP, GIF." }, { status: 400 });
+    }
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const stored = await storage.upload(buffer, file.name);
+    await prisma.deskFile.create({
+      data: {
+        tab: "quote_cny_rate_proof",
+        relatedId: quote.id,
+        storageKey: stored.key,
+        originalName: file.name,
+        mimeType: file.type,
+        size: stored.size,
+        uploadedByManagerId: session.managerId,
+      },
+    });
   }
-  if (file.size > MAX_FILE_SIZE) {
-    return Response.json({ error: "Файл слишком большой (максимум 8MB)." }, { status: 400 });
-  }
-  if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
-    return Response.json({ error: "Недопустимый тип файла. Разрешены: PNG, JPG, WEBP, GIF." }, { status: 400 });
-  }
-
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const stored = await storage.upload(buffer, file.name);
-  await prisma.deskFile.create({
-    data: {
-      tab: "quote_cny_rate_proof",
-      relatedId: quote.id,
-      storageKey: stored.key,
-      originalName: file.name,
-      mimeType: file.type,
-      size: stored.size,
-      uploadedByManagerId: session.managerId,
-    },
-  });
 
   const updated = await prisma.quote.update({
     where: { id },

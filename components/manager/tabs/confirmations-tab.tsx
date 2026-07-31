@@ -355,16 +355,12 @@ function ManagerConfirmationsTab() {
       setCargoRateError("Укажите цену закупки за 1 кг/м³.");
       return;
     }
-    if (!draft?.file) {
-      setCargoRateError("Приложите скриншот переписки с поставщиком.");
-      return;
-    }
     setBusyCargoRateId(quoteId);
     setCargoRateError(null);
     try {
       const formData = new FormData();
       formData.append("cargoRateOverrideCostUsd", String(cost));
-      formData.append("file", draft.file);
+      if (draft?.file) formData.append("file", draft.file);
       const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-cargo-rate`, { method: "PATCH", body: formData });
       if (res.ok) {
         setCargoRateDrafts((current) => {
@@ -384,15 +380,11 @@ function ManagerConfirmationsTab() {
 
   async function handleConfirmCnyRate(quoteId: string) {
     const file = cnyRateFiles[quoteId];
-    if (!file) {
-      setCnyRateError("Приложите подтверждение (скриншот переписки).");
-      return;
-    }
     setBusyCnyRateId(quoteId);
     setCnyRateError(null);
     try {
       const formData = new FormData();
-      formData.append("file", file);
+      if (file) formData.append("file", file);
       const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-cny-rate`, { method: "PATCH", body: formData });
       if (res.ok) {
         setCnyRateFiles((current) => {
@@ -638,8 +630,8 @@ function ManagerConfirmationsTab() {
                 <Ruler className="h-3.5 w-3.5" /> Ручные ставки карго ({pendingCargoRates.length})
               </h3>
               <p className="mt-1 text-xs text-text-secondary">
-                Менеджер вписал ставку карго вручную, не из тарифов. Укажите реальную цену закупки за 1 кг/м³ и
-                приложите скриншот переписки с поставщиком, подтверждающий эту ставку.
+                Менеджер вписал ставку карго вручную, не из тарифов. Укажите реальную цену закупки за 1 кг/м³
+                (скриншот переписки с поставщиком — необязательно, но поможет при проверке).
               </p>
               {cargoRateError && <p className="mt-1 text-xs text-error">{cargoRateError}</p>}
               <ul className="mt-2 space-y-2">
@@ -675,7 +667,7 @@ function ManagerConfirmationsTab() {
                         />
                       </div>
                       <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                        <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки:</span>
+                        <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки (необязательно):</span>
                         <input
                           type="file"
                           accept="image/png,image/jpeg,image/webp,image/gif"
@@ -708,8 +700,8 @@ function ManagerConfirmationsTab() {
                 <Coins className="h-3.5 w-3.5" /> Ручной курс юаня ({pendingCnyRates.length})
               </h3>
               <p className="mt-1 text-xs text-text-secondary">
-                Менеджер вписал курс ¥→₽ вручную, не из тарифов. Приложите скриншот переписки, подтверждающий, что
-                это реальный согласованный курс.
+                Менеджер вписал курс ¥→₽ вручную, не из тарифов. Скриншот переписки, подтверждающий, что это
+                реальный согласованный курс, — необязательно, но поможет при проверке.
               </p>
               {cnyRateError && <p className="mt-1 text-xs text-error">{cnyRateError}</p>}
               <ul className="mt-2 space-y-2">
@@ -731,7 +723,7 @@ function ManagerConfirmationsTab() {
                     </div>
 
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки:</span>
+                      <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки (необязательно):</span>
                       <input
                         type="file"
                         accept="image/png,image/jpeg,image/webp,image/gif"

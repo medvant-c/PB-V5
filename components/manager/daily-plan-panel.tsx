@@ -255,7 +255,12 @@ function DailyPlanPanel() {
                           🎯 от {item.assignedByManagerName}
                         </span>
                       )}
-                      <span className={cn("text-xs font-semibold text-text", item.doneAt && "text-text-secondary line-through")}>
+                      <span
+                        className={cn(
+                          "whitespace-pre-wrap text-xs font-semibold text-text",
+                          item.doneAt && "text-text-secondary line-through",
+                        )}
+                      >
                         {item.note}
                       </span>
                     </div>
@@ -314,24 +319,22 @@ function DailyPlanPanel() {
                       </option>
                     ))}
                   </select>
-                  <div className="flex gap-1.5">
-                    <input
-                      type="text"
-                      value={clientTask}
-                      onChange={(e) => setClientTask(e.target.value)}
-                      placeholder="Что сделать для этого клиента (необязательно)"
-                      className="h-8 min-w-0 flex-1 rounded-lg border border-border bg-surface px-2.5 text-xs text-text"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAdd}
-                      disabled={adding}
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-secondary text-white disabled:opacity-50"
-                      aria-label="Добавить"
-                    >
-                      {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
-                    </button>
-                  </div>
+                  <textarea
+                    value={clientTask}
+                    onChange={(e) => setClientTask(e.target.value)}
+                    placeholder="Что сделать для этого клиента (необязательно)"
+                    rows={5}
+                    className="w-full resize-none rounded-lg border border-border bg-surface px-2.5 py-2 text-xs text-text"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAdd}
+                    disabled={adding}
+                    className="flex h-8 w-full shrink-0 items-center justify-center gap-1.5 rounded-lg bg-gradient-to-br from-primary to-secondary text-xs font-semibold text-white disabled:opacity-50"
+                  >
+                    {adding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-4 w-4" />}
+                    Добавить
+                  </button>
                 </div>
               )}
               {addMode !== "client" && (

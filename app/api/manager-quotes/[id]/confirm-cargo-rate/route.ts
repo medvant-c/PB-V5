@@ -52,15 +52,18 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: "Укажите цену закупки за 1 кг/м³ в долларах." }, { status: 400 });
   }
 
+  // Proof screenshot is a nice-to-have, not a hard gate — the owner/senior
+  // is already the one clicking "Подтвердить" and typing the real cost, so
+  // requiring a file too was one click of friction too many. See PB-V5
+  // chat 2026-07-31.
   const file = formData.get("file");
-  if (!(file instanceof File)) {
-    return Response.json({ error: "Приложите скриншот переписки с поставщиком." }, { status: 400 });
-  }
-  if (file.size > MAX_FILE_SIZE) {
-    return Response.json({ error: "Файл слишком большой (максимум 8MB)." }, { status: 400 });
-  }
-  if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
-    return Response.json({ error: "Недопустимый тип файла. Разрешены: PNG, JPG, WEBP, GIF." }, { status: 400 });
+  if (file instanceof File) {
+    if (file.size > MAX_FILE_SIZE) {
+      return Response.json({ error: "Файл слишком большой (максимум 8MB)." }, { status: 400 });
+    }
+    if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
+      return Response.json({ error: "Недопустимый тип файла. Разрешены: PNG, JPG, WEBP, GIF." }, { status: 400 });
+    }
   }
 
   // Re-derive which basis (weight vs volume) this quote's cargo actually
@@ -74,19 +77,21 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const cargoCostUsd = (cargoRateUsd - cost) * quantityBasis;
   const cargoCostRub = cargoCostUsd * Number(quote.usdRateUsed);
 
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const stored = await storage.upload(buffer, file.name);
-  await prisma.deskFile.create({
-    data: {
-      tab: "quote_cargo_rate_proof",
-      relatedId: quote.id,
-      storageKey: stored.key,
-      originalName: file.name,
-      mimeType: file.type,
-      size: stored.size,
-      uploadedByManagerId: session.managerId,
-    },
-  });
+  if (file instanceof File) {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const stored = await storage.upload(buffer, file.name);
+    await prisma.deskFile.create({
+      data: {
+        tab: "quote_cargo_rate_proof",
+        relatedId: quote.id,
+        storageKey: stored.key,
+        originalName: file.name,
+        mimeType: file.type,
+        size: stored.size,
+        uploadedByManagerId: session.managerId,
+      },
+    });
+  }
 
   const updated = await prisma.quote.update({
     where: { id },
