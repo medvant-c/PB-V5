@@ -48,8 +48,24 @@ export async function POST(req: NextRequest) {
 
   const parsed = parseCnyRateMessage(text);
   if (!parsed) {
-    // Most messages in the group aren't a rate post at all — not an
-    // error, just nothing to do.
+    // Most messages in the group aren't a rate post at all — logged
+    // anyway (not just silently dropped) so "Последние 20 сообщений...
+    // видно, применился ли курс и почему нет" in Тарифы actually shows
+    // every message the webhook received, not only the ones that came
+    // close to matching. Without this, a real format change upstream
+    // (a reworded template, a different source chat) is invisible until
+    // someone notices the rate just never updates. See PB-V5 chat
+    // 2026-08-01.
+    await prisma.telegramCnyRateUpdate.create({
+      data: {
+        rateFrom1000: null,
+        rateFrom3000: null,
+        rateFrom10000: null,
+        rateFrom30000: null,
+        parseError: "Не похоже на сообщение с курсом ¥ — нет «Российский рубль» и/или «за 1¥».",
+        rawMessage: text,
+      },
+    });
     return Response.json({ ok: true });
   }
 
