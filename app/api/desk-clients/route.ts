@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
   }
   const normalizedPhone = normalizePhone(phone);
   if (!normalizedPhone) {
-    return Response.json({ error: "Укажите номер телефона полностью: +7 (XXX) XXX-XX-XX." }, { status: 400 });
+    return Response.json({ error: "Укажите номер телефона полностью: +7 (XXX) XXX-XX-XX, или международный, с кодом страны через «+»." }, { status: 400 });
   }
   if (typeof country !== "string" || !country.trim()) {
     return Response.json({ error: "Укажите страну." }, { status: 400 });

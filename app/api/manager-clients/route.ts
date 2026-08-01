@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
   const hasPhone = typeof phone === "string" && phone.trim();
   const normalizedPhone = hasPhone ? normalizePhone(phone as string) : null;
   if (hasPhone && !normalizedPhone) {
-    return Response.json({ error: "Укажите номер телефона полностью: +7 (XXX) XXX-XX-XX." }, { status: 400 });
+    return Response.json({ error: "Укажите номер телефона полностью: +7 (XXX) XXX-XX-XX, или международный, с кодом страны через «+»." }, { status: 400 });
   }
 
   const VALID_SOURCES = ["instagram", "telegram", "website", "referral", "other"];

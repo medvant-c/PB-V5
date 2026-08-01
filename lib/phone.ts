@@ -2,9 +2,24 @@
 // Client.phone (manager cabinet, the older shared-password /desk tool, and
 // client self-registration) — needed so the field can actually be filtered
 // and exported later, instead of holding whatever a manager happened to
-// type. Every real client so far is Russia/Kazakhstan (+7); there's no
-// country-code picker anywhere in the UI, so this deliberately only
-// supports that one shape. See PB-V5 chat 2026-07-30.
+// type. Most real clients are Russia/Kazakhstan (+7), which gets the nice
+// live-typing mask below — anything else (a Chinese supplier, a client
+// abroad) is accepted as-typed once it's clearly a different country code
+// (see isInternational below), not force-fit into +7 or rejected outright.
+// There's still no per-country validation library here, just this one
+// shape the mask actually knows how to format. See PB-V5 chat 2026-07-30,
+// revisited 2026-08-01.
+
+// A leading "+" followed by any digit other than 7 — the one unambiguous
+// signal that this is a non-RU number without needing a full country-code
+// table. A bare local number typed with no "+" at all still falls through
+// to the RU mask below, same limitation as before this fix.
+function isInternational(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("+")) return false;
+  const afterPlus = trimmed.slice(1).replace(/\D/g, "");
+  return afterPlus.length > 0 && afterPlus[0] !== "7";
+}
 
 // Pulls out the 10 significant digits (i.e. without the leading 7/8
 // country/trunk digit) from anything a user might type or paste — spaces,
@@ -42,6 +57,12 @@ function extractSignificantDigits(raw: string): string {
 // string got shorter but the digit count didn't, one extra digit is
 // dropped from the end to match the user's actual intent.
 function formatPhoneMask(raw: string, previous?: string): string {
+  if (isInternational(raw)) {
+    // No mask to apply — just keep it phone-safe (digits, +, spaces,
+    // parens, dashes) and let the manager type the number as their client
+    // gave it to them.
+    return raw.replace(/[^\d+\s()-]/g, "");
+  }
   let digits = extractSignificantDigits(raw);
   if (previous !== undefined && raw.length < previous.length) {
     const previousDigits = extractSignificantDigits(previous);
@@ -64,6 +85,14 @@ function formatPhoneMask(raw: string, previous?: string): string {
 // and decide whether to reject or just leave the value untouched (see
 // prisma/normalize-phones.ts for existing junk like "тест3").
 function normalizePhone(raw: string): string | null {
+  if (isInternational(raw)) {
+    const trimmed = raw.trim();
+    const digitCount = trimmed.replace(/\D/g, "").length;
+    // Loose E.164-ish range — enough to catch "clearly not a phone number"
+    // typos without pretending to validate any specific country's format.
+    if (digitCount < 7 || digitCount > 15) return null;
+    return trimmed.replace(/[^\d+\s()-]/g, "").replace(/\s+/g, " ");
+  }
   const digits = extractSignificantDigits(raw);
   if (digits.length !== 10) return null;
   return `+7 (${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 8)}-${digits.slice(8, 10)}`;

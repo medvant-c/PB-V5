@@ -105,7 +105,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   if (typeof phone === "string" && phone.trim()) {
     const normalizedPhone = normalizePhone(phone);
     if (!normalizedPhone) {
-      return Response.json({ error: "Укажите номер телефона полностью: +7 (XXX) XXX-XX-XX." }, { status: 400 });
+      return Response.json({ error: "Укажите номер телефона полностью: +7 (XXX) XXX-XX-XX, или международный, с кодом страны через «+»." }, { status: 400 });
     }
     data.phone = normalizedPhone;
   }
