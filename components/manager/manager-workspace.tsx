@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, CheckSquare, Database, FileBarChart, Home, LogOut, Package, Settings, Tag, UserCog, Users, UsersRound, Wallet } from "lucide-react";
+import { Briefcase, CheckSquare, Database, FileBarChart, FileText, Home, LogOut, Package, Settings, Tag, UserCog, Users, UsersRound, Wallet } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ManagerClientsTab } from "@/components/manager/tabs/clients-tab";
+import { ManagerAllQuotesTab } from "@/components/manager/tabs/all-quotes-tab";
 import { ManagerStaffTab } from "@/components/manager/tabs/staff-tab";
 import { ManagerPriceListTab } from "@/components/manager/tabs/price-list-tab";
 import { ManagerDatabaseTab } from "@/components/manager/tabs/database-tab";
@@ -45,6 +46,11 @@ const ALL_SECTIONS = [
   // page regardless of whether the manager wanted to see it right then.
   { id: "home", label: "Главная", icon: Home, Component: ManagerDashboard, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "clients", label: "Клиенты", icon: Users, Component: ManagerClientsTab, ownerOnly: false, seniorOrOwnerOnly: false },
+  // Same quotes, same actions as inside a client's own card (see
+  // components/manager/tabs/clients-tab.tsx's ClientQuotes, reused here
+  // with no clientId) — just flattened into one sortable/filterable list
+  // instead of grouped by client. See PB-V5 chat 2026-08-01.
+  { id: "all-quotes", label: "Все просчёты", icon: FileText, Component: ManagerAllQuotesTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "confirmations", label: "Подтверждения", icon: CheckSquare, Component: ManagerConfirmationsTab, ownerOnly: false, seniorOrOwnerOnly: true },
   { id: "price-list", label: "Прайс-лист", icon: Tag, Component: ManagerPriceListTab, ownerOnly: true, seniorOrOwnerOnly: false },

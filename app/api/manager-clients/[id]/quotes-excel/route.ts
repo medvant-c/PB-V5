@@ -61,6 +61,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       const attachedServicesTotalRub = attachedServices.reduce((sum, s) => sum + Number(s.priceRub), 0);
 
       return {
+        clientName: client.name,
+        clientCompany: client.company,
         quoteType: quote.quoteType,
         photoBuffers,
         productName: quote.productName,

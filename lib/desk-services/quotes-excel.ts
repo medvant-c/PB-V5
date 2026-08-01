@@ -36,6 +36,7 @@ const QUOTE_TYPE_LABEL: Record<string, string> = {
 // total. Column at index i corresponds 1:1 with the values pushed in the
 // row array below — keep both in sync if either changes.
 const COLUMNS = [
+  { header: "Клиент", width: 18, wrap: true, money: false },
   { header: "Тип поиска", width: 12, wrap: false, money: false },
   { header: "Фото 1", width: PHOTO_COL_WIDTH, wrap: false, money: false },
   { header: "Фото 2", width: PHOTO_COL_WIDTH, wrap: false, money: false },
@@ -61,6 +62,8 @@ const COLUMNS = [
 const TOTAL_COLUMN_INDEX = COLUMNS.length; // 1-indexed — last column is ИТОГО
 
 interface QuoteExcelRow {
+  clientName: string;
+  clientCompany: string | null;
   quoteType: string;
   photoBuffers: Buffer[];
   productName: string;
@@ -123,6 +126,7 @@ async function renderQuotesExcel(props: { client: { name: string; company: strin
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
     const row = rows[rowIndex];
     const values = [
+      row.clientCompany ? `${row.clientName} (${row.clientCompany})` : row.clientName,
       QUOTE_TYPE_LABEL[row.quoteType] ?? row.quoteType,
       null,
       null,
@@ -180,7 +184,7 @@ async function renderQuotesExcel(props: { client: { name: string; company: strin
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see comment above
         const imageId = workbook.addImage({ buffer: fitted, extension: "png" } as any);
         sheet.addImage(imageId, {
-          tl: { col: 1 + i, row: excelRow.number - 1 },
+          tl: { col: 2 + i, row: excelRow.number - 1 },
           ext: { width: PHOTO_PX, height: PHOTO_PX },
         });
       } catch (error) {

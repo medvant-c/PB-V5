@@ -1,19 +1,19 @@
 import { NextRequest } from "next/server";
-import { getClientIdFromRequest } from "@/lib/client-auth";
+import { getManagerSessionFromRequest } from "@/lib/manager-auth";
+import { getVisibleManagerIds } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { storage } from "@/lib/storage";
 import { renderQuotesExcel, type QuoteExcelRow } from "@/lib/desk-services/quotes-excel";
 
-// Client-scoped mirror of /api/manager-clients/[id]/quotes-excel.
+// Same as /api/manager-clients/[id]/quotes-excel, just not anchored to
+// one client — the "Все просчёты" tab lets a selection span multiple
+// clients, which is exactly why QuoteExcelRow carries its own
+// clientName/clientCompany per row now instead of one shared header. See
+// PB-V5 chat 2026-08-01.
 export async function POST(req: NextRequest) {
-  const clientId = await getClientIdFromRequest(req);
-  if (!clientId) {
+  const session = await getManagerSessionFromRequest(req);
+  if (!session) {
     return Response.json({ error: "Не авторизовано." }, { status: 401 });
-  }
-
-  const client = await prisma.client.findUnique({ where: { id: clientId } });
-  if (!client) {
-    return Response.json({ error: "Клиент не найден." }, { status: 404 });
   }
 
   let body: unknown;
@@ -27,8 +27,13 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Выберите хотя бы один просчёт." }, { status: 400 });
   }
 
+  const visibleManagerIds = await getVisibleManagerIds(session);
   const quotes = await prisma.quote.findMany({
-    where: { id: { in: quoteIds }, clientId },
+    where: {
+      id: { in: quoteIds },
+      ...(visibleManagerIds === "all" ? {} : { managerId: { in: visibleManagerIds } }),
+    },
+    include: { client: { select: { name: true, company: true } } },
     orderBy: { createdAt: "asc" },
   });
   if (quotes.length === 0) {
@@ -45,8 +50,8 @@ export async function POST(req: NextRequest) {
       const attachedServicesTotalRub = attachedServices.reduce((sum, s) => sum + Number(s.priceRub), 0);
 
       return {
-        clientName: client.name,
-        clientCompany: client.company,
+        clientName: quote.client.name,
+        clientCompany: quote.client.company,
         quoteType: quote.quoteType,
         photoBuffers,
         productName: quote.productName,
@@ -71,9 +76,9 @@ export async function POST(req: NextRequest) {
     }),
   );
 
-  const buffer = await renderQuotesExcel({ client: { name: client.name, company: client.company }, rows });
+  const buffer = await renderQuotesExcel({ client: { name: "Все просчёты", company: null }, rows });
 
-  const fileName = `Просчёты — ${client.name}.xlsx`;
+  const fileName = `Просчёты (${quotes.length}).xlsx`;
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

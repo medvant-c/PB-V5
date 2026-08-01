@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
       ...(visibleManagerIds === "all" ? {} : { managerId: { in: visibleManagerIds } }),
     },
     orderBy: { createdAt: "desc" },
-    include: { manager: { select: { id: true, name: true } }, client: { select: { name: true, company: true } } },
+    include: { manager: { select: { id: true, name: true } }, client: { select: { id: true, name: true, company: true } } },
   });
 
   // First photo per quote, for a small thumbnail in the list — one batch

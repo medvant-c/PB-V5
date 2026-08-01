@@ -123,6 +123,7 @@ interface QuoteRecord {
   densityKgM3: string;
   createdAt: string;
   manager: { id: string; name: string };
+  client: { id: string; name: string; company: string | null };
   firstPhotoId: string | null;
   clientComment: string;
   managerComment: string;
@@ -417,16 +418,23 @@ function ClientQuotes({
   clientSelfSourcedConfirmed,
   clientCreatedByManagerId,
 }: {
-  clientId: string;
+  // Absent = "Все просчёты" mode (see ManagerAllQuotesTab): every quote
+  // visible to this session, across every client, instead of one client's
+  // own history. The export/reassign/status/etc. machinery below is
+  // exactly the same either way — only the fetch URL, the export
+  // endpoints, and whether each row shows its own client name change.
+  // See PB-V5 chat 2026-08-01.
+  clientId?: string;
   refreshKey: number;
-  onEdit: (quoteId: string) => void;
+  onEdit: (quoteId: string, client: { id: string; name: string }) => void;
   onChanged: () => void;
   allManagers: { id: string; name: string }[] | null;
   teamManagers: { id: string; name: string }[] | null;
   canConfirmBuyout: boolean;
-  clientSelfSourcedConfirmed: boolean;
-  clientCreatedByManagerId: string | null;
+  clientSelfSourcedConfirmed?: boolean;
+  clientCreatedByManagerId?: string | null;
 }) {
+  const isGlobal = !clientId;
   const [quotes, setQuotes] = useState<QuoteRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [changingStatusId, setChangingStatusId] = useState<string | null>(null);
@@ -471,9 +479,59 @@ function ClientQuotes({
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const filteredQuotes = statusFilter === "all" ? quotes : quotes.filter((q) => q.status === statusFilter);
 
+  // Search/sort — only surfaced in "Все просчёты" mode (see isGlobal
+  // above); a single client's own list is short enough that the plain
+  // status filter above has always been enough. See PB-V5 chat 2026-08-01.
+  const [sortBy, setSortBy] = useState<"date" | "amount" | "client" | "manager">("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [filterNumber, setFilterNumber] = useState("");
+  const [filterClientName, setFilterClientName] = useState("");
+  const [filterProductName, setFilterProductName] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  const searchedQuotes = !isGlobal
+    ? filteredQuotes
+    : filteredQuotes.filter((q) => {
+        if (filterNumber.trim() && !String(q.displayId).includes(filterNumber.trim())) return false;
+        if (filterClientName.trim()) {
+          const needle = filterClientName.trim().toLowerCase();
+          if (!q.client.name.toLowerCase().includes(needle) && !(q.client.company ?? "").toLowerCase().includes(needle)) return false;
+        }
+        if (filterProductName.trim() && !q.productName.toLowerCase().includes(filterProductName.trim().toLowerCase())) return false;
+        if (dateFrom && new Date(q.createdAt) < new Date(`${dateFrom}T00:00:00`)) return false;
+        if (dateTo && new Date(q.createdAt) > new Date(`${dateTo}T23:59:59.999`)) return false;
+        return true;
+      });
+
+  const visibleQuotes = isGlobal
+    ? [...searchedQuotes].sort((a, b) => {
+        let cmp = 0;
+        if (sortBy === "date") cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        else if (sortBy === "amount") cmp = Number(a.totalRub) - Number(b.totalRub);
+        else if (sortBy === "client") cmp = a.client.name.localeCompare(b.client.name, "ru");
+        else if (sortBy === "manager") cmp = a.manager.name.localeCompare(b.manager.name, "ru");
+        return sortDir === "asc" ? cmp : -cmp;
+      })
+    : searchedQuotes;
+
+  // Preset date-range buttons — set both ends at once so "неделя" etc. is
+  // one click, not two. "Произвольно" is just typing directly into the two
+  // date inputs, no separate mode to toggle.
+  function applyDatePreset(preset: "week" | "month" | "quarter" | "year") {
+    const now = new Date();
+    const from = new Date(now);
+    if (preset === "week") from.setDate(now.getDate() - 7);
+    else if (preset === "month") from.setMonth(now.getMonth() - 1);
+    else if (preset === "quarter") from.setMonth(now.getMonth() - 3);
+    else from.setFullYear(now.getFullYear() - 1);
+    setDateFrom(from.toISOString().slice(0, 10));
+    setDateTo(now.toISOString().slice(0, 10));
+  }
+
   const load = useCallback(() => {
     setLoading(true);
-    return fetch(`/api/manager-quotes?clientId=${clientId}`)
+    return fetch(clientId ? `/api/manager-quotes?clientId=${clientId}` : "/api/manager-quotes")
       .then((res) => res.json())
       .then((data) => setQuotes(data.quotes ?? []))
       .finally(() => setLoading(false));
@@ -574,7 +632,7 @@ function ClientQuotes({
   }
 
   function toggleSelectAll() {
-    setSelectedIds((current) => (current.length === filteredQuotes.length ? [] : filteredQuotes.map((q) => q.id)));
+    setSelectedIds((current) => (current.length === visibleQuotes.length ? [] : visibleQuotes.map((q) => q.id)));
   }
 
   async function handleRecalculate(quoteId: string) {
@@ -698,7 +756,7 @@ function ClientQuotes({
     setExportingExcel(true);
     setExportError(null);
     try {
-      const res = await fetch(`/api/manager-clients/${clientId}/quotes-excel`, {
+      const res = await fetch(isGlobal ? "/api/manager-quotes/quotes-excel" : `/api/manager-clients/${clientId}/quotes-excel`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ quoteIds: selectedIds }),
@@ -732,10 +790,22 @@ function ClientQuotes({
   // as handleExportExcel above, different endpoint.
   async function handleExportInvoice() {
     if (exportingInvoice || selectedIds.length === 0) return;
+    // A счёт bills ONE client — in "Все просчёты" mode the selection can
+    // span several, so this checks they're all the same client instead of
+    // silently billing whichever one happened to own the first quote.
+    let invoiceClientId = clientId;
+    if (isGlobal) {
+      const selectedClientIds = new Set(quotes.filter((q) => selectedIds.includes(q.id)).map((q) => q.client.id));
+      if (selectedClientIds.size !== 1) {
+        setInvoiceError("Счёт можно сформировать только по просчётам одного клиента — сузьте выбор.");
+        return;
+      }
+      invoiceClientId = [...selectedClientIds][0];
+    }
     setExportingInvoice(true);
     setInvoiceError(null);
     try {
-      const res = await fetch(`/api/manager-clients/${clientId}/invoice-excel`, {
+      const res = await fetch(`/api/manager-clients/${invoiceClientId}/invoice-excel`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ quoteIds: selectedIds }),
@@ -771,11 +841,14 @@ function ClientQuotes({
     setExportingPdfBundle(true);
     setPdfBundleError(null);
     try {
-      const res = await fetch(`/api/manager-clients/${clientId}/quotes-pdf-bundle`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quoteIds: selectedIds }),
-      });
+      const res = await fetch(
+        isGlobal ? "/api/manager-quotes/quotes-pdf-bundle" : `/api/manager-clients/${clientId}/quotes-pdf-bundle`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ quoteIds: selectedIds }),
+        },
+      );
       if (!res.ok) {
         const data = await res.json();
         setPdfBundleError(data.error ?? "Не удалось выгрузить PDF.");
@@ -898,6 +971,81 @@ function ClientQuotes({
   return (
     <TooltipProvider>
     <div className="space-y-2">
+      {isGlobal && (
+        <div className="space-y-2 rounded-lg border border-border bg-bg p-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              placeholder="№ просчёта"
+              value={filterNumber}
+              onChange={(e) => setFilterNumber(e.target.value)}
+              className="h-8 w-28 text-xs"
+            />
+            <Input
+              placeholder="Клиент"
+              value={filterClientName}
+              onChange={(e) => setFilterClientName(e.target.value)}
+              className="h-8 w-40 text-xs"
+            />
+            <Input
+              placeholder="Название товара"
+              value={filterProductName}
+              onChange={(e) => setFilterProductName(e.target.value)}
+              className="h-8 w-44 text-xs"
+            />
+            <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+              <SelectTrigger className="h-8 w-36 text-xs">
+                <SelectValue placeholder="Сортировка" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="date">По дате</SelectItem>
+                <SelectItem value="amount">По сумме</SelectItem>
+                <SelectItem value="client">По клиенту</SelectItem>
+                <SelectItem value="manager">По менеджеру</SelectItem>
+              </SelectContent>
+            </Select>
+            <button
+              type="button"
+              onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+              className="flex h-8 items-center gap-1 rounded-lg border border-border bg-surface px-2.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
+              title={sortDir === "asc" ? "По возрастанию" : "По убыванию"}
+            >
+              {sortDir === "asc" ? "↑" : "↓"}
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-8 w-36 text-xs" />
+            <span className="text-xs text-text-secondary">—</span>
+            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-8 w-36 text-xs" />
+            {([
+              ["week", "Неделя"],
+              ["month", "Месяц"],
+              ["quarter", "Квартал"],
+              ["year", "Год"],
+            ] as const).map(([preset, label]) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => applyDatePreset(preset)}
+                className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
+              >
+                {label}
+              </button>
+            ))}
+            {(dateFrom || dateTo) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFrom("");
+                  setDateTo("");
+                }}
+                className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-text-secondary hover:text-error"
+              >
+                Сбросить период
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setSelectedIds([]); }}>
           <SelectTrigger className="h-8 w-44 text-xs">
@@ -916,13 +1064,13 @@ function ClientQuotes({
         <label className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary">
           <input
             type="checkbox"
-            checked={selectedIds.length > 0 && selectedIds.length === filteredQuotes.length}
+            checked={selectedIds.length > 0 && selectedIds.length === visibleQuotes.length}
             onChange={toggleSelectAll}
             aria-label="Выбрать все просчёты"
           />
           Выбрать все
         </label>
-        {quotes.length > 1 && (
+        {!isGlobal && quotes.length > 1 && (
           <a
             href={`/api/manager-clients/${clientId}/quotes-pdf`}
             className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
@@ -1026,7 +1174,7 @@ function ClientQuotes({
           </SelectContent>
         </Select>
 
-        {allManagers && (
+        {teamManagers && teamManagers.length > 1 && (
           <Select value="" onValueChange={handleBulkReassign} disabled={selectedIds.length === 0 || bulkBusy !== null}>
             <SelectTrigger className="h-8 w-52 text-xs">
               {bulkBusy === "reassign" ? (
@@ -1036,7 +1184,7 @@ function ClientQuotes({
               )}
             </SelectTrigger>
             <SelectContent>
-              {allManagers.map((m) => (
+              {teamManagers.map((m) => (
                 <SelectItem key={m.id} value={m.id}>
                   {m.name}
                 </SelectItem>
@@ -1049,11 +1197,11 @@ function ClientQuotes({
       {exportError && <p className="text-xs text-error">{exportError}</p>}
       {pdfBundleError && <p className="text-xs text-error">{pdfBundleError}</p>}
       {invoiceError && <p className="text-xs text-error">{invoiceError}</p>}
-      {filteredQuotes.length === 0 ? (
-        <p className="text-xs text-text-secondary">Нет просчётов с этим статусом.</p>
+      {visibleQuotes.length === 0 ? (
+        <p className="text-xs text-text-secondary">{isGlobal ? "Ничего не найдено." : "Нет просчётов с этим статусом."}</p>
       ) : (
       <ul className="space-y-1.5">
-        {filteredQuotes.map((quote) => (
+        {visibleQuotes.map((quote) => (
           <li key={quote.id} className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
             <div className="flex items-center gap-3">
               <input
@@ -1093,7 +1241,7 @@ function ClientQuotes({
               </div>
               <button
                 type="button"
-                onClick={() => onEdit(quote.id)}
+                onClick={() => onEdit(quote.id, quote.client)}
                 className="flex min-w-0 flex-1 items-center gap-3 text-left hover:opacity-80"
               >
                 <span className="min-w-0 flex-1">
@@ -1163,6 +1311,16 @@ function ClientQuotes({
                       </TooltipContent>
                     </Tooltip>{" "}
                     · {quote.manager.name}
+                    {isGlobal && (
+                      <>
+                        {" "}
+                        ·{" "}
+                        <span className="text-text">
+                          {quote.client.name}
+                          {quote.client.company ? ` (${quote.client.company})` : ""}
+                        </span>
+                      </>
+                    )}
                   </span>
                 </span>
               </button>
@@ -1307,7 +1465,7 @@ function ClientQuotes({
 
               <button
                 type="button"
-                onClick={() => onEdit(quote.id)}
+                onClick={() => onEdit(quote.id, quote.client)}
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary"
                 aria-label="Редактировать просчёт"
                 title="Редактировать просчёт"
@@ -2359,4 +2517,4 @@ function ManagerClientsTab() {
   );
 }
 
-export { ManagerClientsTab };
+export { ManagerClientsTab, ClientQuotes };
