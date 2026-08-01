@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { getVisibleManagerIds } from "@/lib/manager-scope";
+import { dayBoundsUtc, isTodayUtc } from "@/lib/daily-plan-day";
 import { prisma } from "@/lib/prisma";
 
 // Owner/senior only — read-only cross-manager view of today's (or any
@@ -16,35 +17,48 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: "Доступно только старшему менеджеру и руководителю." }, { status: 403 });
   }
 
-  const dateParam = req.nextUrl.searchParams.get("date");
-  const base = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? new Date(`${dateParam}T00:00:00.000Z`) : new Date();
-  const start = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate()));
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  const { start, end } = dayBoundsUtc(req.nextUrl.searchParams.get("date"));
 
   const visibleManagerIds = await getVisibleManagerIds(session);
+  const managerScopeFilter = visibleManagerIds === "all" ? {} : { managerId: { in: visibleManagerIds } };
+  const itemSelect = {
+    id: true,
+    managerId: true,
+    note: true,
+    doneAt: true,
+    planDate: true,
+    client: { select: { id: true, name: true, company: true } },
+    quoteDraftRequest: { select: { id: true, displayId: true } },
+  } as const;
 
-  const [managers, items] = await Promise.all([
+  const [managers, todayItems, overdueItems] = await Promise.all([
     prisma.manager.findMany({
       where: { active: true, ...(visibleManagerIds === "all" ? {} : { id: { in: visibleManagerIds } }) },
       orderBy: { displayId: "asc" },
       select: { id: true, name: true },
     }),
     prisma.dailyPlanItem.findMany({
-      where: {
-        planDate: { gte: start, lt: end },
-        ...(visibleManagerIds === "all" ? {} : { managerId: { in: visibleManagerIds } }),
-      },
+      where: { planDate: { gte: start, lt: end }, ...managerScopeFilter },
       orderBy: { createdAt: "asc" },
-      select: {
-        id: true,
-        managerId: true,
-        note: true,
-        doneAt: true,
-        client: { select: { id: true, name: true, company: true } },
-        quoteDraftRequest: { select: { id: true, displayId: true } },
-      },
+      select: itemSelect,
     }),
+    // Same "roll unfinished items forward onto today" behavior as
+    // manager-daily-plan's GET (see lib/daily-plan-day.ts) — otherwise a
+    // manager's own panel would show an overdue item while this
+    // cross-manager view still reported them at 0 for today.
+    isTodayUtc(start)
+      ? prisma.dailyPlanItem.findMany({
+          where: { doneAt: null, planDate: { lt: start }, ...managerScopeFilter },
+          orderBy: { planDate: "asc" },
+          select: itemSelect,
+        })
+      : Promise.resolve([]),
   ]);
+  const overdueIds = new Set(overdueItems.map((i) => i.id));
+  const items = [...overdueItems, ...todayItems].map((item) => ({
+    ...item,
+    carriedOverFromDate: overdueIds.has(item.id) ? item.planDate.toISOString().slice(0, 10) : null,
+  }));
 
   const itemsByManagerId = new Map<string, typeof items>();
   for (const item of items) {

@@ -2,11 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, Calculator, CheckSquare, Database, FileBarChart, Home, LogOut, Package, Settings, Tag, UserCog, Users, UsersRound, Wallet } from "lucide-react";
+import { Briefcase, CheckSquare, Database, FileBarChart, Home, LogOut, Package, Settings, Tag, UserCog, Users, UsersRound, Wallet } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ManagerClientsTab } from "@/components/manager/tabs/clients-tab";
-import { ManagerTariffsTab } from "@/components/manager/tabs/tariffs-tab";
 import { ManagerStaffTab } from "@/components/manager/tabs/staff-tab";
 import { ManagerPriceListTab } from "@/components/manager/tabs/price-list-tab";
 import { ManagerDatabaseTab } from "@/components/manager/tabs/database-tab";
@@ -46,14 +45,18 @@ const ALL_SECTIONS = [
   { id: "home", label: "Главная", icon: Home, Component: ManagerDashboard, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "clients", label: "Клиенты", icon: Users, Component: ManagerClientsTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentTab, ownerOnly: false, seniorOrOwnerOnly: false },
-  { id: "tariffs", label: "Тарифы", icon: Calculator, Component: ManagerTariffsTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "confirmations", label: "Подтверждения", icon: CheckSquare, Component: ManagerConfirmationsTab, ownerOnly: false, seniorOrOwnerOnly: true },
   { id: "price-list", label: "Прайс-лист", icon: Tag, Component: ManagerPriceListTab, ownerOnly: true, seniorOrOwnerOnly: false },
   { id: "cash", label: "Отчёты по дням", icon: Wallet, Component: ManagerCashTab, ownerOnly: true, seniorOrOwnerOnly: false },
   { id: "profit-report", label: "Отчёт о прибыли", icon: FileBarChart, Component: ManagerProfitReportTab, ownerOnly: true, seniorOrOwnerOnly: false },
   { id: "database", label: "База данных", icon: Database, Component: ManagerDatabaseTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "staff", label: "Сотрудники", icon: UsersRound, Component: ManagerStaffTab, ownerOnly: true, seniorOrOwnerOnly: false },
-  { id: "settings", label: "Настройки", icon: Settings, Component: ManagerSettingsTab, ownerOnly: true, seniorOrOwnerOnly: false },
+  // Was owner-only — now visible to everyone since it also hosts Тарифы/
+  // Карго (which every manager needs to price a quote); the genuinely
+  // owner-only content (Руководящий состав, Тексты) is gated inside
+  // ManagerSettingsTab itself, not at this nav level. See PB-V5 chat
+  // 2026-07-31.
+  { id: "settings", label: "Настройки", icon: Settings, Component: ManagerSettingsTab, ownerOnly: false, seniorOrOwnerOnly: false },
 ] as const;
 
 const LAST_SECTION_STORAGE_KEY = "manager-last-section";

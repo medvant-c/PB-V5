@@ -160,17 +160,19 @@ model Client {
   // is transferred to a new manager (see PATCH .../[id]); senior/owner can
   // flip it back at any time from the client card.
   contactsHiddenFromManager Boolean @default(false)
-  // Owner-only override of SystemSettings.vladShareRatePercent for this one
-  // client — Влад occasionally asks to waive or reduce his cut on a
-  // specific deal (a personal friend/acquaintance of his, or just a favor),
-  // rare enough that it's a per-client exception, not a policy change.
-  // null = use the global rate from Настройки; a number (including 0)
-  // overrides it for every quote/fulfillment order this client has, live
-  // (not snapshotted — same "always today's rate" behavior the global
-  // vladShareRatePercent already has, see app/api/manager-dashboard's own
-  // per-item Влад-share calc). Never exposed to a non-owner session — same
-  // confidentiality boundary as the rest of "Доля партнёров". See PB-V5
-  // chat 2026-07-30.
+  // Owner-only override of every "percent_of_profit"-type Investor's rate
+  // (see Investor model) for this one client — originally added just for
+  // Влад (hence the name, kept for backward compat), who occasionally asks
+  // to waive or reduce his cut on a specific deal (a personal friend/
+  // acquaintance, or just a favor). Now applies uniformly to every
+  // percent_of_profit investor for this client, not one specific person —
+  // there's no per-investor-per-client override matrix, a deliberate
+  // simplification since this is rare and owner-only to begin with. null =
+  // use each investor's own global rate; a number (including 0) overrides
+  // all of them for every quote/fulfillment order this client has, live
+  // (not snapshotted). Never exposed to a non-owner session — same
+  // confidentiality boundary as the rest of "Руководящий состав". See
+  // PB-V5 chat 2026-07-30, generalized 2026-07-31.
   vladShareRatePercentOverride Decimal?
   // Null until the client opens their activation link and sets a password —
   // an account can exist (created by staff) before it's ever activated.
@@ -244,6 +246,7 @@ model Manager {
   quotes         Quote[]
   tariffUpdates  TariffSettings[]
   systemSettingsUpdates SystemSettings[]
+  investorUpdates Investor[]
   uploadedFiles  DeskFile[]
   cashOrders     CashOrder[]
   cashOpeningBalanceUpdates CashOpeningBalance[]
@@ -383,17 +386,14 @@ model SystemSettings {
 
   // 2026-07-28 motivation policy rates (see app/api/manager-dashboard's own
   // comment for the full policy writeup) — company-lead vs self-sourced
-  // rates on Просчёт/Выкуп, Влад's cut, and the fulfillment premium rate.
+  // rates on Просчёт/Выкуп, and the fulfillment premium rate. Investor cuts
+  // (Влад/Юра/etc. — used to be fixed fields here) moved to the Investor
+  // model below on 2026-07-31, so the roster/rates/count can change from
+  // «Настройки» → «Руководящий состав» without a schema change.
   normalRatePercent                    Decimal @default(10)
   selfSourcedProscetRatePercent        Decimal @default(100)
   selfSourcedBuyoutDiscountRatePercent Decimal @default(50)
-  vladShareRatePercent                 Decimal @default(10)
   fulfillmentPremiumRatePercent        Decimal @default(10)
-  // Second investor — Юра gets a flat $/kg on delivered cargo weight only
-  // (not a % of Просчёт/Выкуп/Скидка/Курсовая разница like Влад's cut
-  // above, and not self-sourced-gated like a manager's own cargo bonus —
-  // every cargo delivery counts). See PB-V5 chat 2026-07-31.
-  yuraCargoRateUsdPerKg                Decimal @default(0.1)
 
   // How many of a client's first Standard-tier quotes get the search fee
   // waived — see FREE_STANDARD_QUOTE_LIMIT's old home in quote-request.ts.
@@ -413,6 +413,52 @@ model SystemSettings {
   incomeSummaryText      String @default("")
   incomeDetailText       String @default("")
 
+  updatedAt          DateTime @updatedAt
+  updatedByManagerId String
+  updatedByManager   Manager  @relation(fields: [updatedByManagerId], references: [id])
+}
+
+// A partner/investor entitled to a cut of company profit — replaces the
+// fixed Влад/Юра/Александр/Антон fields that used to live directly on
+// SystemSettings and be hardcoded by name throughout app/api/manager-
+// dashboard/route.ts, lib/desk-services/profit-report.ts, and their
+// frontends. Owner-only ("Настройки" → "Руководящий состав"), singleton-
+// style like SystemSettings (live — a rate change applies to every past
+// AND future deal the next time totals are computed, never snapshotted
+// onto a Quote; matches how vladShareRatePercent already behaved before
+// this model existed). See PB-V5 chat 2026-07-31.
+model Investor {
+  id String @id @default(cuid())
+  name String
+  // Lower shows first — purely display order, doesn't affect the split.
+  sortOrder Int @default(0)
+  // Soft-disable instead of delete — keeps a former investor's name
+  // resolvable in old references without them counting in new splits.
+  active Boolean @default(true)
+  // "percent_of_profit": ratePercent × this deal's clamped total profit
+  //   (every source: Просчёт+Выкуп+Скидка+Курсовая разница+Карго) — same
+  //   math as Влад's cut always used. Client.vladShareRatePercentOverride
+  //   (still that name for backward compat) applies to every investor of
+  //   this type uniformly for that one client, not just one specific
+  //   investor — there's no per-investor-per-client override matrix, a
+  //   deliberate simplification (see that field's own comment).
+  // "flat_per_cargo_kg": rateUsdPerKg × a quote's delivered cargo weight
+  //   (converted at that quote's own usdRateUsed) — same math as Юра's
+  //   cut always used, on every cargo delivery regardless of self-sourced
+  //   status.
+  // "remainder_share": splits whatever's left after every percent_of_profit
+  //   and flat_per_cargo_kg cut (and every manager premium) evenly among
+  //   all ACTIVE remainder_share investors — same math the hardcoded "/2"
+  //   for Александр+Антон always did, generalized to N-way.
+  shareType String
+  ratePercent   Decimal?
+  rateUsdPerKg  Decimal?
+  // Free text — where the payout actually goes (bank details, a crypto
+  // address, "нал", anything). Purely informational, never read by any
+  // calculation — just so the owner doesn't have to remember it elsewhere.
+  paymentChannel String?
+  note           String?
+  createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   updatedByManagerId String
   updatedByManager   Manager  @relation(fields: [updatedByManagerId], references: [id])

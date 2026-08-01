@@ -1,279 +1,84 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Check, Loader2 } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
+import { Calculator, Crown, FileText, Package, Percent, Truck } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { ManagerTariffsTab } from "@/components/manager/tabs/tariffs-tab";
+import { ManagerCargoSettingsTab } from "@/components/manager/tabs/settings/cargo-settings-tab";
+import { ManagerLeadershipTab } from "@/components/manager/tabs/settings/leadership-section";
+import { ManagerQuotesBuyoutSettingsTab } from "@/components/manager/tabs/settings/quotes-buyout-section";
+import { ManagerFulfillmentSettingsTab } from "@/components/manager/tabs/settings/fulfillment-section";
+import { ManagerTextsSettingsTab } from "@/components/manager/tabs/settings/texts-section";
 
-interface SystemSettingsRecord {
-  normalRatePercent: string;
-  selfSourcedProscetRatePercent: string;
-  selfSourcedBuyoutDiscountRatePercent: string;
-  vladShareRatePercent: string;
-  fulfillmentPremiumRatePercent: string;
-  yuraCargoRateUsdPerKg: string;
-  freeStandardQuoteLimit: number;
-  lowDensityVolumeThresholdKgM3: string;
-  premiumExplanationText: string;
-  incomeSummaryText: string;
-  incomeDetailText: string;
-  updatedAt: string;
-}
-
-const PERCENT_FIELD_LABELS: Record<
-  "normalRatePercent" | "selfSourcedProscetRatePercent" | "selfSourcedBuyoutDiscountRatePercent" | "vladShareRatePercent" | "fulfillmentPremiumRatePercent",
-  { label: string; hint: string }
-> = {
-  normalRatePercent: {
-    label: "Обычный клиент (лид компании), %",
-    hint: "Ставка премии менеджеру с Просчёта, Выкупа и Скидки поставщика для клиента, которого не заявили как личного.",
-  },
-  selfSourcedProscetRatePercent: {
-    label: "Личный клиент — Просчёт, %",
-    hint: "Ставка премии с Просчёта для подтверждённого личного клиента менеджера.",
-  },
-  selfSourcedBuyoutDiscountRatePercent: {
-    label: "Личный клиент — Выкуп и Скидка, %",
-    hint: "Ставка премии с Выкупа и Скидки поставщика для подтверждённого личного клиента.",
-  },
-  vladShareRatePercent: {
-    label: "Доля Влада (Партнёр), %",
-    hint: "Берётся сверху с прибыли по каждой подтверждённой сделке, независимо от источника клиента.",
-  },
-  fulfillmentPremiumRatePercent: {
-    label: "Премия за фулфилмент, %",
-    hint: "Только для подтверждённого личного клиента — от выставленной клиенту суммы.",
-  },
-};
-
-const TEXT_FIELD_LABELS: Record<"premiumExplanationText" | "incomeSummaryText" | "incomeDetailText", { label: string; hint: string }> = {
-  premiumExplanationText: {
-    label: "Дашборд — «Как считается премия»",
-    hint: "Показывается всем менеджерам, над «В работе».",
-  },
-  incomeSummaryText: {
-    label: "Дашборд — «Разбивка дохода», краткое пояснение",
-    hint: "Показывается только руководителю, короткий абзац над карточками.",
-  },
-  incomeDetailText: {
-    label: "Дашборд — «Как считается доход» (разворачиваемый блок)",
-    hint: "Показывается только руководителю, под кнопкой «Как считается доход».",
-  },
-};
+// «Настройки» — единая панель управления всеми данными и текстами, которые
+// раньше можно было поменять только правкой кода: курсы валют, доли
+// инвесторов, ставки премий, тексты подсказок. Разбита на под-вкладки по
+// смыслу, а не по тому, в какой таблице что хранится — так «Тарифы» не
+// смешивает клиентские цены с карго-ставками, а «Карго» собирает всё
+// карго-специфичное в одном месте, даже если технически часть полей
+// хранится в TariffSettings, а часть в SystemSettings. See PB-V5 chat
+// 2026-07-31.
+//
+// ownerOnly here doesn't gate access (every manager needs to at least READ
+// Тарифы/Карго to price a quote) — it only hides sub-tabs whose content is
+// genuinely owner-confidential (investor profit shares) or purely
+// administrative (dashboard hint-text copy) from the nav for non-owners.
+// Editing rights within a visible sub-tab are still gated by its own
+// canEdit/isOwner logic, same as before this reorganization.
+const SUB_TABS = [
+  { id: "tariffs", label: "Тарифы", icon: Calculator, Component: ManagerTariffsTab, ownerOnly: false },
+  { id: "leadership", label: "Руководящий состав", icon: Crown, Component: ManagerLeadershipTab, ownerOnly: true },
+  { id: "quotes-buyout", label: "Просчёты и выкуп", icon: Percent, Component: ManagerQuotesBuyoutSettingsTab, ownerOnly: false },
+  { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentSettingsTab, ownerOnly: false },
+  { id: "cargo", label: "Карго", icon: Truck, Component: ManagerCargoSettingsTab, ownerOnly: false },
+  { id: "texts", label: "Тексты", icon: FileText, Component: ManagerTextsSettingsTab, ownerOnly: true },
+] as const;
 
 function ManagerSettingsTab() {
-  const [settings, setSettings] = useState<SystemSettingsRecord | null>(null);
-  const [canEdit, setCanEdit] = useState(false);
-  const [form, setForm] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadSettings = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/manager-settings");
-      const data = await res.json();
-      if (res.ok) {
-        setSettings(data.settings);
-        setCanEdit(Boolean(data.canEdit));
-        setForm({
-          normalRatePercent: data.settings.normalRatePercent,
-          selfSourcedProscetRatePercent: data.settings.selfSourcedProscetRatePercent,
-          selfSourcedBuyoutDiscountRatePercent: data.settings.selfSourcedBuyoutDiscountRatePercent,
-          vladShareRatePercent: data.settings.vladShareRatePercent,
-          fulfillmentPremiumRatePercent: data.settings.fulfillmentPremiumRatePercent,
-          yuraCargoRateUsdPerKg: data.settings.yuraCargoRateUsdPerKg,
-          freeStandardQuoteLimit: String(data.settings.freeStandardQuoteLimit),
-          lowDensityVolumeThresholdKgM3: data.settings.lowDensityVolumeThresholdKgM3,
-          premiumExplanationText: data.settings.premiumExplanationText,
-          incomeSummaryText: data.settings.incomeSummaryText,
-          incomeDetailText: data.settings.incomeDetailText,
-        });
-      }
-    } finally {
-      setLoading(false);
-    }
+  // Probes an owner-only endpoint once to decide which sub-tabs to show —
+  // same "infer role from an API response, not a passed-down prop"
+  // convention every other tab in this cabinet already uses (e.g.
+  // isOwner = settings.cargoDensityMarginUsdPerKg !== undefined in
+  // tariffs-tab.tsx).
+  const [isOwner, setIsOwner] = useState(false);
+  useEffect(() => {
+    fetch("/api/manager-investors")
+      .then((res) => setIsOwner(res.ok))
+      .catch(() => setIsOwner(false));
   }, []);
 
-  useEffect(() => {
-    loadSettings();
-  }, [loadSettings]);
-
-  async function handleSave(event: React.FormEvent) {
-    event.preventDefault();
-    if (saving) return;
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      const res = await fetch("/api/manager-settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error ?? "Не удалось сохранить настройки.");
-        return;
-      }
-      setSaved(true);
-      await loadSettings();
-    } catch {
-      setError("Не удалось связаться с сервером.");
-    } finally {
-      setSaving(false);
-    }
-  }
+  const visibleTabs = SUB_TABS.filter((tab) => !tab.ownerOnly || isOwner);
+  const [activeSubTab, setActiveSubTab] = useState<(typeof SUB_TABS)[number]["id"]>("tariffs");
+  const active = visibleTabs.find((t) => t.id === activeSubTab) ?? visibleTabs[0];
+  const ActiveComponent = active.Component;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div>
         <h2 className="text-sm font-bold text-text">Настройки</h2>
         <p className="mt-1 text-sm text-text-secondary">
-          Ставки премий, лимиты и тексты подсказок — то, что раньше можно было поменять только правкой кода. Просчёты
-          и премии, уже посчитанные с прежними значениями, не меняются задним числом.
+          Цены, ставки, доли и тексты — всё, что раньше требовало правки кода, теперь редактируется здесь.
         </p>
-        {settings && (
-          <p className="mt-1 text-xs text-text-secondary">
-            Обновлено: {new Date(settings.updatedAt).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}
-          </p>
-        )}
       </div>
 
-      {loading ? (
-        <p className="text-sm text-text-secondary">Загрузка…</p>
-      ) : (
-        <form onSubmit={handleSave} className="space-y-8">
-          {!canEdit && (
-            <p className="rounded-lg bg-bg px-3 py-2 text-xs text-text-secondary">
-              Изменять системные настройки может только руководитель. Текущие значения видны ниже.
-            </p>
-          )}
+      <nav className="flex flex-wrap items-center gap-1 border-b border-border pb-3">
+        {visibleTabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveSubTab(tab.id)}
+            className={cn(
+              "flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+              active.id === tab.id ? "bg-primary/10 text-primary" : "text-text-secondary hover:bg-bg hover:text-text",
+            )}
+          >
+            <tab.icon className="h-4 w-4 shrink-0" />
+            {tab.label}
+          </button>
+        ))}
+      </nav>
 
-          <div className="space-y-3">
-            <h3 className="text-sm font-bold text-text">Ставки премий менеджеров</h3>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {Object.entries(PERCENT_FIELD_LABELS).map(([key, { label, hint }]) => (
-                <div key={key} className="space-y-1.5">
-                  <Label htmlFor={`settings-${key}`}>{label}</Label>
-                  <Input
-                    id={`settings-${key}`}
-                    type="number"
-                    step="0.01"
-                    min={0}
-                    max={100}
-                    value={form[key] ?? ""}
-                    onChange={(e) => setForm((current) => ({ ...current, [key]: e.target.value }))}
-                    disabled={!canEdit}
-                    required
-                  />
-                  <p className="text-xs text-text-secondary">{hint}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-3 border-t border-border pt-6">
-            <h3 className="text-sm font-bold text-text">Доля инвесторов</h3>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="settings-yuraCargoRateUsdPerKg">Юра (Инвестор) — за карго, $/кг</Label>
-                <Input
-                  id="settings-yuraCargoRateUsdPerKg"
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  value={form.yuraCargoRateUsdPerKg ?? ""}
-                  onChange={(e) => setForm((current) => ({ ...current, yuraCargoRateUsdPerKg: e.target.value }))}
-                  disabled={!canEdit}
-                  required
-                />
-                <p className="text-xs text-text-secondary">
-                  Флат-ставка с каждого доставленного килограмма карго, независимо от источника клиента — не % от
-                  прибыли, как у Влада выше, и берётся только с карго.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-3 border-t border-border pt-6">
-            <h3 className="text-sm font-bold text-text">Пороги и лимиты</h3>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="settings-freeStandardQuoteLimit">Бесплатных просчётов Standart на клиента, шт</Label>
-                <Input
-                  id="settings-freeStandardQuoteLimit"
-                  type="number"
-                  step="1"
-                  min={0}
-                  value={form.freeStandardQuoteLimit ?? ""}
-                  onChange={(e) => setForm((current) => ({ ...current, freeStandardQuoteLimit: e.target.value }))}
-                  disabled={!canEdit}
-                  required
-                />
-                <p className="text-xs text-text-secondary">
-                  Действует только для новых просчётов — уже созданные не пересчитываются.
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="settings-lowDensityVolumeThresholdKgM3">Порог «по объёму» вместо «по плотности», кг/м³</Label>
-                <Input
-                  id="settings-lowDensityVolumeThresholdKgM3"
-                  type="number"
-                  step="0.1"
-                  min={0}
-                  value={form.lowDensityVolumeThresholdKgM3 ?? ""}
-                  onChange={(e) => setForm((current) => ({ ...current, lowDensityVolumeThresholdKgM3: e.target.value }))}
-                  disabled={!canEdit}
-                  required
-                />
-                <p className="text-xs text-text-secondary">
-                  Ниже этой плотности доставка всегда считается «по объёму», для любой категории.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-3 border-t border-border pt-6">
-            <h3 className="text-sm font-bold text-text">Тексты подсказок на дашборде</h3>
-            <p className="text-xs text-text-secondary">
-              Пустая строка между абзацами — новый абзац. <code className="rounded bg-bg px-1">**слово**</code> —
-              жирный текст.
-            </p>
-            {Object.entries(TEXT_FIELD_LABELS).map(([key, { label, hint }]) => (
-              <div key={key} className="space-y-1.5">
-                <Label htmlFor={`settings-${key}`}>{label}</Label>
-                <Textarea
-                  id={`settings-${key}`}
-                  rows={5}
-                  value={form[key] ?? ""}
-                  onChange={(e) => setForm((current) => ({ ...current, [key]: e.target.value }))}
-                  disabled={!canEdit}
-                />
-                <p className="text-xs text-text-secondary">{hint}</p>
-              </div>
-            ))}
-          </div>
-
-          {canEdit && (
-            <div>
-              {error && <p className="mb-2 text-xs text-error">{error}</p>}
-              {saved && (
-                <p className="mb-2 flex items-center gap-1 text-xs font-medium text-success">
-                  <Check className="h-3.5 w-3.5" /> Сохранено.
-                </p>
-              )}
-              <Button type="submit" disabled={saving}>
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Сохранить настройки"}
-              </Button>
-            </div>
-          )}
-        </form>
-      )}
+      {ActiveComponent && <ActiveComponent />}
     </div>
   );
 }

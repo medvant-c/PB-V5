@@ -86,10 +86,8 @@ interface ProfitReportPdfTotals {
   totalFxProfitRub: number;
   totalCargoProfitRub: number;
   profitPoolRub: number;
-  vladShareRub: number;
-  yuraShareRub: number;
   managerPremiumRub: number;
-  founderShareRub: number;
+  investorShares: { id: string; name: string; shareType: string; shareRub: number }[];
 }
 
 interface ProfitReportPdfProps {
@@ -189,22 +187,12 @@ function ProfitReportPdfDocument({ rows, totals }: ProfitReportPdfProps) {
 
           <View style={styles.splitBox}>
             <Text style={styles.splitTitle}>Доля партнёров</Text>
-            <View style={styles.splitRow}>
-              <Text style={styles.splitLabel}>Влад (Партнёр) — 10%</Text>
-              <Text style={styles.splitValue}>{fmt(totals.vladShareRub)} ₽</Text>
-            </View>
-            <View style={styles.splitRow}>
-              <Text style={styles.splitLabel}>Юра (Инвестор) — карго</Text>
-              <Text style={styles.splitValue}>{fmt(totals.yuraShareRub)} ₽</Text>
-            </View>
-            <View style={styles.splitRow}>
-              <Text style={styles.splitLabel}>Александр (Основатель/Инвестор)</Text>
-              <Text style={styles.splitValue}>{fmt(totals.founderShareRub)} ₽</Text>
-            </View>
-            <View style={styles.splitRow}>
-              <Text style={styles.splitLabel}>Антон</Text>
-              <Text style={styles.splitValue}>{fmt(totals.founderShareRub)} ₽</Text>
-            </View>
+            {totals.investorShares.map((inv) => (
+              <View key={inv.id} style={styles.splitRow}>
+                <Text style={styles.splitLabel}>{inv.name}</Text>
+                <Text style={styles.splitValue}>{fmt(inv.shareRub)} ₽</Text>
+              </View>
+            ))}
           </View>
         </View>
 

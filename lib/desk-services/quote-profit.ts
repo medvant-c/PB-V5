@@ -87,10 +87,11 @@ function totalQuoteProfitRub(q: QuoteProfitFields): number {
   return proscetRub + buyoutRub + discountRub + (q.buyoutFactConfirmed ? fxProfitRub(q) : 0) + cargoProfitRub(q);
 }
 
-// Client.vladShareRatePercentOverride lets the owner waive or reduce
-// Влад's cut for one specific client without touching the global rate
-// (SystemSettings.vladShareRatePercent) everyone else still pays.
-function effectiveVladRatePercent(client: { vladShareRatePercentOverride: unknown }, defaultRatePercent: number): number {
+// Client.vladShareRatePercentOverride (still that name, see its own schema
+// comment) lets the owner waive or reduce every "percent_of_profit"
+// investor's cut for one specific client, uniformly, without touching
+// their individual global rates.
+function effectiveInvestorRatePercent(client: { vladShareRatePercentOverride: unknown }, defaultRatePercent: number): number {
   return client.vladShareRatePercentOverride !== null && client.vladShareRatePercentOverride !== undefined
     ? Number(client.vladShareRatePercentOverride)
     : defaultRatePercent;
@@ -175,16 +176,35 @@ function estimatedFxProfitRub(q: CnyVolumeFields, attachedServicesTotalRub: numb
   return cnyVolume * pickCnyProfitForVolume(cnyVolume, tiers);
 }
 
-// Юра (investor #2) — flat $/kg on delivered cargo weight, on every cargo
-// delivery regardless of self-sourced status (unlike a manager's own
-// flatCargoBonusRub above, which is self-sourced-only and switches basis
-// density/volume — Юра's cut is always per-kg). totalWeightKg is the same
-// field cargoProfitRub implicitly relies on: an estimate before cargo is
-// actualized, the real delivered weight after — no separate
-// estimated/factual formula needed here for the same reason cargoProfitRub
-// itself doesn't need one. See PB-V5 chat 2026-07-31.
-function yuraCargoShareRub(totalWeightKg: unknown, usdPerKg: number, usdRateUsed: unknown): number {
-  return Number(totalWeightKg) * usdPerKg * Number(usdRateUsed);
+// A "flat_per_cargo_kg"-type investor (e.g. Юра) — flat $/kg on delivered
+// cargo weight, on every cargo delivery regardless of self-sourced status
+// (unlike a manager's own flatCargoBonusRub above, which is self-sourced-
+// only and switches basis density/volume — this is always per-kg).
+// totalWeightKg is the same field cargoProfitRub implicitly relies on: an
+// estimate before cargo is actualized, the real delivered weight after —
+// no separate estimated/factual formula needed here for the same reason
+// cargoProfitRub itself doesn't need one. See PB-V5 chat 2026-07-31.
+function investorCargoShareRub(totalWeightKg: unknown, rateUsdPerKg: number, usdRateUsed: unknown): number {
+  return Number(totalWeightKg) * rateUsdPerKg * Number(usdRateUsed);
+}
+
+// A "remainder_share"-type investor (e.g. Александр/Антон) splits whatever
+// is left after every percent_of_profit/flat_per_cargo_kg cut and every
+// manager premium — evenly among however many active remainder_share
+// investors there are (was a hardcoded "/2", now N-way). 0 investors of
+// this type = nothing to split, not a divide-by-zero.
+function splitRemainderRub(remainderPoolRub: number, remainderInvestorCount: number): number {
+  return remainderInvestorCount > 0 ? remainderPoolRub / remainderInvestorCount : 0;
+}
+
+type InvestorShareType = "percent_of_profit" | "flat_per_cargo_kg" | "remainder_share";
+
+interface InvestorConfig {
+  id: string;
+  name: string;
+  shareType: InvestorShareType;
+  ratePercent: number | null;
+  rateUsdPerKg: number | null;
 }
 
 export {
@@ -194,12 +214,13 @@ export {
   fxProfitRub,
   cargoProfitRub,
   totalQuoteProfitRub,
-  effectiveVladRatePercent,
+  effectiveInvestorRatePercent,
   isSelfSourcedFor,
   flatCargoBonusRub,
   pickCnyProfitForVolume,
   estimateCnyVolume,
   estimatedFxProfitRub,
-  yuraCargoShareRub,
+  investorCargoShareRub,
+  splitRemainderRub,
 };
-export type { QuoteProfitFields, SourceProfits, CnyProfitTiers, CnyVolumeFields };
+export type { QuoteProfitFields, SourceProfits, CnyProfitTiers, CnyVolumeFields, InvestorShareType, InvestorConfig };

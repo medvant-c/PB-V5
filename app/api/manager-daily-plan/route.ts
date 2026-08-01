@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { getVisibleManagerIds } from "@/lib/manager-scope";
+import { dayBoundsUtc, isTodayUtc } from "@/lib/daily-plan-day";
 import { prisma } from "@/lib/prisma";
 
 // Mostly personal — every manager (including the owner, who can plan their
@@ -12,25 +13,15 @@ import { prisma } from "@/lib/prisma";
 // themselves. The read-only cross-manager overview lives in a separate
 // route (manager-daily-plan-summary).
 
-function dayBounds(dateParam: string | null): { start: Date; end: Date } {
-  // <input type="date">/query param is a plain "YYYY-MM-DD" — treated as a
-  // UTC calendar day (same convention as CashOrder's date field elsewhere
-  // in this app), not the browser's local midnight.
-  const base = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? new Date(`${dateParam}T00:00:00.000Z`) : new Date();
-  const start = new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate()));
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-  return { start, end };
-}
-
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
     return Response.json({ error: "Не авторизовано." }, { status: 401 });
   }
 
-  const { start, end } = dayBounds(req.nextUrl.searchParams.get("date"));
+  const { start, end } = dayBoundsUtc(req.nextUrl.searchParams.get("date"));
 
-  const items = await prisma.dailyPlanItem.findMany({
+  const todayItems = await prisma.dailyPlanItem.findMany({
     where: { managerId: session.managerId, planDate: { gte: start, lt: end } },
     orderBy: { createdAt: "asc" },
     include: {
@@ -38,6 +29,26 @@ export async function GET(req: NextRequest) {
       quoteDraftRequest: { select: { id: true, displayId: true } },
     },
   });
+
+  // Anything left unchecked on an earlier day rolls forward onto today's
+  // list automatically, so it doesn't quietly fall off the radar once its
+  // original day ends — only when actually looking at today, never when
+  // reviewing a past day's plan (that must stay an exact historical
+  // record, e.g. for DailyPlanReviewModal's "vs yesterday" check). See
+  // PB-V5 chat 2026-08-01.
+  const overdueItems = isTodayUtc(start)
+    ? await prisma.dailyPlanItem.findMany({
+        where: { managerId: session.managerId, doneAt: null, planDate: { lt: start } },
+        orderBy: { planDate: "asc" },
+        include: {
+          client: { select: { id: true, name: true, company: true } },
+          quoteDraftRequest: { select: { id: true, displayId: true } },
+        },
+      })
+    : [];
+  const overdueIds = new Set(overdueItems.map((i) => i.id));
+
+  const items = [...overdueItems, ...todayItems];
 
   // assignedByManagerId is a plain string, no relation (see schema) —
   // resolved with one batch lookup rather than N+1 queries.
@@ -51,6 +62,7 @@ export async function GET(req: NextRequest) {
     items: items.map((item) => ({
       ...item,
       assignedByManagerName: item.assignedByManagerId ? (assignerNameById.get(item.assignedByManagerId) ?? null) : null,
+      carriedOverFromDate: overdueIds.has(item.id) ? item.planDate.toISOString().slice(0, 10) : null,
     })),
   });
 }
@@ -100,7 +112,7 @@ export async function POST(req: NextRequest) {
     assignedByManagerId = session.managerId;
   }
 
-  const { start } = dayBounds(typeof date === "string" ? date : null);
+  const { start } = dayBoundsUtc(typeof date === "string" ? date : null);
 
   const item = await prisma.dailyPlanItem.create({
     data: {

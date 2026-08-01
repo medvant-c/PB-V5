@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getSystemSettings } from "@/lib/system-settings";
 import { QUOTE_STATUSES, type QuoteStatus } from "@/lib/quote-statuses";
 import {
-  effectiveVladRatePercent,
+  effectiveInvestorRatePercent,
   estimatedSourceProfits,
   factualSourceProfits,
   fxProfitRub,
@@ -13,7 +13,8 @@ import {
   isSelfSourcedFor,
   flatCargoBonusRub,
   estimatedFxProfitRub,
-  yuraCargoShareRub,
+  investorCargoShareRub,
+  splitRemainderRub,
   type CnyProfitTiers,
 } from "@/lib/desk-services/quote-profit";
 
@@ -270,9 +271,7 @@ export async function GET(req: NextRequest) {
     selfSourcedProscetRatePercent: Number(systemSettings.selfSourcedProscetRatePercent),
     selfSourcedBuyoutDiscountRatePercent: Number(systemSettings.selfSourcedBuyoutDiscountRatePercent),
   };
-  const vladShareRatePercent = Number(systemSettings.vladShareRatePercent);
   const fulfillmentPremiumRatePercent = Number(systemSettings.fulfillmentPremiumRatePercent);
-  const yuraCargoRateUsdPerKg = Number(systemSettings.yuraCargoRateUsdPerKg);
   const cnyProfitTiers: CnyProfitTiers = {
     base: tariffSettings?.cnyProfitPerYuanRub !== undefined && tariffSettings?.cnyProfitPerYuanRub !== null ? Number(tariffSettings.cnyProfitPerYuanRub) : 0,
     tier3000: tariffSettings?.cnyProfitPerYuanRubTier3000 !== undefined && tariffSettings?.cnyProfitPerYuanRubTier3000 !== null ? Number(tariffSettings.cnyProfitPerYuanRubTier3000) : null,
@@ -433,15 +432,12 @@ export async function GET(req: NextRequest) {
   let cargoWeightKg: number | null = null;
   let searchFeeRub: number | null = null;
   let buyoutCommissionRub: number | null = null;
-  // Влад's 10% cut (every confirmed source, every deal) and what's left for
-  // the two founders after that plus every manager's premium — see PB-V5
-  // chat 2026-07-28. Company-wide, not per-manager; negative per-quote
-  // totals are clamped to 0 first, same convention as manager premiums,
-  // so one loss-making deal never eats into shares already earned
-  // elsewhere.
-  let vladShareRub: number | null = null;
-  let yuraShareRub: number | null = null;
-  let founderShareRub: number | null = null;
+  // Every active investor's cut (see Investor model) — company-wide, not
+  // per-manager; negative per-quote totals are clamped to 0 first, same
+  // convention as manager premiums, so one loss-making deal never eats
+  // into shares already earned elsewhere. Replaces the old fixed
+  // Влад/Юра/Александр/Антон fields — see PB-V5 chat 2026-07-31.
+  let investorShares: { id: string; name: string; shareType: string; shareRub: number }[] | null = null;
   if (session.role === "owner" && perManager) {
     const totalManagerPotentialPremiumsRub = perManager.reduce((sum, m) => sum + m.estimatedPremiumRub, 0);
     const totalManagerFactualPremiumsRub = perManager.reduce((sum, m) => sum + m.factualPremiumRub, 0);
@@ -480,36 +476,60 @@ export async function GET(req: NextRequest) {
     // profit for this pool, same treatment as Просчёт.
     const totalProfitPoolRub = totalConfirmedQuoteProfitRub + fulfillmentTotalRub;
 
-    // Влад's cut is computed PER DEAL, not once on the aggregate pool
-    // above — that's the only way a per-client override
+    const investors = await prisma.investor.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } });
+
+    // percent_of_profit — computed PER DEAL, not once on the aggregate pool
+    // above, since that's the only way a per-client override
     // (Client.vladShareRatePercentOverride) can actually change anything.
     // Same Math.max(0, ...)-per-item clamping the old aggregate version
     // used, just applied before each deal's own rate multiply instead of
     // after one company-wide multiply.
-    const vladShareFromQuotesRub = quotes
-      .filter((q) => q.buyoutFactConfirmed)
-      .reduce((sum, q) => {
-        const { proscetRub, buyoutRub, discountRub } = factualSourceProfits(q);
-        const perQuoteTotal = Math.max(0, proscetRub + buyoutRub + discountRub + fxProfitRub(q) + cargoProfitRub(q));
-        const rate = effectiveVladRatePercent(q.client, vladShareRatePercent);
-        return sum + perQuoteTotal * (rate / 100);
+    let percentAndFlatSharesRub = 0;
+    const shares: { id: string; name: string; shareType: string; shareRub: number }[] = [];
+    for (const inv of investors) {
+      if (inv.shareType !== "percent_of_profit") continue;
+      const ratePercent = Number(inv.ratePercent ?? 0);
+      const fromQuotesRub = quotes
+        .filter((q) => q.buyoutFactConfirmed)
+        .reduce((sum, q) => {
+          const { proscetRub, buyoutRub, discountRub } = factualSourceProfits(q);
+          const perQuoteTotal = Math.max(0, proscetRub + buyoutRub + discountRub + fxProfitRub(q) + cargoProfitRub(q));
+          const rate = effectiveInvestorRatePercent(q.client, ratePercent);
+          return sum + perQuoteTotal * (rate / 100);
+        }, 0);
+      const fromFulfillmentRub = fulfillmentOrders.reduce((sum, o) => {
+        const rate = effectiveInvestorRatePercent(o.client, ratePercent);
+        return sum + Number(o.totalRub) * (rate / 100);
       }, 0);
-    const vladShareFromFulfillmentRub = fulfillmentOrders.reduce((sum, o) => {
-      const rate = effectiveVladRatePercent(o.client, vladShareRatePercent);
-      return sum + Number(o.totalRub) * (rate / 100);
-    }, 0);
-    vladShareRub = vladShareFromQuotesRub + vladShareFromFulfillmentRub;
+      const shareRub = fromQuotesRub + fromFulfillmentRub;
+      percentAndFlatSharesRub += shareRub;
+      shares.push({ id: inv.id, name: inv.name, shareType: inv.shareType, shareRub });
+    }
 
-    // Юра — flat $/kg on delivered cargo weight only, gated the same way
-    // as factualCargoBonusRub above (cargoBonusRatePercent locked in at
-    // handed_to_client), not on buyoutFactConfirmed — cargo delivery and
-    // buyout confirmation are independent events. Comes off the top same
-    // as Влад's cut, before the founders split what's left.
-    yuraShareRub = quotes
-      .filter((q) => q.cargoBonusRatePercent !== null && q.cargoBonusRatePercent !== undefined)
-      .reduce((sum, q) => sum + yuraCargoShareRub(q.totalWeightKg, yuraCargoRateUsdPerKg, q.usdRateUsed), 0);
+    // flat_per_cargo_kg — gated the same way as factualCargoBonusRub above
+    // (cargoBonusRatePercent locked in at handed_to_client), not on
+    // buyoutFactConfirmed — cargo delivery and buyout confirmation are
+    // independent events. Comes off the top same as a percent_of_profit
+    // cut, before remainder_share investors split what's left.
+    const deliveredCargoQuotes = quotes.filter((q) => q.cargoBonusRatePercent !== null && q.cargoBonusRatePercent !== undefined);
+    for (const inv of investors) {
+      if (inv.shareType !== "flat_per_cargo_kg") continue;
+      const rateUsdPerKg = Number(inv.rateUsdPerKg ?? 0);
+      const shareRub = deliveredCargoQuotes.reduce((sum, q) => sum + investorCargoShareRub(q.totalWeightKg, rateUsdPerKg, q.usdRateUsed), 0);
+      percentAndFlatSharesRub += shareRub;
+      shares.push({ id: inv.id, name: inv.name, shareType: inv.shareType, shareRub });
+    }
 
-    founderShareRub = (totalProfitPoolRub - vladShareRub - yuraShareRub - totalManagerFactualPremiumsRub) / 2;
+    // remainder_share — splits whatever's left evenly, N-way (was a
+    // hardcoded "/2" for Александр+Антон, now works for any count).
+    const remainderInvestors = investors.filter((inv) => inv.shareType === "remainder_share");
+    const remainderPoolRub = totalProfitPoolRub - percentAndFlatSharesRub - totalManagerFactualPremiumsRub;
+    const perRemainderShareRub = splitRemainderRub(remainderPoolRub, remainderInvestors.length);
+    for (const inv of remainderInvestors) {
+      shares.push({ id: inv.id, name: inv.name, shareType: inv.shareType, shareRub: perRemainderShareRub });
+    }
+
+    investorShares = shares;
   }
 
   // Owner-confidential cargo-margin signal — never leaves the server for
@@ -541,9 +561,7 @@ export async function GET(req: NextRequest) {
     cargoWeightKg,
     searchFeeRub,
     buyoutCommissionRub,
-    vladShareRub,
-    yuraShareRub,
-    founderShareRub,
+    investorShares,
     // Every ₽ figure on the dashboard is DISPLAYED in ¥ (per PB-V5 chat
     // 2026-07-28) — the frontend converts using this rate rather than the
     // backend recomputing everything in CNY, so the underlying premium/

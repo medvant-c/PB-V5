@@ -11,6 +11,19 @@ interface PlanItem {
   client: { id: string; name: string; company: string | null } | null;
   quoteDraftRequest: { id: string; displayId: number } | null;
   assignedByManagerName: string | null;
+  // Set when this item was left unchecked on an earlier day and rolled
+  // forward onto today's list automatically (see GET /api/manager-daily-
+  // plan) — the original "YYYY-MM-DD" it was actually planned for, so the
+  // badge can say "с 30.07" instead of just "просрочено".
+  carriedOverFromDate: string | null;
+}
+
+function formatCarriedOverLabel(dateIso: string): string {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (dateIso === yesterday.toISOString().slice(0, 10)) return "перенесено со вчера";
+  const [, month, day] = dateIso.split("-");
+  return `перенесено с ${day}.${month}`;
 }
 
 interface ClientOption {
@@ -250,6 +263,11 @@ function DailyPlanPanel() {
                       >
                         {item.quoteDraftRequest ? "черновик" : item.client ? "клиент" : "заметка"}
                       </span>
+                      {item.carriedOverFromDate && (
+                        <span className="rounded-full bg-error/15 px-1.5 py-0.5 text-[10px] font-bold text-error">
+                          ⏪ {formatCarriedOverLabel(item.carriedOverFromDate)}
+                        </span>
+                      )}
                       {item.assignedByManagerName && (
                         <span className="rounded-full bg-secondary/15 px-1.5 py-0.5 text-[10px] font-bold text-secondary">
                           🎯 от {item.assignedByManagerName}

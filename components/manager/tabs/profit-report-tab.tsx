@@ -46,8 +46,6 @@ interface ReportRow {
   fxProfitRub: number;
   cargoProfitRub: number;
   rawTotalRub: number;
-  vladShareRub: number;
-  yuraShareRub: number;
   managerPremiumRub: number;
   manager: { id: string; name: string };
   client: { id: string; name: string; company: string | null };
@@ -62,10 +60,8 @@ interface ReportTotals {
   totalFxProfitRub: number;
   totalCargoProfitRub: number;
   profitPoolRub: number;
-  vladShareRub: number;
-  yuraShareRub: number;
   managerPremiumRub: number;
-  founderShareRub: number;
+  investorShares: { id: string; name: string; shareType: string; shareRub: number }[];
 }
 
 function fmt(value: number): string {
@@ -431,34 +427,26 @@ function ManagerProfitReportTab() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-border bg-bg p-4 sm:p-5">
-            <div className="flex items-center gap-1.5 text-sm font-bold text-text">
-              <Lock className="h-4 w-4 text-text-secondary" /> Доля партнёров — видно только руководителю
-            </div>
-            <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
-              10% от прибыли по каждой сделке (со всех источников, включая курсовую разницу) — Владу. Юре — фикс
-              $/кг с каждого доставленного карго, отдельно от остальной прибыли. Остаток после доли Влада, доли
-              Юры и премий менеджеров делится 50/50 между Александром и Антоном.
-            </p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-4">
-              <div className="rounded-xl border border-border bg-surface p-3.5">
-                <div className="text-xs text-text-secondary">Влад (Партнёр) — 10%</div>
-                <div className="mt-1 text-lg font-bold text-text">{fmtBoth(report.totals.vladShareRub, cnyRateRub)}</div>
+          {report.totals.investorShares.length > 0 && (
+            <div className="rounded-2xl border border-border bg-bg p-4 sm:p-5">
+              <div className="flex items-center gap-1.5 text-sm font-bold text-text">
+                <Lock className="h-4 w-4 text-text-secondary" /> Руководящий состав — видно только руководителю
               </div>
-              <div className="rounded-xl border border-border bg-surface p-3.5">
-                <div className="text-xs text-text-secondary">Юра (Инвестор) — карго</div>
-                <div className="mt-1 text-lg font-bold text-text">{fmtBoth(report.totals.yuraShareRub, cnyRateRub)}</div>
-              </div>
-              <div className="rounded-xl border border-border bg-surface p-3.5">
-                <div className="text-xs text-text-secondary">Александр (Основатель/Инвестор)</div>
-                <div className="mt-1 text-lg font-bold text-text">{fmtBoth(report.totals.founderShareRub, cnyRateRub)}</div>
-              </div>
-              <div className="rounded-xl border border-border bg-surface p-3.5">
-                <div className="text-xs text-text-secondary">Антон</div>
-                <div className="mt-1 text-lg font-bold text-text">{fmtBoth(report.totals.founderShareRub, cnyRateRub)}</div>
+              <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
+                Доля каждого инвестора считается по его собственному правилу (% от прибыли по каждой подтверждённой
+                сделке, фикс $/кг с доставленного карго, или остаток поровну после всех остальных долей и премий
+                менеджеров) — состав и ставки настраиваются в «Настройки» → «Руководящий состав».
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-4">
+                {report.totals.investorShares.map((inv) => (
+                  <div key={inv.id} className="rounded-xl border border-border bg-surface p-3.5">
+                    <div className="text-xs text-text-secondary">{inv.name}</div>
+                    <div className="mt-1 text-lg font-bold text-text">{fmtBoth(inv.shareRub, cnyRateRub)}</div>
+                  </div>
+                ))}
               </div>
             </div>
-          </div>
+          )}
 
           {report.rows.some((r) => !r.confirmed) && (
             <p className="flex items-start gap-1.5 text-xs text-text-secondary">

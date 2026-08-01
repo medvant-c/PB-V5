@@ -3,15 +3,17 @@ import { prisma } from "@/lib/prisma";
 import { getSystemSettings } from "@/lib/system-settings";
 import {
   cargoProfitRub,
-  effectiveVladRatePercent,
+  effectiveInvestorRatePercent,
   estimatedFxProfitRub,
   estimatedSourceProfits,
   factualSourceProfits,
   flatCargoBonusRub,
   fxProfitRub,
+  investorCargoShareRub,
   isSelfSourcedFor,
-  yuraCargoShareRub,
+  splitRemainderRub,
   type CnyProfitTiers,
+  type InvestorConfig,
   type QuoteProfitFields,
 } from "@/lib/desk-services/quote-profit";
 
@@ -81,16 +83,18 @@ interface PremiumRates {
 
 // One quote's full breakdown — every line the aggregate dashboard totals
 // are built from, just kept per-deal instead of summed away, plus this
-// quote's own contribution to Влад's cut and the manager's premium so the
-// per-quote rows and the batch totals below always reconcile exactly.
+// quote's own contribution to every percent_of_profit/flat_per_cargo_kg
+// investor's cut and the manager's premium so the per-quote rows and the
+// batch totals below always reconcile exactly. remainder_share investors
+// aren't computed here — that split only makes sense on the aggregate
+// remainder pool (see buildProfitReport below), not per-row.
 function computeQuoteBreakdown(
   q: ProfitQuote,
   cargoRates: { usdPerKg: number; usdPerM3: number },
   premiumRates: PremiumRates,
-  vladShareRatePercent: number,
+  investors: InvestorConfig[],
   cnyProfitTiers: CnyProfitTiers,
   attachedServicesTotalRub: number,
-  yuraCargoRateUsdPerKg: number,
 ) {
   const fields: QuoteProfitFields = q;
   const { proscetRub, buyoutRub, discountRub } = q.buyoutFactConfirmed ? factualSourceProfits(fields) : estimatedSourceProfits(fields);
@@ -102,13 +106,15 @@ function computeQuoteBreakdown(
   const rawTotalRub = proscetRub + buyoutRub + discountRub + fx + cargo;
   const clampedTotalRub = Math.max(0, rawTotalRub);
 
-  const vladRatePercent = effectiveVladRatePercent(q.client, vladShareRatePercent);
-  const vladShareRub = clampedTotalRub * (vladRatePercent / 100);
-  // Юра — flat $/kg on delivered cargo weight, independent of profit/
-  // confirmation status (totalWeightKg is itself an estimate before
-  // actualization, the real delivered weight after — same as
-  // cargoProfitRub above needs no separate estimated/factual branch).
-  const yuraShareRub = yuraCargoShareRub(q.totalWeightKg, yuraCargoRateUsdPerKg, q.usdRateUsed);
+  const investorShares = investors
+    .filter((inv) => inv.shareType === "percent_of_profit" || inv.shareType === "flat_per_cargo_kg")
+    .map((inv) => {
+      const shareRub =
+        inv.shareType === "percent_of_profit"
+          ? clampedTotalRub * (effectiveInvestorRatePercent(q.client, Number(inv.ratePercent ?? 0)) / 100)
+          : investorCargoShareRub(q.totalWeightKg, Number(inv.rateUsdPerKg ?? 0), q.usdRateUsed);
+      return { id: inv.id, name: inv.name, shareType: inv.shareType, shareRub };
+    });
 
   let managerPremiumRub: number;
   if (q.buyoutFactConfirmed) {
@@ -153,17 +159,17 @@ function computeQuoteBreakdown(
     fxProfitRub: fx,
     cargoProfitRub: cargo,
     rawTotalRub,
-    vladShareRub,
-    yuraShareRub,
+    investorShares,
     managerPremiumRub,
   };
 }
 
 async function loadRatesAndQuotes(quoteIds: string[]) {
-  const [tariffSettings, systemSettings, quotes] = await Promise.all([
+  const [tariffSettings, systemSettings, quotes, investorRows] = await Promise.all([
     prisma.tariffSettings.findFirst({ orderBy: { createdAt: "desc" } }),
     getSystemSettings(),
     fetchProfitQuotes(quoteIds),
+    prisma.investor.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
   ]);
   const cargoRates = {
     usdPerKg: tariffSettings ? Number(tariffSettings.managerCargoRateUsdPerKg) : 0.3,
@@ -174,8 +180,13 @@ async function loadRatesAndQuotes(quoteIds: string[]) {
     selfSourcedProscetRatePercent: Number(systemSettings.selfSourcedProscetRatePercent),
     selfSourcedBuyoutDiscountRatePercent: Number(systemSettings.selfSourcedBuyoutDiscountRatePercent),
   };
-  const vladShareRatePercent = Number(systemSettings.vladShareRatePercent);
-  const yuraCargoRateUsdPerKg = Number(systemSettings.yuraCargoRateUsdPerKg);
+  const investors: InvestorConfig[] = investorRows.map((inv) => ({
+    id: inv.id,
+    name: inv.name,
+    shareType: inv.shareType as InvestorConfig["shareType"],
+    ratePercent: inv.ratePercent !== null ? Number(inv.ratePercent) : null,
+    rateUsdPerKg: inv.rateUsdPerKg !== null ? Number(inv.rateUsdPerKg) : null,
+  }));
   const cnyProfitTiers: CnyProfitTiers = {
     base: tariffSettings?.cnyProfitPerYuanRub !== undefined && tariffSettings?.cnyProfitPerYuanRub !== null ? Number(tariffSettings.cnyProfitPerYuanRub) : 0,
     tier3000:
@@ -201,37 +212,41 @@ async function loadRatesAndQuotes(quoteIds: string[]) {
   });
   const attachedServicesByQuoteId = new Map(attachedServiceSums.map((s) => [s.quoteId, Number(s._sum.priceRub ?? 0)]));
 
-  return { quotes, cargoRates, premiumRates, vladShareRatePercent, yuraCargoRateUsdPerKg, cnyProfitTiers, attachedServicesByQuoteId };
+  return { quotes, cargoRates, premiumRates, investors, cnyProfitTiers, attachedServicesByQuoteId };
 }
 
 // The single entry point both routes call — guarantees the on-screen report
 // and the downloaded PDF can never show different numbers for the same
 // selection.
 async function buildProfitReport(quoteIds: string[]) {
-  const { quotes, cargoRates, premiumRates, vladShareRatePercent, yuraCargoRateUsdPerKg, cnyProfitTiers, attachedServicesByQuoteId } =
-    await loadRatesAndQuotes(quoteIds);
+  const { quotes, cargoRates, premiumRates, investors, cnyProfitTiers, attachedServicesByQuoteId } = await loadRatesAndQuotes(quoteIds);
   const rows = quotes.map((q) =>
-    computeQuoteBreakdown(
-      q,
-      cargoRates,
-      premiumRates,
-      vladShareRatePercent,
-      cnyProfitTiers,
-      attachedServicesByQuoteId.get(q.id) ?? 0,
-      yuraCargoRateUsdPerKg,
-    ),
+    computeQuoteBreakdown(q, cargoRates, premiumRates, investors, cnyProfitTiers, attachedServicesByQuoteId.get(q.id) ?? 0),
   );
 
   const totalRevenueRub = rows.reduce((sum, r) => sum + r.totalRub, 0);
   const totalProfitRub = rows.reduce((sum, r) => sum + r.rawTotalRub, 0);
   const profitPoolRub = rows.reduce((sum, r) => sum + Math.max(0, r.rawTotalRub), 0);
-  const vladShareRub = rows.reduce((sum, r) => sum + r.vladShareRub, 0);
-  const yuraShareRub = rows.reduce((sum, r) => sum + r.yuraShareRub, 0);
   const managerPremiumRub = rows.reduce((sum, r) => sum + r.managerPremiumRub, 0);
-  // Same 50/50 split as app/api/manager-dashboard/route.ts's founderShareRub
-  // — this value IS one founder's share already (Александр's or Антон's),
-  // not the combined pool.
-  const founderShareRub = (profitPoolRub - vladShareRub - yuraShareRub - managerPremiumRub) / 2;
+
+  // percent_of_profit + flat_per_cargo_kg — sum each investor's per-row
+  // contribution across the whole selection.
+  const investorShares: { id: string; name: string; shareType: string; shareRub: number }[] = [];
+  let percentAndFlatSharesRub = 0;
+  for (const inv of investors) {
+    if (inv.shareType !== "percent_of_profit" && inv.shareType !== "flat_per_cargo_kg") continue;
+    const shareRub = rows.reduce((sum, r) => sum + (r.investorShares.find((s) => s.id === inv.id)?.shareRub ?? 0), 0);
+    percentAndFlatSharesRub += shareRub;
+    investorShares.push({ id: inv.id, name: inv.name, shareType: inv.shareType, shareRub });
+  }
+  // remainder_share — splits whatever's left evenly, N-way (was a
+  // hardcoded "/2" for Александр+Антон, now works for any count).
+  const remainderInvestors = investors.filter((inv) => inv.shareType === "remainder_share");
+  const remainderPoolRub = profitPoolRub - percentAndFlatSharesRub - managerPremiumRub;
+  const perRemainderShareRub = splitRemainderRub(remainderPoolRub, remainderInvestors.length);
+  for (const inv of remainderInvestors) {
+    investorShares.push({ id: inv.id, name: inv.name, shareType: inv.shareType, shareRub: perRemainderShareRub });
+  }
 
   // Per-source breakdown of totalProfitRub above — so "Прибыль компании"
   // doesn't stay one opaque number, same "show what it's made of" instinct
@@ -244,8 +259,18 @@ async function buildProfitReport(quoteIds: string[]) {
   const totalFxProfitRub = rows.reduce((sum, r) => sum + r.fxProfitRub, 0);
   const totalCargoProfitRub = rows.reduce((sum, r) => sum + r.cargoProfitRub, 0);
 
+  // investorShares was only needed above to sum into the totals-level
+  // investorShares array — the per-quote table doesn't display it (same as
+  // managerPremiumRub never being shown per-row either), so it's dropped
+  // here rather than shipped to the client unused.
+  const publicRows = rows.map((row) => {
+    const publicRow = { ...row };
+    delete (publicRow as Partial<typeof row>).investorShares;
+    return publicRow;
+  });
+
   return {
-    rows,
+    rows: publicRows,
     totals: {
       totalRevenueRub,
       totalProfitRub,
@@ -255,10 +280,8 @@ async function buildProfitReport(quoteIds: string[]) {
       totalFxProfitRub,
       totalCargoProfitRub,
       profitPoolRub,
-      vladShareRub,
-      yuraShareRub,
       managerPremiumRub,
-      founderShareRub,
+      investorShares,
     },
   };
 }

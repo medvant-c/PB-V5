@@ -72,6 +72,28 @@ function toPositiveNumber(value: unknown): number | null {
   return typeof num === "number" && Number.isFinite(num) && num >= 0 ? num : null;
 }
 
+// Every TariffSettings numeric column is required by the schema (never
+// null), but this route now accepts a PARTIAL body — the Настройки area
+// splits these fields across several sub-tabs (Тарифы, Карго), each with
+// its own independent save button, and TariffSettings is one append-only
+// row covering all of them. A field not present in this particular POST
+// carries forward unchanged from the previous row (same convention the
+// owner-only margin/tier fields below already used); only a field that's
+// present AND invalid is rejected. See PB-V5 chat 2026-07-31.
+const REQUIRED_NUMBER_FIELDS = [
+  "cnyRateRub",
+  "usdRateRub",
+  "volumeRateUsdPerCbm",
+  "standardPriceRub",
+  "expertPriceRub",
+  "proPriceRub",
+  "customProductionStandardRub",
+  "customProductionExpertRub",
+  "customProductionProRub",
+  "managerCargoRateUsdPerKg",
+  "managerCargoRateUsdPerM3",
+] as const;
+
 export async function POST(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
@@ -90,32 +112,28 @@ export async function POST(req: NextRequest) {
   }
 
   const raw = (body as Record<string, unknown>) ?? {};
-  const fields = {
-    cnyRateRub: toPositiveNumber(raw.cnyRateRub),
-    usdRateRub: toPositiveNumber(raw.usdRateRub),
-    volumeRateUsdPerCbm: toPositiveNumber(raw.volumeRateUsdPerCbm),
-    standardPriceRub: toPositiveNumber(raw.standardPriceRub),
-    expertPriceRub: toPositiveNumber(raw.expertPriceRub),
-    proPriceRub: toPositiveNumber(raw.proPriceRub),
-    customProductionStandardRub: toPositiveNumber(raw.customProductionStandardRub),
-    customProductionExpertRub: toPositiveNumber(raw.customProductionExpertRub),
-    customProductionProRub: toPositiveNumber(raw.customProductionProRub),
-    managerCargoRateUsdPerKg: toPositiveNumber(raw.managerCargoRateUsdPerKg),
-    managerCargoRateUsdPerM3: toPositiveNumber(raw.managerCargoRateUsdPerM3),
-  };
+  const previous = await prisma.tariffSettings.findFirst({ orderBy: { createdAt: "desc" } });
 
-  for (const [key, value] of Object.entries(fields)) {
-    if (value === null) {
-      return Response.json({ error: `Поле «${key}» должно быть неотрицательным числом.` }, { status: 400 });
+  const validated: Record<string, number> = {};
+  for (const key of REQUIRED_NUMBER_FIELDS) {
+    if (raw[key] !== undefined) {
+      const value = toPositiveNumber(raw[key]);
+      if (value === null) {
+        return Response.json({ error: `Поле «${key}» должно быть неотрицательным числом.` }, { status: 400 });
+      }
+      validated[key] = value;
+    } else if (previous && previous[key as keyof typeof previous] !== null && previous[key as keyof typeof previous] !== undefined) {
+      validated[key] = Number(previous[key as keyof typeof previous]);
+    } else {
+      return Response.json({ error: `Поле «${key}» обязательно при первом сохранении тарифов.` }, { status: 400 });
     }
   }
-  const validated = fields as Record<keyof typeof fields, number>;
 
   // Cargo margin: owner-only. TariffSettings is append-only (every save
-  // creates a whole new row), so a non-owner's save — which never even
-  // sees these fields in the form — must carry the current margin forward
-  // unchanged rather than let it silently reset to the schema default.
-  const previous = await prisma.tariffSettings.findFirst({ orderBy: { createdAt: "desc" } });
+  // creates a whole new row), so a save that doesn't send these — either a
+  // non-owner, or an owner saving from a different sub-tab — must carry
+  // the current margin forward unchanged rather than let it silently reset
+  // to the schema default.
   let cargoDensityMarginUsdPerKg = previous ? Number(previous.cargoDensityMarginUsdPerKg) : 1.2;
   let cargoVolumeMarginUsdPerCbm = previous ? Number(previous.cargoVolumeMarginUsdPerCbm) : 50;
   if (session.role === "owner" && (raw.cargoDensityMarginUsdPerKg !== undefined || raw.cargoVolumeMarginUsdPerCbm !== undefined)) {

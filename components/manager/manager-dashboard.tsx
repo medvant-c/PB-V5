@@ -141,15 +141,12 @@ interface DashboardData {
   cargoWeightKg: number | null;
   searchFeeRub: number | null;
   buyoutCommissionRub: number | null;
-  // Owner-only — Влад's 10% cut and what's left for the two founders
-  // (Александр/Антон, 50/50) after Влад and every manager's premium — see
-  // PB-V5 chat 2026-07-28.
-  vladShareRub: number | null;
-  // Юра (Инвестор #2) — flat $/kg on delivered cargo weight only, comes
-  // off the top same as Влад's cut before founderShareRub is split. See
-  // PB-V5 chat 2026-07-31.
-  yuraShareRub: number | null;
-  founderShareRub: number | null;
+  // Owner-only — every active investor's cut (see Investor model), already
+  // resolved server-side (percent-of-profit, flat-per-cargo-kg, and
+  // remainder-share investors all reduced to one number each). Replaces
+  // the old fixed Влад/Юра/Александр/Антон fields — see PB-V5 chat
+  // 2026-07-31.
+  investorShares: { id: string; name: string; shareType: string; shareRub: number }[] | null;
   // Every ₽ amount on this dashboard is displayed converted to ¥ using this
   // rate (see PB-V5 chat 2026-07-28) — underlying storage/math stays RUB,
   // only the presentation changes.
@@ -660,6 +657,11 @@ interface DailyPlanSummaryItem {
   note: string;
   doneAt: string | null;
   quoteDraftRequest: { id: string; displayId: number } | null;
+  // Original "YYYY-MM-DD" the item was actually planned for, set only when
+  // it was left unchecked on an earlier day and rolled forward onto
+  // today's list (see GET /api/manager-daily-plan-summary) — mirrors
+  // PlanItem.carriedOverFromDate in daily-plan-panel.tsx.
+  carriedOverFromDate: string | null;
 }
 
 interface DailyPlanSummaryRow {
@@ -813,6 +815,7 @@ function TeamDailyPlanWidget() {
                       <span className={cn("min-w-0 flex-1 truncate text-text", item.doneAt && "text-text-secondary line-through")}>
                         {item.note}
                       </span>
+                      {item.carriedOverFromDate && <span className="shrink-0 text-error">⏪ с {item.carriedOverFromDate.slice(8, 10)}.{item.carriedOverFromDate.slice(5, 7)}</span>}
                       {item.quoteDraftRequest && (
                         <span className="shrink-0 text-text-secondary">№{item.quoteDraftRequest.displayId}</span>
                       )}
@@ -1120,35 +1123,23 @@ function ManagerDashboard() {
             </div>
           )}
 
-        {data.vladShareRub != null && data.founderShareRub != null && (
+        {data.investorShares && data.investorShares.length > 0 && (
           <div className="rounded-2xl border border-border bg-bg p-4 sm:p-5">
             <div className="flex items-center gap-1.5 text-sm font-bold text-text">
-              <Lock className="h-4 w-4 text-text-secondary" /> Доля партнёров — видно только руководителю
+              <Lock className="h-4 w-4 text-text-secondary" /> Руководящий состав — видно только руководителю
             </div>
             <p className="mt-1.5 text-xs leading-relaxed text-text-secondary">
-              10% от прибыли по каждой подтверждённой сделке (со всех источников, включая курсовую разницу) —
-              Владу. Юре — фикс $/кг с каждого доставленного карго, отдельно от остальной прибыли. Остаток после
-              доли Влада, доли Юры и премий всех менеджеров делится 50/50 между Александром и Антоном.
+              Доля каждого инвестора считается по его собственному правилу (% от прибыли по каждой подтверждённой
+              сделке, фикс $/кг с доставленного карго, или остаток поровну после всех остальных долей и премий
+              менеджеров) — состав и ставки настраиваются в «Настройки» → «Руководящий состав».
             </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-4">
-              <div className="rounded-xl border border-border bg-surface p-3.5">
-                <div className="text-xs text-text-secondary">Влад (Партнёр) — 10%</div>
-                <div className="mt-1 text-lg font-bold text-text">{fmtBoth(data.vladShareRub, data.cnyRateRub)}</div>
-              </div>
-              {data.yuraShareRub != null && (
-                <div className="rounded-xl border border-border bg-surface p-3.5">
-                  <div className="text-xs text-text-secondary">Юра (Инвестор) — карго</div>
-                  <div className="mt-1 text-lg font-bold text-text">{fmtBoth(data.yuraShareRub, data.cnyRateRub)}</div>
+              {data.investorShares.map((inv) => (
+                <div key={inv.id} className="rounded-xl border border-border bg-surface p-3.5">
+                  <div className="text-xs text-text-secondary">{inv.name}</div>
+                  <div className="mt-1 text-lg font-bold text-text">{fmtBoth(inv.shareRub, data.cnyRateRub)}</div>
                 </div>
-              )}
-              <div className="rounded-xl border border-border bg-surface p-3.5">
-                <div className="text-xs text-text-secondary">Александр (Основатель/Инвестор)</div>
-                <div className="mt-1 text-lg font-bold text-text">{fmtBoth(data.founderShareRub, data.cnyRateRub)}</div>
-              </div>
-              <div className="rounded-xl border border-border bg-surface p-3.5">
-                <div className="text-xs text-text-secondary">Антон</div>
-                <div className="mt-1 text-lg font-bold text-text">{fmtBoth(data.founderShareRub, data.cnyRateRub)}</div>
-              </div>
+              ))}
             </div>
           </div>
         )}
