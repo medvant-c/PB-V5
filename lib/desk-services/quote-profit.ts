@@ -176,6 +176,30 @@ function estimatedFxProfitRub(q: CnyVolumeFields, attachedServicesTotalRub: numb
   return cnyVolume * pickCnyProfitForVolume(cnyVolume, tiers);
 }
 
+interface ManagerPremiumRates {
+  normalRatePercent: number;
+  selfSourcedProscetRatePercent: number;
+  selfSourcedBuyoutDiscountRatePercent: number;
+}
+
+// The manager's premium on ONE confirmed quote's Просчёт/Выкуп/Скидка —
+// same formula the dashboard's aggregate factualPremiumRub and the profit
+// report's per-row managerPremiumRub each computed independently before
+// this was factored out (see PB-V5 chat 2026-08-01). Does NOT include the
+// self-sourced cargo bonus (flatCargoBonusRub) — that's gated on
+// cargoBonusRatePercent being locked in separately from
+// buyoutFactConfirmed, so a caller that needs the FULL premium (cargo
+// bonus included) adds flatCargoBonusRub() on top itself, same split every
+// existing caller already used.
+function factualManagerPremiumRub(sourceProfits: SourceProfits, buyoutSelfSourcedBoost: boolean, rates: ManagerPremiumRates): number {
+  const proscetRate = buyoutSelfSourcedBoost ? rates.selfSourcedProscetRatePercent : rates.normalRatePercent;
+  const buyoutDiscountRate = buyoutSelfSourcedBoost ? rates.selfSourcedBuyoutDiscountRatePercent : rates.normalRatePercent;
+  return (
+    Math.max(0, sourceProfits.proscetRub) * (proscetRate / 100) +
+    (Math.max(0, sourceProfits.buyoutRub) + Math.max(0, sourceProfits.discountRub)) * (buyoutDiscountRate / 100)
+  );
+}
+
 // A "flat_per_cargo_kg"-type investor (e.g. Юра) — flat $/kg on delivered
 // cargo weight, on every cargo delivery regardless of self-sourced status
 // (unlike a manager's own flatCargoBonusRub above, which is self-sourced-
@@ -216,6 +240,7 @@ export {
   totalQuoteProfitRub,
   effectiveInvestorRatePercent,
   isSelfSourcedFor,
+  factualManagerPremiumRub,
   flatCargoBonusRub,
   pickCnyProfitForVolume,
   estimateCnyVolume,
@@ -223,4 +248,4 @@ export {
   investorCargoShareRub,
   splitRemainderRub,
 };
-export type { QuoteProfitFields, SourceProfits, CnyProfitTiers, CnyVolumeFields, InvestorShareType, InvestorConfig };
+export type { QuoteProfitFields, SourceProfits, CnyProfitTiers, CnyVolumeFields, InvestorShareType, InvestorConfig, ManagerPremiumRates };

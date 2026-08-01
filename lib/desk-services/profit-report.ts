@@ -6,6 +6,7 @@ import {
   effectiveInvestorRatePercent,
   estimatedFxProfitRub,
   estimatedSourceProfits,
+  factualManagerPremiumRub,
   factualSourceProfits,
   flatCargoBonusRub,
   fxProfitRub,
@@ -106,24 +107,9 @@ function computeQuoteBreakdown(
   const rawTotalRub = proscetRub + buyoutRub + discountRub + fx + cargo;
   const clampedTotalRub = Math.max(0, rawTotalRub);
 
-  const investorShares = investors
-    .filter((inv) => inv.shareType === "percent_of_profit" || inv.shareType === "flat_per_cargo_kg")
-    .map((inv) => {
-      const shareRub =
-        inv.shareType === "percent_of_profit"
-          ? clampedTotalRub * (effectiveInvestorRatePercent(q.client, Number(inv.ratePercent ?? 0)) / 100)
-          : investorCargoShareRub(q.totalWeightKg, Number(inv.rateUsdPerKg ?? 0), q.usdRateUsed);
-      return { id: inv.id, name: inv.name, shareType: inv.shareType, shareRub };
-    });
-
   let managerPremiumRub: number;
   if (q.buyoutFactConfirmed) {
-    const proscetRate = q.buyoutSelfSourcedBoost ? premiumRates.selfSourcedProscetRatePercent : premiumRates.normalRatePercent;
-    const buyoutDiscountRate = q.buyoutSelfSourcedBoost
-      ? premiumRates.selfSourcedBuyoutDiscountRatePercent
-      : premiumRates.normalRatePercent;
-    managerPremiumRub =
-      Math.max(0, proscetRub) * (proscetRate / 100) + (Math.max(0, buyoutRub) + Math.max(0, discountRub)) * (buyoutDiscountRate / 100);
+    managerPremiumRub = factualManagerPremiumRub({ proscetRub, buyoutRub, discountRub }, Boolean(q.buyoutSelfSourcedBoost), premiumRates);
   } else {
     const isBoosted = isSelfSourcedFor(q.client, q.managerId);
     const proscetRate = isBoosted ? premiumRates.selfSourcedProscetRatePercent : premiumRates.normalRatePercent;
@@ -142,6 +128,22 @@ function computeQuoteBreakdown(
         ? flatCargoBonusRub(q, cargoRates)
         : 0;
   managerPremiumRub += cargoBonusRub;
+
+  // percent_of_profit investors take their cut from profit AFTER this same
+  // deal's own manager premium (rate-based premium + cargo bonus, both
+  // above) — the manager's bonus comes off the top first, for every client
+  // (company-lead or self-sourced) alike. flat_per_cargo_kg is unaffected
+  // (weight-based, not profit-based). See PB-V5 chat 2026-08-01.
+  const profitAfterManagerPremiumRub = Math.max(0, clampedTotalRub - managerPremiumRub);
+  const investorShares = investors
+    .filter((inv) => inv.shareType === "percent_of_profit" || inv.shareType === "flat_per_cargo_kg")
+    .map((inv) => {
+      const shareRub =
+        inv.shareType === "percent_of_profit"
+          ? profitAfterManagerPremiumRub * (effectiveInvestorRatePercent(q.client, Number(inv.ratePercent ?? 0)) / 100)
+          : investorCargoShareRub(q.totalWeightKg, Number(inv.rateUsdPerKg ?? 0), q.usdRateUsed);
+      return { id: inv.id, name: inv.name, shareType: inv.shareType, shareRub };
+    });
 
   return {
     id: q.id,

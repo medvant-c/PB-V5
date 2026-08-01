@@ -11,6 +11,7 @@ import {
   fxProfitRub,
   cargoProfitRub,
   isSelfSourcedFor,
+  factualManagerPremiumRub,
   flatCargoBonusRub,
   estimatedFxProfitRub,
   investorCargoShareRub,
@@ -180,13 +181,7 @@ function summarize(
       // recomputed live — see schema comment on that field. Просчёт gets
       // the full 100% boost for a self-sourced client; Выкуп/Скидка get a
       // smaller 50% boost — not the same rate as Просчёт.
-      const proscetRate = q.buyoutSelfSourcedBoost ? premiumRates.selfSourcedProscetRatePercent : premiumRates.normalRatePercent;
-      const buyoutDiscountRate = q.buyoutSelfSourcedBoost
-        ? premiumRates.selfSourcedBuyoutDiscountRatePercent
-        : premiumRates.normalRatePercent;
-      factualPremiumRub +=
-        Math.max(0, proscetRub) * (proscetRate / 100) +
-        (Math.max(0, buyoutRub) + Math.max(0, discountRub)) * (buyoutDiscountRate / 100);
+      factualPremiumRub += factualManagerPremiumRub({ proscetRub, buyoutRub, discountRub }, Boolean(q.buyoutSelfSourcedBoost), premiumRates);
     } else {
       const { proscetRub, buyoutRub } = estimatedSourceProfits(q);
       potentialProscetRub += proscetRub;
@@ -439,8 +434,16 @@ export async function GET(req: NextRequest) {
   // Влад/Юра/Александр/Антон fields — see PB-V5 chat 2026-07-31.
   let investorShares: { id: string; name: string; shareType: string; shareRub: number }[] | null = null;
   if (session.role === "owner" && perManager) {
-    const totalManagerPotentialPremiumsRub = perManager.reduce((sum, m) => sum + m.estimatedPremiumRub, 0);
-    const totalManagerFactualPremiumsRub = perManager.reduce((sum, m) => sum + m.factualPremiumRub, 0);
+    // From `overall` (every quote/order in scope), not `perManager` (which
+    // excludes the owner — see its `role: { not: "owner" }` filter above,
+    // meant only for the "who isn't pulling their weight" leaderboard). The
+    // premium belongs to whoever a deal is actually assigned to, regardless
+    // of role — a quote the owner personally handles still owes exactly the
+    // same premium as any other manager's, and must still be subtracted
+    // before splitting what's left among investors. See PB-V5 chat
+    // 2026-08-01.
+    const totalManagerPotentialPremiumsRub = overall.estimatedPremiumRub;
+    const totalManagerFactualPremiumsRub = overall.factualPremiumRub;
     expectedIncomeRub =
       overall.potentialProscetRub +
       overall.potentialBuyoutRub +
@@ -481,9 +484,13 @@ export async function GET(req: NextRequest) {
     // percent_of_profit — computed PER DEAL, not once on the aggregate pool
     // above, since that's the only way a per-client override
     // (Client.vladShareRatePercentOverride) can actually change anything.
-    // Same Math.max(0, ...)-per-item clamping the old aggregate version
-    // used, just applied before each deal's own rate multiply instead of
-    // after one company-wide multiply.
+    // Takes its cut from profit AFTER that same deal's own manager premium
+    // (rate-based premium + self-sourced cargo bonus/fulfillment premium),
+    // not the gross figure — the manager's bonus comes off the top first,
+    // for every client (company-lead or self-sourced) alike. See PB-V5
+    // chat 2026-08-01. Same Math.max(0, ...)-per-item clamping the old
+    // aggregate version used, just applied before each deal's own rate
+    // multiply instead of after one company-wide multiply.
     let percentAndFlatSharesRub = 0;
     const shares: { id: string; name: string; shareType: string; shareRub: number }[] = [];
     for (const inv of investors) {
@@ -492,14 +499,23 @@ export async function GET(req: NextRequest) {
       const fromQuotesRub = quotes
         .filter((q) => q.buyoutFactConfirmed)
         .reduce((sum, q) => {
-          const { proscetRub, buyoutRub, discountRub } = factualSourceProfits(q);
-          const perQuoteTotal = Math.max(0, proscetRub + buyoutRub + discountRub + fxProfitRub(q) + cargoProfitRub(q));
+          const sourceProfits = factualSourceProfits(q);
+          const grossTotal = sourceProfits.proscetRub + sourceProfits.buyoutRub + sourceProfits.discountRub + fxProfitRub(q) + cargoProfitRub(q);
+          const cargoBonus =
+            q.cargoBonusRatePercent !== null && q.cargoBonusRatePercent !== undefined && Number(q.cargoBonusRatePercent) > 0
+              ? flatCargoBonusRub(q, cargoRates)
+              : 0;
+          const managerPremium = factualManagerPremiumRub(sourceProfits, Boolean(q.buyoutSelfSourcedBoost), premiumRates) + cargoBonus;
+          const netTotal = Math.max(0, grossTotal - managerPremium);
           const rate = effectiveInvestorRatePercent(q.client, ratePercent);
-          return sum + perQuoteTotal * (rate / 100);
+          return sum + netTotal * (rate / 100);
         }, 0);
       const fromFulfillmentRub = fulfillmentOrders.reduce((sum, o) => {
+        const isSelfSourced = o.client.selfSourcedConfirmed && o.client.createdByManagerId === o.managerId;
+        const fulfillmentPremium = isSelfSourced ? Number(o.totalRub) * (fulfillmentPremiumRatePercent / 100) : 0;
+        const netTotal = Math.max(0, Number(o.totalRub) - fulfillmentPremium);
         const rate = effectiveInvestorRatePercent(o.client, ratePercent);
-        return sum + Number(o.totalRub) * (rate / 100);
+        return sum + netTotal * (rate / 100);
       }, 0);
       const shareRub = fromQuotesRub + fromFulfillmentRub;
       percentAndFlatSharesRub += shareRub;
