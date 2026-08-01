@@ -17,9 +17,18 @@ set -euo pipefail
 # --accept-data-loss` — only pass it for a schema-changing deploy, same
 # "always back up before a schema push" rule this project already follows
 # manually for every migration.
+#
+# Also records the commit we're moving away FROM into .last-stable-commit
+# (only once the new deploy actually succeeds) so scripts/rollback.sh can
+# undo exactly this deploy if it ships a regression. A --migrate deploy's
+# schema change isn't auto-reverted by rollback.sh — restore the desk.db
+# backup this script just took, by hand, if the migration itself is what
+# broke things (a deliberate, reviewed step, not something to automate
+# blindly against real data). See PB-V5 chat 2026-08-01.
 
 cd "$(dirname "$0")/.."
 STATUS_FILE="$(pwd)/deploy-status.json"
+STABLE_FILE="$(pwd)/.last-stable-commit"
 
 MIGRATE=false
 for arg in "$@"; do
@@ -30,6 +39,7 @@ write_status() {
   printf '{"status":"%s","version":"%s","updatedAt":"%s"}\n' "$1" "$2" "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" > "$STATUS_FILE"
 }
 
+PRE_DEPLOY_COMMIT="$(git rev-parse HEAD)"
 CURRENT_VERSION="$(git rev-parse --short HEAD)"
 # If anything below fails, drop the flag back to "idle" at the OLD version
 # immediately — the still-running old process is unaffected by a failed
@@ -59,7 +69,8 @@ pm2 restart pb-v5 --update-env
 sleep 2
 
 trap - ERR
+echo "$PRE_DEPLOY_COMMIT" > "$STABLE_FILE"
 NEW_VERSION="$(git rev-parse --short HEAD)"
 write_status "idle" "$NEW_VERSION"
 
-echo "Deploy complete: $NEW_VERSION"
+echo "Deploy complete: $NEW_VERSION (rollback target: $(git rev-parse --short "$PRE_DEPLOY_COMMIT"))"

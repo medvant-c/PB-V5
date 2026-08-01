@@ -98,7 +98,15 @@ interface QuoteForStats {
   actualSupplierDiscountCny: unknown;
   buyoutSelfSourcedBoost: boolean | null;
   cargoBonusRatePercent: unknown;
-  client: { selfSourcedConfirmed: boolean; createdByManagerId: string | null; vladShareRatePercentOverride: unknown };
+  completedAt: Date | null;
+  displayId: number;
+  productName: string;
+  client: {
+    selfSourcedConfirmed: boolean;
+    createdByManagerId: string | null;
+    vladShareRatePercentOverride: unknown;
+    name: string;
+  };
 }
 
 function summarize(
@@ -304,7 +312,9 @@ export async function GET(req: NextRequest) {
       buyoutSelfSourcedBoost: true,
       cargoBonusRatePercent: true,
       completedAt: true,
-      client: { select: { selfSourcedConfirmed: true, createdByManagerId: true, vladShareRatePercentOverride: true } },
+      displayId: true,
+      productName: true,
+      client: { select: { selfSourcedConfirmed: true, createdByManagerId: true, vladShareRatePercentOverride: true, name: true } },
     },
   });
 
@@ -331,6 +341,16 @@ export async function GET(req: NextRequest) {
 
   function countCompletedSince(managerId: string, since: Date): number {
     return quotes.filter((q) => q.managerId === managerId && q.completedAt && new Date(q.completedAt) >= since).length;
+  }
+
+  // Same filter as countCompletedSince, just returning what the count is
+  // actually counting — powers the "какие именно просчёты" hover tooltip
+  // on "Готовые просчёты по менеджерам" instead of leaving the owner to
+  // guess from a bare number. See PB-V5 chat 2026-08-01.
+  function completedQuotesSince(managerId: string, since: Date): { id: string; displayId: number; productName: string; clientName: string }[] {
+    return quotes
+      .filter((q) => q.managerId === managerId && q.completedAt && new Date(q.completedAt) >= since)
+      .map((q) => ({ id: q.id, displayId: q.displayId, productName: q.productName, clientName: q.client.name }));
   }
 
   // Фулфилмент — a separate business line from Quote entirely (see PB-V5
@@ -400,6 +420,9 @@ export async function GET(req: NextRequest) {
       completedToday: countCompletedSince(m.id, startOfDay),
       completedWeek: countCompletedSince(m.id, startOfWeek),
       completedMonth: countCompletedSince(m.id, startOfMonth),
+      completedTodayList: completedQuotesSince(m.id, startOfDay),
+      completedWeekList: completedQuotesSince(m.id, startOfWeek),
+      completedMonthList: completedQuotesSince(m.id, startOfMonth),
     }));
   }
 

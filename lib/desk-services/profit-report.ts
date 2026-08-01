@@ -42,9 +42,12 @@ const PROFIT_SELECT = {
   chinaDeliveryRub: true,
   cargoDeliveryRub: true,
   cargoCostRub: true,
+  cargoCostUsd: true,
+  cargoRateUsd: true,
   searchServiceFeeRub: true,
   customProductionFeeRub: true,
   buyoutCommissionRub: true,
+  buyoutCommissionPercent: true,
   cnyRateUsed: true,
   usdRateUsed: true,
   buyoutFactConfirmed: true,
@@ -145,6 +148,19 @@ function computeQuoteBreakdown(
       return { id: inv.id, name: inv.name, shareType: inv.shareType, shareRub };
     });
 
+  // Raw inputs behind every figure above, for the on-screen "детали"
+  // expansion — so an owner can check a suspicious number (e.g. an
+  // inflated cargo margin from a not-yet-confirmed manual rate) without
+  // asking someone to look it up in the database. Cargo rates are
+  // per-unit on whichever basis this quote actually prices cargo on (see
+  // flatCargoBonusRub in quote-profit.ts for the same density/volume
+  // basis rule) — cargoCostUsd itself is a total, divided back down to
+  // match cargoRateUsd's own per-unit shape. See PB-V5 chat 2026-08-01.
+  const cargoBasisIsWeight = q.deliveryPricingMode === "density" && Number(q.densityKgM3) >= 100;
+  const cargoBasisQty = cargoBasisIsWeight ? Number(q.totalWeightKg) : Number(q.totalVolumeM3);
+  const cargoCostRateUsd = cargoBasisQty > 0 ? Number(q.cargoCostUsd) / cargoBasisQty : 0;
+  const fxProfitPerYuanRub = q.buyoutFactConfirmed && Number(q.actualBuyoutCny) > 0 ? fx / Number(q.actualBuyoutCny) : null;
+
   return {
     id: q.id,
     displayId: q.displayId,
@@ -162,6 +178,16 @@ function computeQuoteBreakdown(
     cargoProfitRub: cargo,
     rawTotalRub,
     investorShares,
+    buyoutCommissionPercent: Number(q.buyoutCommissionPercent),
+    cnyRateUsed: Number(q.cnyRateUsed),
+    actualBuyoutRateUsed: q.buyoutFactConfirmed ? Number(q.actualBuyoutRateUsed) : null,
+    usdRateUsed: Number(q.usdRateUsed),
+    cargoSellRateUsd: Number(q.cargoRateUsd),
+    cargoCostRateUsd,
+    cargoBasisUnit: cargoBasisIsWeight ? ("kg" as const) : ("m3" as const),
+    totalWeightKg: Number(q.totalWeightKg),
+    totalVolumeM3: Number(q.totalVolumeM3),
+    fxProfitPerYuanRub,
     managerPremiumRub,
   };
 }

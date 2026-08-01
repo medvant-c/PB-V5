@@ -96,12 +96,45 @@ function ConversionRing({ percent, size = 56 }: { percent: number; size?: number
   );
 }
 
+interface CompletedQuoteRef {
+  id: string;
+  displayId: number;
+  productName: string;
+  clientName: string;
+}
+
 interface PerManagerRow extends StatSummary {
   managerId: string;
   managerName: string;
   completedToday: number;
   completedWeek: number;
   completedMonth: number;
+  completedTodayList: CompletedQuoteRef[];
+  completedWeekList: CompletedQuoteRef[];
+  completedMonthList: CompletedQuoteRef[];
+}
+
+// A bare "2" next to "Сегодня" doesn't say which two — hovering shows the
+// actual quotes that count is counting, so the owner doesn't have to go
+// digging for them. See PB-V5 chat 2026-08-01.
+function CompletedCountCell({ count, quotes }: { count: number; quotes: CompletedQuoteRef[] }) {
+  if (count === 0) return <>{count}</>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="cursor-default underline decoration-dotted underline-offset-2">{count}</span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="w-64">
+        <ul className="space-y-1 text-xs">
+          {quotes.map((q) => (
+            <li key={q.id}>
+              №{q.displayId} · {q.productName} · {q.clientName}
+            </li>
+          ))}
+        </ul>
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 // Enough fields to render one row of the click-to-filter quote list below
@@ -1203,9 +1236,15 @@ function ManagerDashboard() {
                   {data.perManager.map((row) => (
                     <tr key={row.managerId} className="border-b border-border last:border-0">
                       <td className="py-1.5 font-medium text-text">{row.managerName}</td>
-                      <td className="py-1.5 text-text-secondary">{row.completedToday}</td>
-                      <td className="py-1.5 text-text-secondary">{row.completedWeek}</td>
-                      <td className="py-1.5 text-text-secondary">{row.completedMonth}</td>
+                      <td className="py-1.5 text-text-secondary">
+                        <CompletedCountCell count={row.completedToday} quotes={row.completedTodayList} />
+                      </td>
+                      <td className="py-1.5 text-text-secondary">
+                        <CompletedCountCell count={row.completedWeek} quotes={row.completedWeekList} />
+                      </td>
+                      <td className="py-1.5 text-text-secondary">
+                        <CompletedCountCell count={row.completedMonth} quotes={row.completedMonthList} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>

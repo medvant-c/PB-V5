@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, Download, FileBarChart, Loader2, Lock } from "lucide-react";
+import { CheckCircle2, ChevronDown, Download, FileBarChart, Loader2, Lock } from "lucide-react";
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,16 @@ interface ReportRow {
   cargoProfitRub: number;
   rawTotalRub: number;
   managerPremiumRub: number;
+  buyoutCommissionPercent: number;
+  cnyRateUsed: number;
+  actualBuyoutRateUsed: number | null;
+  usdRateUsed: number;
+  cargoSellRateUsd: number;
+  cargoCostRateUsd: number;
+  cargoBasisUnit: "kg" | "m3";
+  totalWeightKg: number;
+  totalVolumeM3: number;
+  fxProfitPerYuanRub: number | null;
   manager: { id: string; name: string };
   client: { id: string; name: string; company: string | null };
 }
@@ -66,6 +76,12 @@ interface ReportTotals {
 
 function fmt(value: number): string {
   return Number.isFinite(value) ? Math.round(value).toLocaleString("ru-RU") : "—";
+}
+
+// Rates ($1.7/кг, курс 12.85) lose their meaning rounded to a whole number
+// the way money figures do — kept to 2 decimal places instead.
+function fmtRate(value: number): string {
+  return Number.isFinite(value) ? value.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
 }
 
 // Every money figure here shows ¥ first, ₽ alongside — same convention as
@@ -91,6 +107,7 @@ function ManagerProfitReportTab() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const [report, setReport] = useState<{ rows: ReportRow[]; totals: ReportTotals } | null>(null);
+  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -331,6 +348,7 @@ function ManagerProfitReportTab() {
             <table className="w-full min-w-250 border-collapse text-sm">
               <thead>
                 <tr className="border-b border-border bg-bg text-left text-xs text-text-secondary">
+                  <th className="px-3 py-1.5 font-medium"></th>
                   <th className="px-3 py-1.5 font-medium">№</th>
                   <th className="px-3 py-1.5 font-medium">Клиент / товар</th>
                   <th className="px-3 py-1.5 text-right font-medium">Просчёт</th>
@@ -343,29 +361,88 @@ function ManagerProfitReportTab() {
               </thead>
               <tbody>
                 {report.rows.map((row) => (
-                  <tr key={row.id} className="border-b border-border last:border-0">
-                    <td className="px-3 py-1.5 text-text-secondary">
-                      {row.displayId}
-                      <div className={cn("text-[10px] font-medium", row.confirmed ? "text-success" : "text-warning")}>
-                        {row.confirmed ? "факт" : "оценка"}
-                      </div>
-                    </td>
-                    <td className="px-3 py-1.5 text-text">
-                      <div className="max-w-52 truncate">{row.productName}</div>
-                      <div className="text-xs text-text-secondary">
-                        {row.client.name}
-                        {row.client.company ? ` · ${row.client.company}` : ""} · {row.manager.name}
-                      </div>
-                    </td>
-                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.proscetRub)} ₽</td>
-                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.buyoutRub)} ₽</td>
-                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.discountRub)} ₽</td>
-                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.fxProfitRub)} ₽</td>
-                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.cargoProfitRub)} ₽</td>
-                    <td className={cn("px-3 py-1.5 text-right font-bold", row.rawTotalRub >= 0 ? "text-success" : "text-error")}>
-                      {fmt(row.rawTotalRub)} ₽
-                    </td>
-                  </tr>
+                  <>
+                    <tr
+                      key={row.id}
+                      onClick={() => setExpandedRowId(expandedRowId === row.id ? null : row.id)}
+                      className="cursor-pointer border-b border-border last:border-0 hover:bg-bg"
+                    >
+                      <td className="px-2 py-1.5 text-text-secondary">
+                        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expandedRowId === row.id && "rotate-180")} />
+                      </td>
+                      <td className="px-3 py-1.5 text-text-secondary">
+                        {row.displayId}
+                        <div className={cn("text-[10px] font-medium", row.confirmed ? "text-success" : "text-warning")}>
+                          {row.confirmed ? "факт" : "оценка"}
+                        </div>
+                      </td>
+                      <td className="px-3 py-1.5 text-text">
+                        <div className="max-w-52 truncate">{row.productName}</div>
+                        <div className="text-xs text-text-secondary">
+                          {row.client.name}
+                          {row.client.company ? ` · ${row.client.company}` : ""} · {row.manager.name}
+                        </div>
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.proscetRub)} ₽</td>
+                      <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.buyoutRub)} ₽</td>
+                      <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.discountRub)} ₽</td>
+                      <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.fxProfitRub)} ₽</td>
+                      <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.cargoProfitRub)} ₽</td>
+                      <td className={cn("px-3 py-1.5 text-right font-bold", row.rawTotalRub >= 0 ? "text-success" : "text-error")}>
+                        {fmt(row.rawTotalRub)} ₽
+                      </td>
+                    </tr>
+                    {expandedRowId === row.id && (
+                      <tr className="border-b border-border bg-bg last:border-0">
+                        <td colSpan={9} className="px-4 py-3">
+                          <div className="grid gap-x-6 gap-y-1.5 text-xs sm:grid-cols-3 lg:grid-cols-4">
+                            <div>
+                              <span className="text-text-secondary">Комиссия выкупа: </span>
+                              <span className="font-medium text-text">{fmtRate(row.buyoutCommissionPercent)}%</span>
+                            </div>
+                            <div>
+                              <span className="text-text-secondary">Курс продажи (¥→₽ клиенту): </span>
+                              <span className="font-medium text-text">{fmtRate(row.cnyRateUsed)} ₽</span>
+                            </div>
+                            <div>
+                              <span className="text-text-secondary">Курс закупки (факт): </span>
+                              <span className="font-medium text-text">
+                                {row.actualBuyoutRateUsed !== null ? `${fmtRate(row.actualBuyoutRateUsed)} ₽` : "не подтверждено"}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-text-secondary">Курс $: </span>
+                              <span className="font-medium text-text">{fmtRate(row.usdRateUsed)} ₽</span>
+                            </div>
+                            <div>
+                              <span className="text-text-secondary">Карго, ставка продажи: </span>
+                              <span className="font-medium text-text">
+                                ${fmtRate(row.cargoSellRateUsd)}/{row.cargoBasisUnit === "kg" ? "кг" : "м³"}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-text-secondary">Карго, себестоимость: </span>
+                              <span className="font-medium text-text">
+                                ${fmtRate(row.cargoCostRateUsd)}/{row.cargoBasisUnit === "kg" ? "кг" : "м³"}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-text-secondary">Доход с курса за 1¥: </span>
+                              <span className="font-medium text-text">
+                                {row.fxProfitPerYuanRub !== null ? `${fmtRate(row.fxProfitPerYuanRub)} ₽` : "не подтверждено"}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-text-secondary">Вес / объём: </span>
+                              <span className="font-medium text-text">
+                                {fmtRate(row.totalWeightKg)} кг / {fmtRate(row.totalVolumeM3)} м³
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 ))}
               </tbody>
             </table>

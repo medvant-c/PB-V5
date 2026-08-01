@@ -48,6 +48,7 @@ next-env.d.ts
 
 # deploy — written by scripts/deploy.sh on the server, never part of the repo
 /deploy-status.json
+/.last-stable-commit
 
 # local tooling — not part of the deployed app
 /.claude

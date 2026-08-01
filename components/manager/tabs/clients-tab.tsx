@@ -18,6 +18,7 @@ import {
   MessageSquare,
   Package,
   Pencil,
+  Percent,
   Plus,
   Receipt,
   RefreshCw,
@@ -398,6 +399,8 @@ function ClientQuotes({
   onChanged,
   allManagers,
   canConfirmBuyout,
+  clientSelfSourcedConfirmed,
+  clientCreatedByManagerId,
 }: {
   clientId: string;
   refreshKey: number;
@@ -405,6 +408,8 @@ function ClientQuotes({
   onChanged: () => void;
   allManagers: { id: string; name: string }[] | null;
   canConfirmBuyout: boolean;
+  clientSelfSourcedConfirmed: boolean;
+  clientCreatedByManagerId: string | null;
 }) {
   const [quotes, setQuotes] = useState<QuoteRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -424,6 +429,13 @@ function ClientQuotes({
   const [expandedBuyoutId, setExpandedBuyoutId] = useState<string | null>(null);
   const [buyoutDrafts, setBuyoutDrafts] = useState<Record<string, { cny: string; rate: string }>>({});
   const [savingBuyoutId, setSavingBuyoutId] = useState<string | null>(null);
+
+  // Owner-only manual override of one quote's cargo bonus % — see
+  // app/api/manager-quotes/[id]/cargo-bonus-rate/route.ts.
+  const [expandedCargoBonusId, setExpandedCargoBonusId] = useState<string | null>(null);
+  const [cargoBonusDrafts, setCargoBonusDrafts] = useState<Record<string, string>>({});
+  const [savingCargoBonusId, setSavingCargoBonusId] = useState<string | null>(null);
+  const [cargoBonusError, setCargoBonusError] = useState<string | null>(null);
 
   // Cargo actualization modal — opened either because a status change got
   // blocked (pendingStatus set, so we can retry it right after saving) or
@@ -838,6 +850,32 @@ function ClientQuotes({
     }
   }
 
+  async function handleSaveCargoBonusRate(quoteId: string) {
+    const draft = cargoBonusDrafts[quoteId];
+    const value = Number(draft);
+    if (!Number.isFinite(value) || value < 0) {
+      setCargoBonusError("Ставка должна быть неотрицательным числом.");
+      return;
+    }
+    setSavingCargoBonusId(quoteId);
+    setCargoBonusError(null);
+    try {
+      const res = await fetch(`/api/manager-quotes/${quoteId}/cargo-bonus-rate`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ratePercent: value }),
+      });
+      if (res.ok) {
+        await load();
+      } else {
+        const data = await res.json();
+        setCargoBonusError(data.error ?? "Не удалось сохранить.");
+      }
+    } finally {
+      setSavingCargoBonusId(null);
+    }
+  }
+
   if (loading) return <p className="text-xs text-text-secondary">Загрузка просчётов…</p>;
   if (quotes.length === 0) return <p className="text-xs text-text-secondary">Просчётов пока нет.</p>;
 
@@ -1229,6 +1267,28 @@ function ClientQuotes({
                 </button>
               )}
 
+              {allManagers !== null &&
+                quote.cargoBonusRatePercent !== null &&
+                clientSelfSourcedConfirmed &&
+                quote.manager.id === clientCreatedByManagerId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCargoBonusDrafts((current) => ({
+                        ...current,
+                        [quote.id]: current[quote.id] ?? quote.cargoBonusRatePercent ?? "",
+                      }));
+                      setCargoBonusError(null);
+                      setExpandedCargoBonusId(expandedCargoBonusId === quote.id ? null : quote.id);
+                    }}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary"
+                    aria-label="Ставка премии за карго"
+                    title="Ставка премии менеджера за карго (свой клиент)"
+                  >
+                    <Percent className="h-4 w-4" />
+                  </button>
+                )}
+
               <button
                 type="button"
                 onClick={() => onEdit(quote.id)}
@@ -1398,6 +1458,35 @@ function ClientQuotes({
                   </div>
                 );
               })()}
+
+            {expandedCargoBonusId === quote.id && (
+              <div className="mt-2 space-y-2 rounded-lg border border-border bg-bg p-2.5">
+                <p className="text-xs text-text-secondary">
+                  По умолчанию: 10% (свой клиент). Можно вручную изменить премию менеджера за карго именно по этой сделке.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={cargoBonusDrafts[quote.id] ?? ""}
+                    onChange={(e) => setCargoBonusDrafts((current) => ({ ...current, [quote.id]: e.target.value }))}
+                    className="w-24 rounded-md border border-border bg-surface px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                  <span className="text-sm text-text-secondary">%</span>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveCargoBonusRate(quote.id)}
+                    disabled={savingCargoBonusId === quote.id}
+                    className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {savingCargoBonusId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    Сохранить
+                  </button>
+                </div>
+                {cargoBonusError && <p className="text-xs text-error">{cargoBonusError}</p>}
+              </div>
+            )}
           </li>
         ))}
       </ul>
@@ -2219,6 +2308,8 @@ function ManagerClientsTab() {
                       refreshKey={quotesRefreshKey}
                       allManagers={allManagers}
                       canConfirmBuyout={canConfirmBuyout}
+                      clientSelfSourcedConfirmed={client.selfSourcedConfirmed}
+                      clientCreatedByManagerId={client.createdByManagerId}
                       onEdit={(quoteId) => {
                         setQuoteDialogClientId(client.id);
                         setEditingQuoteId(quoteId);

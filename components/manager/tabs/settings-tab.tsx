@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Calculator, Crown, FileText, Package, Percent, Truck } from "lucide-react";
+import { Calculator, Crown, FileText, History, Package, Percent, Truck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ManagerTariffsTab } from "@/components/manager/tabs/tariffs-tab";
 import { ManagerCargoSettingsTab } from "@/components/manager/tabs/settings/cargo-settings-tab";
@@ -9,6 +9,7 @@ import { ManagerLeadershipTab } from "@/components/manager/tabs/settings/leaders
 import { ManagerQuotesBuyoutSettingsTab } from "@/components/manager/tabs/settings/quotes-buyout-section";
 import { ManagerFulfillmentSettingsTab } from "@/components/manager/tabs/settings/fulfillment-section";
 import { ManagerTextsSettingsTab } from "@/components/manager/tabs/settings/texts-section";
+import { ManagerUpdatesTab } from "@/components/manager/tabs/settings/updates-section";
 
 // «Настройки» — единая панель управления всеми данными и текстами, которые
 // раньше можно было поменять только правкой кода: курсы валют, доли
@@ -32,6 +33,7 @@ const SUB_TABS = [
   { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentSettingsTab, ownerOnly: false },
   { id: "cargo", label: "Карго", icon: Truck, Component: ManagerCargoSettingsTab, ownerOnly: false },
   { id: "texts", label: "Тексты", icon: FileText, Component: ManagerTextsSettingsTab, ownerOnly: true },
+  { id: "updates", label: "Обновления", icon: History, Component: ManagerUpdatesTab, ownerOnly: true },
 ] as const;
 
 function ManagerSettingsTab() {
