@@ -66,6 +66,7 @@ export async function POST(req: NextRequest) {
         buyoutCommissionRub: Number(quote.buyoutCommissionRub),
         attachedServicesTotalRub,
         cargoDeliveryRub: Number(quote.cargoDeliveryRub),
+        cargoDeliveryUsd: Number(quote.cargoDeliveryUsd),
         totalRub: Number(quote.totalRub),
       };
     }),

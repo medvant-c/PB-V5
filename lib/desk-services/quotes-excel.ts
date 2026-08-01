@@ -14,11 +14,16 @@ const HEADER_FILL = "FF1F3864"; // dark navy
 const HEADER_FONT_COLOR = "FFFFFFFF";
 const STRIPE_FILL = "FFDCE6F1"; // light blue, alternates with white
 
-// Every money column in this sheet is ₽ (see COLUMNS below — the only
-// currency this export ever shows), so one format covers all of them.
-// Thousands-separated, no decimals (every value is already Math.round()'d
-// before it's written), ₽ suffix. See PB-V5 chat 2026-07-31.
-const MONEY_FORMAT = '#,##0" ₽"';
+// Every money column is ₽ except cargo delivery, which can optionally be
+// shown in $ instead (see cargoInUsd below) — cargo is the one line this
+// business actually negotiates/tracks in $ internally, so a manager
+// exporting for that purpose doesn't have to mentally convert every row
+// back. Thousands-separated, no decimals for ₽ (every value is already
+// Math.round()'d before it's written); $ keeps two decimals since a
+// per-kg/m³ cargo rate isn't a round number. See PB-V5 chat 2026-07-31,
+// extended 2026-08-01.
+const MONEY_FORMAT_RUB = '#,##0" ₽"';
+const MONEY_FORMAT_USD = '"$"#,##0.00';
 // Approximate default-font line height in points, for the row-height
 // estimate below — not pixel-perfect, just enough that a long Описание
 // isn't silently clipped by the fixed photo-aligned row height.
@@ -34,32 +39,36 @@ const QUOTE_TYPE_LABEL: Record<string, string> = {
 // quote-dialog.tsx): goods → China delivery → search fee → производство
 // под заказ → buyout commission → cargo delivery → extra services → grand
 // total. Column at index i corresponds 1:1 with the values pushed in the
-// row array below — keep both in sync if either changes.
-const COLUMNS = [
-  { header: "Клиент", width: 18, wrap: true, money: false },
-  { header: "Тип поиска", width: 12, wrap: false, money: false },
-  { header: "Фото 1", width: PHOTO_COL_WIDTH, wrap: false, money: false },
-  { header: "Фото 2", width: PHOTO_COL_WIDTH, wrap: false, money: false },
-  { header: "Фото 3", width: PHOTO_COL_WIDTH, wrap: false, money: false },
-  { header: "Наименование", width: 28, wrap: true, money: false },
-  { header: "Описание", width: 30, wrap: true, money: false },
-  { header: "Цвет", width: 12, wrap: false, money: false },
-  { header: "Размеры", width: 16, wrap: true, money: false },
-  { header: "Количество", width: 11, wrap: false, money: false },
-  { header: "Цена, ₽", width: 12, wrap: false, money: true },
-  { header: "Общая стоимость, ₽", width: 16, wrap: false, money: true },
-  { header: "Доставка по Китаю, ₽", width: 16, wrap: false, money: true },
-  { header: "Вес, кг", width: 10, wrap: false, money: false },
-  { header: "Плотность, кг/м³", width: 14, wrap: false, money: false },
-  { header: "Объём, м³", width: 11, wrap: false, money: false },
-  { header: "Услуга поиска, ₽", width: 14, wrap: false, money: true },
-  { header: "Производство под заказ, ₽", width: 16, wrap: false, money: true },
-  { header: "Комиссия за выкуп, ₽", width: 16, wrap: false, money: true },
-  { header: "Доп. услуги, ₽", width: 13, wrap: false, money: true },
-  { header: "Доставка карго, ₽", width: 14, wrap: false, money: true },
-  { header: "ИТОГО, ₽", width: 13, wrap: false, money: true },
-] as const;
-const TOTAL_COLUMN_INDEX = COLUMNS.length; // 1-indexed — last column is ИТОГО
+// row array below — keep both in sync if either changes. `money` is which
+// format applies, not just whether one does — only the cargo column ever
+// switches to "usd" (see buildColumns/cargoInUsd).
+type MoneyKind = false | "rub" | "usd";
+function buildColumns(cargoInUsd: boolean): { header: string; width: number; wrap: boolean; money: MoneyKind }[] {
+  return [
+    { header: "Клиент", width: 18, wrap: true, money: false },
+    { header: "Тип поиска", width: 12, wrap: false, money: false },
+    { header: "Фото 1", width: PHOTO_COL_WIDTH, wrap: false, money: false },
+    { header: "Фото 2", width: PHOTO_COL_WIDTH, wrap: false, money: false },
+    { header: "Фото 3", width: PHOTO_COL_WIDTH, wrap: false, money: false },
+    { header: "Наименование", width: 28, wrap: true, money: false },
+    { header: "Описание", width: 30, wrap: true, money: false },
+    { header: "Цвет", width: 12, wrap: false, money: false },
+    { header: "Размеры", width: 16, wrap: true, money: false },
+    { header: "Количество", width: 11, wrap: false, money: false },
+    { header: "Цена, ₽", width: 12, wrap: false, money: "rub" },
+    { header: "Общая стоимость, ₽", width: 16, wrap: false, money: "rub" },
+    { header: "Доставка по Китаю, ₽", width: 16, wrap: false, money: "rub" },
+    { header: "Вес, кг", width: 10, wrap: false, money: false },
+    { header: "Плотность, кг/м³", width: 14, wrap: false, money: false },
+    { header: "Объём, м³", width: 11, wrap: false, money: false },
+    { header: "Услуга поиска, ₽", width: 14, wrap: false, money: "rub" },
+    { header: "Производство под заказ, ₽", width: 16, wrap: false, money: "rub" },
+    { header: "Комиссия за выкуп, ₽", width: 16, wrap: false, money: "rub" },
+    { header: "Доп. услуги, ₽", width: 13, wrap: false, money: "rub" },
+    { header: cargoInUsd ? "Доставка карго, $" : "Доставка карго, ₽", width: 14, wrap: false, money: cargoInUsd ? "usd" : "rub" },
+    { header: "ИТОГО, ₽", width: 13, wrap: false, money: "rub" },
+  ];
+}
 
 interface QuoteExcelRow {
   clientName: string;
@@ -83,6 +92,7 @@ interface QuoteExcelRow {
   buyoutCommissionRub: number;
   attachedServicesTotalRub: number;
   cargoDeliveryRub: number;
+  cargoDeliveryUsd: number;
   totalRub: number;
 }
 
@@ -107,8 +117,14 @@ async function fitPhotoToSquare(buffer: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
-async function renderQuotesExcel(props: { client: { name: string; company: string | null }; rows: QuoteExcelRow[] }): Promise<Buffer> {
-  const { client, rows } = props;
+async function renderQuotesExcel(props: {
+  client: { name: string; company: string | null };
+  rows: QuoteExcelRow[];
+  cargoInUsd?: boolean;
+}): Promise<Buffer> {
+  const { client, rows, cargoInUsd = false } = props;
+  const COLUMNS = buildColumns(cargoInUsd);
+  const TOTAL_COLUMN_INDEX = COLUMNS.length; // 1-indexed — last column is ИТОГО
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Panda Bridge";
   const sheet = workbook.addWorksheet(`Просчёты — ${client.name}`.slice(0, 31));
@@ -146,7 +162,7 @@ async function renderQuotesExcel(props: { client: { name: string; company: strin
       Math.round(row.customProductionFeeRub),
       Math.round(row.buyoutCommissionRub),
       Math.round(row.attachedServicesTotalRub),
-      Math.round(row.cargoDeliveryRub),
+      cargoInUsd ? Number(row.cargoDeliveryUsd.toFixed(2)) : Math.round(row.cargoDeliveryRub),
       Math.round(row.totalRub),
     ];
     const excelRow = sheet.addRow(values);
@@ -165,7 +181,8 @@ async function renderQuotesExcel(props: { client: { name: string; company: strin
         vertical: "middle",
         wrapText: Boolean(COLUMNS[colNumber - 1]?.wrap),
       };
-      if (COLUMNS[colNumber - 1]?.money) cell.numFmt = MONEY_FORMAT;
+      const money = COLUMNS[colNumber - 1]?.money;
+      if (money) cell.numFmt = money === "usd" ? MONEY_FORMAT_USD : MONEY_FORMAT_RUB;
       if (stripeFill) cell.fill = stripeFill;
       if (colNumber === TOTAL_COLUMN_INDEX) cell.font = { bold: true };
     });

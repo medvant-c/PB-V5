@@ -751,7 +751,13 @@ function ClientQuotes({
     }
   }
 
-  async function handleExportExcel() {
+  // cargoInUsd — see lib/desk-services/quotes-excel.ts: same file, same
+  // columns, just the "Доставка карго" column in $ instead of ₽ (the one
+  // line this business actually tracks in $ internally) while everything
+  // else (цена товара, доставка по Китаю, услуги) stays in ₽. Second
+  // button below reuses this same handler with the flag flipped. See
+  // PB-V5 chat 2026-08-01.
+  async function handleExportExcel(cargoInUsd: boolean) {
     if (exportingExcel || selectedIds.length === 0) return;
     setExportingExcel(true);
     setExportError(null);
@@ -759,7 +765,7 @@ function ClientQuotes({
       const res = await fetch(isGlobal ? "/api/manager-quotes/quotes-excel" : `/api/manager-clients/${clientId}/quotes-excel`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quoteIds: selectedIds }),
+        body: JSON.stringify({ quoteIds: selectedIds, cargoInUsd }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -1080,12 +1086,22 @@ function ClientQuotes({
         )}
         <button
           type="button"
-          onClick={handleExportExcel}
+          onClick={() => handleExportExcel(false)}
           disabled={selectedIds.length === 0 || exportingExcel}
           className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
         >
           {exportingExcel ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
           Выгрузить в Excel {selectedIds.length > 0 && `(${selectedIds.length})`}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleExportExcel(true)}
+          disabled={selectedIds.length === 0 || exportingExcel}
+          title="Карго — в $, остальное — в ₽"
+          className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {exportingExcel ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
+          Excel (карго в $) {selectedIds.length > 0 && `(${selectedIds.length})`}
         </button>
         <button
           type="button"

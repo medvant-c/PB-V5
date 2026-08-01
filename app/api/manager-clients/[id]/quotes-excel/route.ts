@@ -38,7 +38,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { quoteIds } = (body as { quoteIds?: unknown }) ?? {};
+  const { quoteIds, cargoInUsd } = (body as { quoteIds?: unknown; cargoInUsd?: unknown }) ?? {};
   if (!Array.isArray(quoteIds) || quoteIds.length === 0 || !quoteIds.every((id) => typeof id === "string")) {
     return Response.json({ error: "Выберите хотя бы один просчёт." }, { status: 400 });
   }
@@ -82,14 +82,19 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         buyoutCommissionRub: Number(quote.buyoutCommissionRub),
         attachedServicesTotalRub,
         cargoDeliveryRub: Number(quote.cargoDeliveryRub),
+        cargoDeliveryUsd: Number(quote.cargoDeliveryUsd),
         totalRub: Number(quote.totalRub),
       };
     }),
   );
 
-  const buffer = await renderQuotesExcel({ client: { name: client.name, company: client.company }, rows });
+  const buffer = await renderQuotesExcel({
+    client: { name: client.name, company: client.company },
+    rows,
+    cargoInUsd: cargoInUsd === true,
+  });
 
-  const fileName = `Просчёты — ${client.name}.xlsx`;
+  const fileName = `Просчёты — ${client.name}${cargoInUsd === true ? " (карго в $)" : ""}.xlsx`;
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
