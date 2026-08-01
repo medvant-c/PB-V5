@@ -18,6 +18,7 @@ import { ManagerDashboard } from "@/components/manager/manager-dashboard";
 import { DailyPlanPanel } from "@/components/manager/daily-plan-panel";
 import { DailyPlanReviewModal } from "@/components/manager/daily-plan-review-modal";
 import { AutoRefresh } from "@/components/manager/auto-refresh";
+import { DeploymentWatcher } from "@/components/manager/deployment-watcher";
 
 interface ManagerWorkspaceProps {
   name: string;
@@ -229,6 +230,7 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
     <DailyPlanPanel />
     <DailyPlanReviewModal />
     <AutoRefresh />
+    <DeploymentWatcher />
     </div>
   );
 }

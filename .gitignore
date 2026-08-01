@@ -46,6 +46,9 @@ next-env.d.ts
 /desk-uploads
 /generated
 
+# deploy — written by scripts/deploy.sh on the server, never part of the repo
+/deploy-status.json
+
 # local tooling — not part of the deployed app
 /.claude
 /screenshots
