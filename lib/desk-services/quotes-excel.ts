@@ -3,16 +3,20 @@ import ExcelJS from "exceljs";
 import sharp from "sharp";
 import { quoteDisclaimerPlainText } from "@/lib/desk-services/quote-disclaimer";
 
-// ~2×2cm at 96dpi ("вставь фото — примерно 2 на 2 см", not stretched/
-// cropped: sharp's fit:"contain" letterboxes onto a neutral background
-// instead, same reasoning as the PDF renderers' objectFit:"contain" fix).
-const PHOTO_PX = 76;
-const PHOTO_COL_WIDTH = 11; // character units, ≈ PHOTO_PX at default font
-const ROW_HEIGHT = 60; // points, ≈ PHOTO_PX px — every data row, so photos and text line up
+// ~4×4cm at 96dpi — doubled from the original ~2×2cm, same aspect ratio
+// (sharp's fit:"contain" still letterboxes onto a neutral background
+// instead of stretching/cropping, same reasoning as the PDF renderers'
+// objectFit:"contain" fix). See PB-V5 chat 2026-08-01.
+const PHOTO_PX = 152;
+const PHOTO_COL_WIDTH = 22; // character units, ≈ PHOTO_PX at default font
+const ROW_HEIGHT = 120; // points, ≈ PHOTO_PX px — every data row, so photos and text line up
 
 const HEADER_FILL = "FF1F3864"; // dark navy
 const HEADER_FONT_COLOR = "FFFFFFFF";
 const STRIPE_FILL = "FFDCE6F1"; // light blue, alternates with white
+// Base body/header font size — bumped from Excel's ~11pt default per PB-V5
+// chat 2026-08-01.
+const FONT_SIZE = 14;
 
 // Every money column is ₽ except cargo delivery, which can optionally be
 // shown in $ instead (see cargoInUsd below) — cargo is the one line this
@@ -24,10 +28,10 @@ const STRIPE_FILL = "FFDCE6F1"; // light blue, alternates with white
 // extended 2026-08-01.
 const MONEY_FORMAT_RUB = '#,##0" ₽"';
 const MONEY_FORMAT_USD = '"$"#,##0.00';
-// Approximate default-font line height in points, for the row-height
-// estimate below — not pixel-perfect, just enough that a long Описание
-// isn't silently clipped by the fixed photo-aligned row height.
-const LINE_HEIGHT_PT = 14;
+// Approximate FONT_SIZE line height in points, for the row-height
+// estimate below — not pixel-perfect, just enough that a long wrapped
+// cell isn't silently clipped by the fixed photo-aligned row height.
+const LINE_HEIGHT_PT = 19;
 
 const QUOTE_TYPE_LABEL: Record<string, string> = {
   standard: "Standart",
@@ -51,7 +55,10 @@ function buildColumns(cargoInUsd: boolean): { header: string; width: number; wra
     { header: "Фото 2", width: PHOTO_COL_WIDTH, wrap: false, money: false },
     { header: "Фото 3", width: PHOTO_COL_WIDTH, wrap: false, money: false },
     { header: "Наименование", width: 28, wrap: true, money: false },
-    { header: "Описание", width: 30, wrap: true, money: false },
+    // No wrapText — a manager scanning this column wants one line per
+    // row, scrollable/expandable in Excel itself if they need the full
+    // text, not the row growing to fit it. See PB-V5 chat 2026-08-01.
+    { header: "Описание", width: 30, wrap: false, money: false },
     { header: "Цвет", width: 12, wrap: false, money: false },
     { header: "Размеры", width: 16, wrap: true, money: false },
     { header: "Количество", width: 11, wrap: false, money: false },
@@ -130,11 +137,14 @@ async function renderQuotesExcel(props: {
   const sheet = workbook.addWorksheet(`Просчёты — ${client.name}`.slice(0, 31));
 
   sheet.columns = COLUMNS.map((c) => ({ header: c.header, width: c.width }));
+  // Header row (№1) stays visible while scrolling through a long list —
+  // "закрепление области первой строки". See PB-V5 chat 2026-08-01.
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
 
   const headerRow = sheet.getRow(1);
-  headerRow.height = 22;
+  headerRow.height = 26;
   headerRow.eachCell((cell) => {
-    cell.font = { bold: true, color: { argb: HEADER_FONT_COLOR } };
+    cell.font = { bold: true, size: FONT_SIZE, color: { argb: HEADER_FONT_COLOR } };
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_FILL } };
     cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
   });
@@ -181,10 +191,10 @@ async function renderQuotesExcel(props: {
         vertical: "middle",
         wrapText: Boolean(COLUMNS[colNumber - 1]?.wrap),
       };
+      cell.font = colNumber === TOTAL_COLUMN_INDEX ? { bold: true, size: FONT_SIZE } : { size: FONT_SIZE };
       const money = COLUMNS[colNumber - 1]?.money;
       if (money) cell.numFmt = money === "usd" ? MONEY_FORMAT_USD : MONEY_FORMAT_RUB;
       if (stripeFill) cell.fill = stripeFill;
-      if (colNumber === TOTAL_COLUMN_INDEX) cell.font = { bold: true };
     });
 
     for (let i = 0; i < 3; i++) {
