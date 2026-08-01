@@ -54,6 +54,7 @@ const styles = StyleSheet.create({
   colVolume: { width: 54, textAlign: "right" },
   colDensity: { width: 68, textAlign: "right" },
   colTariff: { width: 62, textAlign: "right" },
+  colCargoUsd: { width: 68, textAlign: "right" },
   // Wide enough for the full one-line header "ЦЕНА/ЕД. ПОД КЛЮЧ, ₽" at
   // headCell's 8.5pt bold uppercase — 84 clipped it to "…ПОД" with nothing
   // after (maxLines: 1 has no ellipsis fallback, so it just vanished).
@@ -106,6 +107,13 @@ interface QuoteListRow {
   // own shipping/customs planning.
   cargoRateUsd?: number;
   deliveryPricingMode?: "density" | "volume";
+  // Total cargo delivery for this quote, in $ — only rendered when
+  // cargoInUsd is passed (see QuotesListPdfProps below), same "второй
+  // вариант в $" the Excel export gained. Distinct from cargoRateUsd
+  // above (a per-kg/m³ rate, always $) — this is the actual line-item
+  // amount, normally shown in ₽ baked into "Итого". See PB-V5 chat
+  // 2026-08-01.
+  cargoDeliveryUsd?: number;
 }
 
 // "Под ключ" — the full all-in total (goods + delivery + fees + commission)
@@ -119,9 +127,11 @@ interface QuotesListPdfProps {
   rows: QuoteListRow[];
   // See QuoteListRow.cargoRateUsd above — manager route only.
   showTariff?: boolean;
+  // See QuoteListRow.cargoDeliveryUsd above — manager route only.
+  cargoInUsd?: boolean;
 }
 
-function QuotesListPdfDocument({ client, rows, showTariff }: QuotesListPdfProps) {
+function QuotesListPdfDocument({ client, rows, showTariff, cargoInUsd }: QuotesListPdfProps) {
   const grandTotal = rows.reduce((sum, row) => sum + row.totalRub, 0);
   const totalWeightKg = rows.reduce((sum, row) => sum + row.totalWeightKg, 0);
   const totalVolumeM3 = rows.reduce((sum, row) => sum + row.totalVolumeM3, 0);
@@ -151,6 +161,7 @@ function QuotesListPdfDocument({ client, rows, showTariff }: QuotesListPdfProps)
             <Text style={[styles.headCell, styles.colVolume]}>Объём, м³</Text>
             <Text style={[styles.headCell, styles.colDensity]}>Плотн., кг/м³</Text>
             {showTariff && <Text style={[styles.headCell, styles.colTariff]}>Тариф, $</Text>}
+            {cargoInUsd && <Text style={[styles.headCell, styles.colCargoUsd]}>Карго, $</Text>}
             <Text style={[styles.headCell, styles.colPerUnit]}>Цена/ед. под ключ, ₽</Text>
             <Text style={[styles.headCell, styles.colTotal]}>Итого, ₽</Text>
           </View>
@@ -183,6 +194,11 @@ function QuotesListPdfDocument({ client, rows, showTariff }: QuotesListPdfProps)
                   {row.cargoRateUsd !== undefined
                     ? `$${row.cargoRateUsd.toFixed(2)}/${row.deliveryPricingMode === "volume" ? "м³" : "кг"}`
                     : "—"}
+                </Text>
+              )}
+              {cargoInUsd && (
+                <Text style={[styles.cell, styles.cellText, styles.colCargoUsd]}>
+                  {row.cargoDeliveryUsd !== undefined ? `$${row.cargoDeliveryUsd.toFixed(2)}` : "—"}
                 </Text>
               )}
               <Text style={[styles.cell, styles.cellText, styles.colPerUnit]}>{fmt(perUnitTurnkeyRub(row))}</Text>

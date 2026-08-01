@@ -1077,12 +1077,21 @@ function ClientQuotes({
           Выбрать все
         </label>
         {!isGlobal && quotes.length > 1 && (
-          <a
-            href={`/api/manager-clients/${clientId}/quotes-pdf`}
-            className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
-          >
-            <FileStack className="h-3.5 w-3.5" /> Скачать все просчёты ({quotes.length})
-          </a>
+          <>
+            <a
+              href={`/api/manager-clients/${clientId}/quotes-pdf`}
+              className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
+            >
+              <FileStack className="h-3.5 w-3.5" /> Скачать все просчёты ({quotes.length})
+            </a>
+            <a
+              href={`/api/manager-clients/${clientId}/quotes-pdf?cargoInUsd=1`}
+              title="Карго — в $, остальное — в ₽"
+              className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
+            >
+              <FileStack className="h-3.5 w-3.5" /> Все просчёты (карго в $)
+            </a>
+          </>
         )}
         <button
           type="button"

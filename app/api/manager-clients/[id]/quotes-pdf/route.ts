@@ -38,6 +38,8 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: "У клиента пока нет просчётов." }, { status: 404 });
   }
 
+  const cargoInUsd = req.nextUrl.searchParams.get("cargoInUsd") === "1";
+
   const rows: QuoteListRow[] = await Promise.all(
     quotes.map(async (quote) => {
       const firstPhoto = await prisma.deskFile.findFirst({
@@ -57,6 +59,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
         densityKgM3: Number(quote.densityKgM3),
         cargoRateUsd: Number(quote.cargoRateUsd),
         deliveryPricingMode: quote.deliveryPricingMode,
+        cargoDeliveryUsd: Number(quote.cargoDeliveryUsd),
       };
     }),
   );
@@ -65,9 +68,10 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     client: { name: client.name, company: client.company },
     rows,
     showTariff: true,
+    cargoInUsd,
   });
 
-  const fileName = `Все просчёты — ${client.name}.pdf`;
+  const fileName = `Все просчёты — ${client.name}${cargoInUsd ? " (карго в $)" : ""}.pdf`;
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/pdf",
