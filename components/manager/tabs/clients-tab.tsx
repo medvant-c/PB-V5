@@ -241,6 +241,11 @@ function ClientDraftRequests({
   refreshKey: number;
   onChange: () => void;
 }) {
+  // Collapsed by default — same "archive pushing the rest of the card
+  // down the page" reasoning as ClientFilesPanel's own `open` state, with
+  // the same visible count-on-the-closed-header pattern. See PB-V5 chat
+  // 2026-08-01.
+  const [open, setOpen] = useState(false);
   const [drafts, setDrafts] = useState<DraftRequestRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState("");
@@ -316,10 +321,17 @@ function ClientDraftRequests({
   }
 
   return (
-    <div className="space-y-2 rounded-xl border border-warning/30 bg-warning/5 p-3">
-      <p className="flex items-center gap-1.5 text-xs font-semibold text-warning">
-        <AlertTriangle className="h-3.5 w-3.5" /> Черновики — заявки на просчёт (ещё не в работе)
-      </p>
+    <div className="rounded-xl border border-warning/30 bg-warning/5">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between gap-2 p-3 text-left">
+        <span className="flex items-center gap-1.5 text-xs font-semibold text-warning">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          Черновики — заявки на просчёт (ещё не в работе){!loading && drafts.length > 0 ? ` (${drafts.length})` : ""}
+        </span>
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-warning transition-transform", open && "rotate-180")} />
+      </button>
+
+      {open && (
+        <div className="space-y-2 border-t border-warning/20 p-3 pt-2.5">
       {!loading && drafts.length > 0 && (
         <ul className="space-y-1.5">
           {drafts.map((draft) => (
@@ -388,6 +400,8 @@ function ClientDraftRequests({
         </Button>
       </form>
       {error && <p className="text-xs text-error">{error}</p>}
+        </div>
+      )}
     </div>
   );
 }
@@ -398,6 +412,7 @@ function ClientQuotes({
   onEdit,
   onChanged,
   allManagers,
+  teamManagers,
   canConfirmBuyout,
   clientSelfSourcedConfirmed,
   clientCreatedByManagerId,
@@ -407,6 +422,7 @@ function ClientQuotes({
   onEdit: (quoteId: string) => void;
   onChanged: () => void;
   allManagers: { id: string; name: string }[] | null;
+  teamManagers: { id: string; name: string }[] | null;
   canConfirmBuyout: boolean;
   clientSelfSourcedConfirmed: boolean;
   clientCreatedByManagerId: string | null;
@@ -1199,7 +1215,7 @@ function ClientQuotes({
                 )}
               </button>
 
-              {allManagers && (
+              {teamManagers && teamManagers.length > 1 && (
                 <Select
                   value=""
                   onValueChange={(managerId) => handleReassignQuote(quote.id, managerId)}
@@ -1220,7 +1236,7 @@ function ClientQuotes({
                       align the (nonexistent, value="") selected item over this
                       8px-square icon trigger and miscomputes wildly off-screen. */}
                   <SelectContent position="popper" align="end">
-                    {allManagers
+                    {teamManagers
                       .filter((m) => m.id !== quote.manager.id)
                       .map((m) => (
                         <SelectItem key={m.id} value={m.id}>
@@ -2307,6 +2323,7 @@ function ManagerClientsTab() {
                       clientId={client.id}
                       refreshKey={quotesRefreshKey}
                       allManagers={allManagers}
+                      teamManagers={teamManagers}
                       canConfirmBuyout={canConfirmBuyout}
                       clientSelfSourcedConfirmed={client.selfSourcedConfirmed}
                       clientCreatedByManagerId={client.createdByManagerId}
