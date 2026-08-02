@@ -65,7 +65,7 @@ interface ParsedQuoteFields {
   priceCnyPerUnit: number;
   chinaDeliveryCny: number;
   weightPerUnitKg: number;
-  volumeInputMode: "per_unit_dims" | "total_dims" | "manual_total";
+  volumeInputMode: "per_unit_dims" | "total_dims" | "manual_total" | "per_unit_volume";
   unitLengthCm?: number;
   unitWidthCm?: number;
   unitHeightCm?: number;
@@ -73,6 +73,7 @@ interface ParsedQuoteFields {
   totalWidthCm?: number;
   totalHeightCm?: number;
   manualTotalVolumeM3?: number;
+  unitVolumeM3?: number;
   deliveryPricingMode: "density" | "volume";
   cargoCategoryKey?: string;
   cargoDiscountUsd?: number;
@@ -136,7 +137,12 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
   if (weightPerUnitKg === null || weightPerUnitKg <= 0) {
     return { error: "Укажите вес за 1 шт." };
   }
-  if (volumeInputMode !== "per_unit_dims" && volumeInputMode !== "total_dims" && volumeInputMode !== "manual_total") {
+  if (
+    volumeInputMode !== "per_unit_dims" &&
+    volumeInputMode !== "total_dims" &&
+    volumeInputMode !== "manual_total" &&
+    volumeInputMode !== "per_unit_volume"
+  ) {
     return { error: "Некорректный способ расчёта объёма." };
   }
   if (deliveryPricingMode !== "density" && deliveryPricingMode !== "volume") {
@@ -165,6 +171,7 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
       totalWidthCm: optionalNumber(formData.get("totalWidthCm")),
       totalHeightCm: optionalNumber(formData.get("totalHeightCm")),
       manualTotalVolumeM3: optionalNumber(formData.get("manualTotalVolumeM3")),
+      unitVolumeM3: optionalNumber(formData.get("unitVolumeM3")),
       deliveryPricingMode,
       cargoCategoryKey: requiredString(formData.get("cargoCategoryKey")) ?? undefined,
       cargoDiscountUsd: optionalNumber(formData.get("cargoDiscountUsd")),
@@ -207,6 +214,7 @@ function buildEngineInputs(fields: ParsedQuoteFields, rates: QuoteRates): QuoteE
     totalWidthCm: fields.totalWidthCm,
     totalHeightCm: fields.totalHeightCm,
     manualTotalVolumeM3: fields.manualTotalVolumeM3,
+    unitVolumeM3: fields.unitVolumeM3,
     deliveryPricingMode: fields.deliveryPricingMode,
     cargoCategoryKey: fields.cargoCategoryKey,
     cargoDiscountUsd: fields.cargoDiscountUsd,

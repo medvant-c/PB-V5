@@ -66,6 +66,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       totalLengthCm: existing.totalLengthCm,
       totalWidthCm: existing.totalWidthCm,
       totalHeightCm: existing.totalHeightCm,
+      unitVolumeM3: existing.unitVolumeM3,
       totalVolumeM3: existing.totalVolumeM3,
       densityKgM3: existing.densityKgM3,
       deliveryPricingMode: existing.deliveryPricingMode,

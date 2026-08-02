@@ -28,7 +28,7 @@ interface BuyoutCommissionTierInput {
   commissionPercent: number;
 }
 
-type VolumeInputMode = "per_unit_dims" | "total_dims" | "manual_total";
+type VolumeInputMode = "per_unit_dims" | "total_dims" | "manual_total" | "per_unit_volume";
 type DeliveryPricingMode = "density" | "volume";
 
 interface QuoteEngineInputs {
@@ -45,6 +45,7 @@ interface QuoteEngineInputs {
   totalWidthCm?: number;
   totalHeightCm?: number;
   manualTotalVolumeM3?: number;
+  unitVolumeM3?: number;
 
   deliveryPricingMode: DeliveryPricingMode;
   // Required for both modes now — "по объёму" looks up a per-category
@@ -155,6 +156,8 @@ function computeTotalVolumeM3(inputs: QuoteEngineInputs): number {
     }
     case "manual_total":
       return inputs.manualTotalVolumeM3 ?? 0;
+    case "per_unit_volume":
+      return (inputs.unitVolumeM3 ?? 0) * inputs.quantity;
   }
 }
 

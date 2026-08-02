@@ -81,6 +81,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     totalWidthCm: existing.totalWidthCm !== null ? Number(existing.totalWidthCm) : undefined,
     totalHeightCm: existing.totalHeightCm !== null ? Number(existing.totalHeightCm) : undefined,
     manualTotalVolumeM3: existing.volumeInputMode === "manual_total" ? Number(existing.totalVolumeM3) : undefined,
+    unitVolumeM3: existing.unitVolumeM3 !== null ? Number(existing.unitVolumeM3) : undefined,
     deliveryPricingMode: existing.deliveryPricingMode,
     cargoCategoryKey: existing.cargoCategoryKey ?? undefined,
     densityTiers: densityTiersToEngineInput(densityTiers),

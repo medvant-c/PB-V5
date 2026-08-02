@@ -235,6 +235,7 @@ export async function POST(req: NextRequest) {
       totalLengthCm: engineInputs.totalLengthCm,
       totalWidthCm: engineInputs.totalWidthCm,
       totalHeightCm: engineInputs.totalHeightCm,
+      unitVolumeM3: engineInputs.unitVolumeM3,
       totalVolumeM3: computed.totalVolumeM3,
       densityKgM3: computed.densityKgM3,
       destinationCountry: fields.destinationCountry,

@@ -274,6 +274,10 @@ enum VolumeInputMode {
   per_unit_dims
   total_dims
   manual_total
+  // Manager knows the volume of a single unit (e.g. from a supplier spec
+  // sheet) but not its L×W×H — totalVolumeM3 = unitVolumeM3 * quantity.
+  // See PB-V5 chat 2026-08-02.
+  per_unit_volume
 }
 
 // Cargo pricing can be worked out two ways — matches the calculators-tab.tsx
@@ -647,6 +651,9 @@ model Quote {
   totalLengthCm      Decimal?
   totalWidthCm       Decimal?
   totalHeightCm      Decimal?
+  // Only meaningful when volumeInputMode is per_unit_volume — the entered
+  // per-unit m³, before multiplying by quantity (see totalVolumeM3 below).
+  unitVolumeM3       Decimal?
   // Always populated regardless of volumeInputMode — the one number the
   // rest of the formula chain (density, cargo rate) actually reads.
   totalVolumeM3      Decimal

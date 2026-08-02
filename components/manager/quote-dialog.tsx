@@ -122,6 +122,7 @@ interface QuoteDetail {
   totalLengthCm: string | null;
   totalWidthCm: string | null;
   totalHeightCm: string | null;
+  unitVolumeM3: string | null;
   totalVolumeM3: string;
   deliveryPricingMode: DeliveryPricingMode;
   cargoCategoryKey: string | null;
@@ -189,6 +190,7 @@ const BLANK_FORM = {
   totalWidthCm: "",
   totalHeightCm: "",
   manualTotalVolumeM3: "",
+  unitVolumeM3: "",
   deliveryPricingMode: "density" as DeliveryPricingMode,
   cargoCategoryKey: "",
   cargoDiscountUsd: "",
@@ -252,6 +254,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   const [totalWidthCm, setTotalWidthCm] = useState(BLANK_FORM.totalWidthCm);
   const [totalHeightCm, setTotalHeightCm] = useState(BLANK_FORM.totalHeightCm);
   const [manualTotalVolumeM3, setManualTotalVolumeM3] = useState(BLANK_FORM.manualTotalVolumeM3);
+  const [unitVolumeM3, setUnitVolumeM3] = useState(BLANK_FORM.unitVolumeM3);
 
   const [deliveryPricingMode, setDeliveryPricingMode] = useState(BLANK_FORM.deliveryPricingMode);
   const [cargoCategoryKey, setCargoCategoryKey] = useState(BLANK_FORM.cargoCategoryKey);
@@ -346,6 +349,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       setTotalWidthCm(BLANK_FORM.totalWidthCm);
       setTotalHeightCm(BLANK_FORM.totalHeightCm);
       setManualTotalVolumeM3(BLANK_FORM.manualTotalVolumeM3);
+      setUnitVolumeM3(BLANK_FORM.unitVolumeM3);
       setDeliveryPricingMode(BLANK_FORM.deliveryPricingMode);
       setCargoCategoryKey(BLANK_FORM.cargoCategoryKey);
       setCargoDiscountUsd(BLANK_FORM.cargoDiscountUsd);
@@ -392,6 +396,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           // manual_total mode has no separate stored input — totalVolumeM3 is
           // exactly what was typed in, regardless of mode.
           setManualTotalVolumeM3(q.volumeInputMode === "manual_total" ? q.totalVolumeM3 : "");
+          setUnitVolumeM3(q.unitVolumeM3 ?? "");
           setDeliveryPricingMode(q.deliveryPricingMode);
           setCargoCategoryKey(q.cargoCategoryKey ?? "");
           setCargoDiscountUsd(Number(q.cargoDiscountUsd) > 0 ? q.cargoDiscountUsd : "");
@@ -529,6 +534,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       totalWidthCm: num(totalWidthCm),
       totalHeightCm: num(totalHeightCm),
       manualTotalVolumeM3: num(manualTotalVolumeM3),
+      unitVolumeM3: num(unitVolumeM3),
       deliveryPricingMode,
       cargoCategoryKey: cargoCategoryKey || undefined,
       densityTiers,
@@ -590,6 +596,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     totalWidthCm,
     totalHeightCm,
     manualTotalVolumeM3,
+    unitVolumeM3,
     deliveryPricingMode,
     cargoCategoryKey,
     attachedServicesTotalRub,
@@ -680,6 +687,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           formData.append("totalLengthCm", totalLengthCm);
           formData.append("totalWidthCm", totalWidthCm);
           formData.append("totalHeightCm", totalHeightCm);
+        } else if (volumeInputMode === "per_unit_volume") {
+          formData.append("unitVolumeM3", unitVolumeM3);
         } else {
           formData.append("manualTotalVolumeM3", manualTotalVolumeM3);
         }
@@ -943,6 +952,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                   [
                     ["per_unit_dims", "Габариты 1 шт"],
                     ["total_dims", "Общие габариты"],
+                    ["per_unit_volume", "Объём 1 шт"],
                     ["manual_total", "Объём вручную"],
                   ] as const
                 ).map(([mode, label]) => (
@@ -973,6 +983,9 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                   <Input type="number" placeholder="Ширина, см" value={totalWidthCm} onChange={(e) => setTotalWidthCm(e.target.value)} />
                   <Input type="number" placeholder="Высота, см" value={totalHeightCm} onChange={(e) => setTotalHeightCm(e.target.value)} />
                 </div>
+              )}
+              {volumeInputMode === "per_unit_volume" && (
+                <Input type="number" placeholder="Объём 1 шт, м³" value={unitVolumeM3} onChange={(e) => setUnitVolumeM3(e.target.value)} />
               )}
               {volumeInputMode === "manual_total" && (
                 <Input type="number" placeholder="Общий объём, м³" value={manualTotalVolumeM3} onChange={(e) => setManualTotalVolumeM3(e.target.value)} />
