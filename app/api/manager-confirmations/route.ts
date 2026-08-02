@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     select: { id: true, name: true },
   });
 
-  const [pendingBuyouts, pendingClients, pendingCargoRates, pendingCnyRates, pendingBuyoutCommissions] = await Promise.all([
+  const [pendingBuyouts, pendingClients, pendingCargoRates, pendingCnyRates, pendingUsdRates, pendingBuyoutCommissions] = await Promise.all([
     prisma.quote.findMany({
       where: { ...managerFilter, status: { in: POST_BUYOUT_STATUSES }, buyoutFactConfirmed: false },
       orderBy: { statusChangedAt: "asc" },
@@ -106,6 +106,23 @@ export async function GET(req: NextRequest) {
         client: { select: { name: true, company: true } },
       },
     }),
+    // A manual $→₽ rate (Quote.usdRateRubOverride) needs the same
+    // owner/senior sign-off — proof it's a real agreed rate. See PB-V5
+    // chat 2026-08-02.
+    prisma.quote.findMany({
+      where: { ...managerFilter, usdRateRubOverride: { not: null }, usdRateOverrideConfirmed: false },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        displayId: true,
+        productName: true,
+        createdAt: true,
+        usdRateUsed: true,
+        usdRateRubOverride: true,
+        manager: { select: { id: true, name: true } },
+        client: { select: { name: true, company: true } },
+      },
+    }),
     // A manual buyout-commission % override needs the same owner/senior
     // sign-off — proof it's a real agreed commission, not made up. See
     // PB-V5 chat 2026-07-31.
@@ -125,5 +142,13 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
-  return Response.json({ pendingBuyouts, pendingClients, pendingCargoRates, pendingCnyRates, pendingBuyoutCommissions, teamManagers });
+  return Response.json({
+    pendingBuyouts,
+    pendingClients,
+    pendingCargoRates,
+    pendingCnyRates,
+    pendingUsdRates,
+    pendingBuyoutCommissions,
+    teamManagers,
+  });
 }

@@ -136,7 +136,9 @@ export async function POST(req: NextRequest) {
 
   const engineInputs = buildEngineInputs(fields, {
     cnyRateRub: fields.cnyRateRubOverride ?? cnyTiers.base,
-    usdRateRub: Number(tariffSettings.usdRateRub),
+    // A manual override is usable immediately, same as cnyRateRubOverride
+    // above — confirmation only gates the sign-off.
+    usdRateRub: fields.usdRateRubOverride ?? Number(tariffSettings.usdRateRub),
     // A manual override collapses today's live bracket ladder into one flat
     // rate — same "usable immediately, confirmation only gates the sign-off"
     // rule as cnyRateRubOverride/cargoRateUsdOverride. See
@@ -265,6 +267,9 @@ export async function POST(req: NextRequest) {
       // A manual rate always starts unconfirmed — see
       // Quote.cnyRateOverrideConfirmed in prisma/schema.prisma.
       cnyRateRubOverride: fields.cnyRateRubOverride ?? null,
+      // A manual rate always starts unconfirmed — see
+      // Quote.usdRateOverrideConfirmed in prisma/schema.prisma.
+      usdRateRubOverride: fields.usdRateRubOverride ?? null,
     },
   });
 

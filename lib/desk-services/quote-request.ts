@@ -87,6 +87,12 @@ interface ParsedQuoteFields {
   // rate), same as it already resolves cnyRateRub from either
   // TariffSettings or a frozen snapshot depending on create vs edit.
   cnyRateRubOverride?: number;
+  // Manual $→₽ rate for a special case — see Quote.usdRateRubOverride in
+  // prisma/schema.prisma. undefined = no override, normal TariffSettings
+  // rate (create) or frozen snapshot (edit). Same "not part of
+  // QuoteRates/buildEngineInputs below" split as cnyRateRubOverride — the
+  // route itself resolves the final usdRateRub to pass the engine.
+  usdRateRubOverride?: number;
   // Manual commission-% override for the buyout — see
   // Quote.buyoutCommissionPercentOverride in prisma/schema.prisma. undefined
   // = no override, normal BuyoutCommissionTariff bracket lookup. Same
@@ -177,6 +183,7 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
       cargoDiscountUsd: optionalNumber(formData.get("cargoDiscountUsd")),
       cargoRateUsdOverride: optionalNumber(formData.get("cargoRateUsdOverride")),
       cnyRateRubOverride: optionalNumber(formData.get("cnyRateRubOverride")),
+      usdRateRubOverride: optionalNumber(formData.get("usdRateRubOverride")),
       buyoutCommissionPercentOverride: optionalNumber(formData.get("buyoutCommissionPercentOverride")),
       isCustomProduction: formData.get("isCustomProduction") === "true",
     },

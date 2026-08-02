@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Archive, CheckCircle2, ChevronDown, Coins, Loader2, Paperclip, Percent, Ruler, UserCheck, Wallet } from "lucide-react";
+import { Archive, CheckCircle2, ChevronDown, Coins, DollarSign, Loader2, Paperclip, Percent, Ruler, UserCheck, Wallet } from "lucide-react";
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -51,6 +51,17 @@ interface PendingCnyRate {
   createdAt: string;
   cnyRateUsed: string;
   cnyRateRubOverride: string;
+  manager: { id: string; name: string };
+  client: { name: string; company: string | null };
+}
+
+interface PendingUsdRate {
+  id: string;
+  displayId: number;
+  productName: string;
+  createdAt: string;
+  usdRateUsed: string;
+  usdRateRubOverride: string;
   manager: { id: string; name: string };
   client: { name: string; company: string | null };
 }
@@ -110,7 +121,7 @@ interface ClientOption {
   company: string | null;
 }
 
-type ArchiveEntryType = "buyout" | "cargo_rate" | "cny_rate" | "buyout_commission" | "self_sourced_client";
+type ArchiveEntryType = "buyout" | "cargo_rate" | "cny_rate" | "usd_rate" | "buyout_commission" | "self_sourced_client";
 
 interface ArchiveEntry {
   type: ArchiveEntryType;
@@ -129,6 +140,7 @@ const ARCHIVE_TYPE_LABEL: Record<ArchiveEntryType, string> = {
   buyout: "Выкуп",
   cargo_rate: "Ставка карго",
   cny_rate: "Курс юаня",
+  usd_rate: "Курс доллара",
   buyout_commission: "Комиссия за выкуп",
   self_sourced_client: "Личный клиент",
 };
@@ -347,6 +359,7 @@ function ManagerConfirmationsTab() {
   const [pendingClients, setPendingClients] = useState<PendingClient[]>([]);
   const [pendingCargoRates, setPendingCargoRates] = useState<PendingCargoRate[]>([]);
   const [pendingCnyRates, setPendingCnyRates] = useState<PendingCnyRate[]>([]);
+  const [pendingUsdRates, setPendingUsdRates] = useState<PendingUsdRate[]>([]);
   const [pendingBuyoutCommissions, setPendingBuyoutCommissions] = useState<PendingBuyoutCommission[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -362,6 +375,10 @@ function ManagerConfirmationsTab() {
   const [busyCnyRateId, setBusyCnyRateId] = useState<string | null>(null);
   const [cnyRateError, setCnyRateError] = useState<string | null>(null);
 
+  const [usdRateFiles, setUsdRateFiles] = useState<Record<string, File | null>>({});
+  const [busyUsdRateId, setBusyUsdRateId] = useState<string | null>(null);
+  const [usdRateError, setUsdRateError] = useState<string | null>(null);
+
   const [buyoutCommissionFiles, setBuyoutCommissionFiles] = useState<Record<string, File | null>>({});
   const [busyBuyoutCommissionId, setBusyBuyoutCommissionId] = useState<string | null>(null);
   const [buyoutCommissionError, setBuyoutCommissionError] = useState<string | null>(null);
@@ -375,6 +392,7 @@ function ManagerConfirmationsTab() {
         setPendingClients(data.pendingClients ?? []);
         setPendingCargoRates(data.pendingCargoRates ?? []);
         setPendingCnyRates(data.pendingCnyRates ?? []);
+        setPendingUsdRates(data.pendingUsdRates ?? []);
         setPendingBuyoutCommissions(data.pendingBuyoutCommissions ?? []);
       })
       .finally(() => setLoading(false));
@@ -431,6 +449,30 @@ function ManagerConfirmationsTab() {
       }
     } finally {
       setBusyCnyRateId(null);
+    }
+  }
+
+  async function handleConfirmUsdRate(quoteId: string) {
+    const file = usdRateFiles[quoteId];
+    setBusyUsdRateId(quoteId);
+    setUsdRateError(null);
+    try {
+      const formData = new FormData();
+      if (file) formData.append("file", file);
+      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-usd-rate`, { method: "PATCH", body: formData });
+      if (res.ok) {
+        setUsdRateFiles((current) => {
+          const { [quoteId]: _omit, ...rest } = current;
+          void _omit;
+          return rest;
+        });
+        await load();
+      } else {
+        const data = await res.json();
+        setUsdRateError(data.error ?? "Не удалось подтвердить курс.");
+      }
+    } finally {
+      setBusyUsdRateId(null);
     }
   }
 
@@ -548,6 +590,7 @@ function ManagerConfirmationsTab() {
     pendingClients.length === 0 &&
     pendingCargoRates.length === 0 &&
     pendingCnyRates.length === 0 &&
+    pendingUsdRates.length === 0 &&
     pendingBuyoutCommissions.length === 0;
 
   return (
@@ -799,6 +842,59 @@ function ManagerConfirmationsTab() {
                       className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
                     >
                       {busyCnyRateId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      Подтвердить
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {pendingUsdRates.length > 0 && (
+            <div>
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
+                <DollarSign className="h-3.5 w-3.5" /> Ручной курс доллара ({pendingUsdRates.length})
+              </h3>
+              <p className="mt-1 text-xs text-text-secondary">
+                Менеджер вписал курс $→₽ вручную, не из тарифов. Скриншот переписки, подтверждающий, что это
+                реальный согласованный курс, — необязательно, но поможет при проверке.
+              </p>
+              {usdRateError && <p className="mt-1 text-xs text-error">{usdRateError}</p>}
+              <ul className="mt-2 space-y-2">
+                {pendingUsdRates.map((quote) => (
+                  <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <span className="font-medium text-text">
+                          №{quote.displayId} · {quote.productName}
+                        </span>
+                        <span className="ml-2 text-xs text-text-secondary">
+                          {quote.client.name}
+                          {quote.client.company ? ` · ${quote.client.company}` : ""} · менеджер {quote.manager.name}
+                        </span>
+                      </div>
+                      <span className="text-xs font-medium text-warning">
+                        курс: 1$ = {Number(quote.usdRateRubOverride).toFixed(2)}₽
+                      </span>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки (необязательно):</span>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        onChange={(e) => setUsdRateFiles((c) => ({ ...c, [quote.id]: e.target.files?.[0] ?? null }))}
+                        className="text-xs text-text-secondary"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmUsdRate(quote.id)}
+                      disabled={busyUsdRateId === quote.id}
+                      className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
+                    >
+                      {busyUsdRateId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                       Подтвердить
                     </button>
                   </li>

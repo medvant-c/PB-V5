@@ -134,6 +134,8 @@ interface QuoteDetail {
   cnyRateRubOverride: string | null;
   cnyRateOverrideConfirmed: boolean;
   usdRateUsed: string;
+  usdRateRubOverride: string | null;
+  usdRateOverrideConfirmed: boolean;
   buyoutCommissionPercent: string;
   buyoutCommissionPercentOverride: string | null;
   buyoutCommissionOverrideConfirmed: boolean;
@@ -196,6 +198,7 @@ const BLANK_FORM = {
   cargoDiscountUsd: "",
   cargoRateUsdOverride: "",
   cnyRateRubOverride: "",
+  usdRateRubOverride: "",
   buyoutCommissionPercentOverride: "",
 };
 
@@ -267,6 +270,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   const [cargoRateOverrideConfirmed, setCargoRateOverrideConfirmed] = useState(false);
   const [cnyRateRubOverride, setCnyRateRubOverride] = useState(BLANK_FORM.cnyRateRubOverride);
   const [cnyRateOverrideConfirmed, setCnyRateOverrideConfirmed] = useState(false);
+  const [usdRateRubOverride, setUsdRateRubOverride] = useState(BLANK_FORM.usdRateRubOverride);
+  const [usdRateOverrideConfirmed, setUsdRateOverrideConfirmed] = useState(false);
   const [buyoutCommissionPercentOverride, setBuyoutCommissionPercentOverride] = useState(BLANK_FORM.buyoutCommissionPercentOverride);
   const [buyoutCommissionOverrideConfirmed, setBuyoutCommissionOverrideConfirmed] = useState(false);
 
@@ -357,6 +362,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       setCargoRateOverrideConfirmed(false);
       setCnyRateRubOverride(BLANK_FORM.cnyRateRubOverride);
       setCnyRateOverrideConfirmed(false);
+      setUsdRateRubOverride(BLANK_FORM.usdRateRubOverride);
+      setUsdRateOverrideConfirmed(false);
       setBuyoutCommissionPercentOverride(BLANK_FORM.buyoutCommissionPercentOverride);
       setBuyoutCommissionOverrideConfirmed(false);
       setFrozenRates(null);
@@ -404,6 +411,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           setCargoRateOverrideConfirmed(q.cargoRateOverrideConfirmed);
           setCnyRateRubOverride(q.cnyRateRubOverride ?? "");
           setCnyRateOverrideConfirmed(q.cnyRateOverrideConfirmed);
+          setUsdRateRubOverride(q.usdRateRubOverride ?? "");
+          setUsdRateOverrideConfirmed(q.usdRateOverrideConfirmed);
           setBuyoutCommissionPercentOverride(q.buyoutCommissionPercentOverride ?? "");
           setBuyoutCommissionOverrideConfirmed(q.buyoutCommissionOverrideConfirmed);
           setFrozenRates({
@@ -541,7 +550,9 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       volumeTariffs: volumeTariffInputs,
       searchServiceFeeRub,
       buyoutCommissionTiers,
-      usdRateRub: isFrozen ? frozenRates.usdRateRub : Number(tariffs.usdRateRub),
+      // A manual override is usable immediately, same as
+      // cnyRateRubOverride below — confirmation only gates the sign-off.
+      usdRateRub: num(usdRateRubOverride) ?? (isFrozen ? frozenRates.usdRateRub : Number(tariffs.usdRateRub)),
       attachedServicesTotalRub,
       customProductionFeeRub,
       cargoDiscountUsd: num(cargoDiscountUsd),
@@ -603,6 +614,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     cargoDiscountUsd,
     cargoRateUsdOverride,
     cnyRateRubOverride,
+    usdRateRubOverride,
     buyoutCommissionPercentOverride,
     isEditing,
     frozenRates,
@@ -698,6 +710,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         if (cargoDiscountUsd.trim()) formData.append("cargoDiscountUsd", cargoDiscountUsd.trim());
         if (cargoRateUsdOverride.trim()) formData.append("cargoRateUsdOverride", cargoRateUsdOverride.trim());
         if (cnyRateRubOverride.trim()) formData.append("cnyRateRubOverride", cnyRateRubOverride.trim());
+        if (usdRateRubOverride.trim()) formData.append("usdRateRubOverride", usdRateRubOverride.trim());
         if (buyoutCommissionPercentOverride.trim()) {
           formData.append("buyoutCommissionPercentOverride", buyoutCommissionPercentOverride.trim());
         }
@@ -1172,6 +1185,30 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                   (isEditing ? (
                     <p className={cn("text-xs", cnyRateOverrideConfirmed ? "text-success" : "text-warning")}>
                       {cnyRateOverrideConfirmed
+                        ? "✓ Курс подтверждён руководителем/старшим менеджером."
+                        : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — курс уже применяется в просчёте."}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-warning">
+                      После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
+                    </p>
+                  ))}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Ручной курс доллара, ₽ (необязательно — иначе берётся из тарифов)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="из тарифов"
+                  value={usdRateRubOverride}
+                  onChange={(e) => setUsdRateRubOverride(e.target.value)}
+                />
+                {usdRateRubOverride.trim() &&
+                  (isEditing ? (
+                    <p className={cn("text-xs", usdRateOverrideConfirmed ? "text-success" : "text-warning")}>
+                      {usdRateOverrideConfirmed
                         ? "✓ Курс подтверждён руководителем/старшим менеджером."
                         : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — курс уже применяется в просчёте."}
                     </p>

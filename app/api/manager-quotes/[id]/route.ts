@@ -127,7 +127,9 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     // frozen value, never a live tariff lookup — an edit never moves money
     // the client was already quoted.
     cnyRateRub: fields.cnyRateRubOverride ?? Number(existing.cnyRateUsed),
-    usdRateRub: Number(existing.usdRateUsed),
+    // Frozen unless a manual override is present — same reasoning as
+    // cnyRateRub above.
+    usdRateRub: fields.usdRateRubOverride ?? Number(existing.usdRateUsed),
     // Frozen, same as cnyRateRub/usdRateRub above — an edit never moves
     // money the client was already quoted (see recalculate/route.ts's
     // comment). A single bracket spanning the whole range reuses the exact
@@ -193,6 +195,14 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     ? null
     : existing.buyoutCommissionOverrideConfirmedByManagerId;
   const buyoutCommissionOverrideConfirmedAt = buyoutCommissionOverrideChanged ? null : existing.buyoutCommissionOverrideConfirmedAt;
+
+  // Same reset-on-change rule again, for the manual $→₽ rate — see
+  // Quote.usdRateOverrideConfirmed in prisma/schema.prisma.
+  const existingUsdRateRubOverride = existing.usdRateRubOverride !== null ? Number(existing.usdRateRubOverride) : undefined;
+  const usdRateOverrideChanged = fields.usdRateRubOverride !== existingUsdRateRubOverride;
+  const usdRateOverrideConfirmed = usdRateOverrideChanged ? false : existing.usdRateOverrideConfirmed;
+  const usdRateOverrideConfirmedByManagerId = usdRateOverrideChanged ? null : existing.usdRateOverrideConfirmedByManagerId;
+  const usdRateOverrideConfirmedAt = usdRateOverrideChanged ? null : existing.usdRateOverrideConfirmedAt;
 
   // Same per-category cost lookup as the POST route — see its comment. A
   // confirmed manual rate's real supplier cost (confirmedCargoCostUsd)
@@ -288,6 +298,14 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       cnyRateOverrideConfirmed,
       cnyRateOverrideConfirmedByManagerId,
       cnyRateOverrideConfirmedAt,
+      // Not previously persisted here (frozen, never changed by a plain
+      // edit) — now genuinely can change with a manual override, same
+      // reasoning as cnyRateUsed above.
+      usdRateUsed: engineInputs.usdRateRub,
+      usdRateRubOverride: fields.usdRateRubOverride ?? null,
+      usdRateOverrideConfirmed,
+      usdRateOverrideConfirmedByManagerId,
+      usdRateOverrideConfirmedAt,
     },
   });
 

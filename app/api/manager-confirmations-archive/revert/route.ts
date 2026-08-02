@@ -69,6 +69,17 @@ export async function PATCH(req: NextRequest) {
     return Response.json({ ok: true });
   }
 
+  if (type === "usd_rate") {
+    const quote = await prisma.quote.findUnique({ where: { id }, select: { usdRateOverrideConfirmed: true } });
+    if (!quote) return Response.json({ error: "Просчёт не найден." }, { status: 404 });
+    if (!quote.usdRateOverrideConfirmed) return Response.json({ error: "Курс доллара не подтверждён." }, { status: 400 });
+    await prisma.quote.update({
+      where: { id },
+      data: { usdRateOverrideConfirmed: false, usdRateOverrideConfirmedByManagerId: null, usdRateOverrideConfirmedAt: null },
+    });
+    return Response.json({ ok: true });
+  }
+
   if (type === "buyout_commission") {
     const quote = await prisma.quote.findUnique({ where: { id }, select: { buyoutCommissionOverrideConfirmed: true } });
     if (!quote) return Response.json({ error: "Просчёт не найден." }, { status: 404 });

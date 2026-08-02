@@ -46,6 +46,9 @@ enum DeskFileTab {
   // agreed, not made up. relatedId is the Quote id. See PB-V5 chat
   // 2026-07-30.
   quote_cny_rate_proof
+  // Same idea again, for a manual $→₽ rate (Quote.usdRateRubOverride).
+  // relatedId is the Quote id. See PB-V5 chat 2026-08-02.
+  quote_usd_rate_proof
   // Same idea again, for a manual buyout-commission % override
   // (Quote.buyoutCommissionPercentOverride). relatedId is the Quote id.
   // See PB-V5 chat 2026-07-31.
@@ -756,6 +759,19 @@ model Quote {
   cnyRateOverrideConfirmed          Boolean   @default(false)
   cnyRateOverrideConfirmedByManagerId String?
   cnyRateOverrideConfirmedAt        DateTime?
+
+  // Manual $→₽ rate for a special case — same idea as cnyRateRubOverride
+  // above, just for the rate cargo delivery is converted at (usdRateUsed).
+  // null = normal rate, taken from TariffSettings.usdRateRub (new quote) or
+  // frozen from this quote's own snapshot (edit), same as before this field
+  // existed. See PB-V5 chat 2026-08-02.
+  usdRateRubOverride Decimal?
+  // Same owner/senior sign-off gate as cnyRateOverrideConfirmed above —
+  // proof-only, no separate cost field (same reasoning as cny: this rate
+  // already IS what cargo is converted at, nothing else to enter).
+  usdRateOverrideConfirmed          Boolean   @default(false)
+  usdRateOverrideConfirmedByManagerId String?
+  usdRateOverrideConfirmedAt        DateTime?
 
   // Manual commission-% override for the buyout — same idea as
   // cargoRateUsdOverride/cnyRateRubOverride above: null = normal

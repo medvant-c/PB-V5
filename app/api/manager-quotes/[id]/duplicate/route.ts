@@ -91,6 +91,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       // Same "value carried over, confirmation always resets" reasoning as
       // cargoRateUsdOverride above.
       cnyRateRubOverride: existing.cnyRateRubOverride,
+      usdRateRubOverride: existing.usdRateRubOverride,
     },
   });
 
