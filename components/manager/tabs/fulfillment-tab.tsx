@@ -328,6 +328,7 @@ function ManagerFulfillmentTab() {
   }
 
   async function handleToggleArchiveOrder(order: FulfillmentOrderRecord) {
+    if (!order.archivedAt && !window.confirm("Отправить этот заказ в архив?")) return;
     setBusyOrderActionId(order.id);
     try {
       const res = await fetch(`/api/manager-fulfillment-orders/${order.id}`, {

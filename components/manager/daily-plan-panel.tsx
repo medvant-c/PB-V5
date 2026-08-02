@@ -120,6 +120,7 @@ function DailyPlanPanel() {
   }
 
   async function handleDelete(id: string) {
+    if (!window.confirm("Удалить эту задачу из плана?")) return;
     setBusyId(id);
     try {
       const res = await fetch(`/api/manager-daily-plan/${id}`, { method: "DELETE" });

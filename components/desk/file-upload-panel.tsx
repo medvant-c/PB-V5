@@ -88,6 +88,7 @@ function FileUploadPanel({ tab, relatedId = null, className }: FileUploadPanelPr
   }
 
   async function deleteFile(id: string) {
+    if (!window.confirm("Удалить этот файл?")) return;
     setPendingDeleteId(id);
     setError(null);
     try {

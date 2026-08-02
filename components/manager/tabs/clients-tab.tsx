@@ -2205,6 +2205,7 @@ function ManagerClientsTab() {
   }
 
   async function handleToggleArchive(client: ClientRecord) {
+    if (!client.archivedAt && !window.confirm(`Отправить клиента «${client.name}» в архив?`)) return;
     setArchivingId(client.id);
     try {
       const res = await fetch(`/api/manager-clients/${client.id}`, {

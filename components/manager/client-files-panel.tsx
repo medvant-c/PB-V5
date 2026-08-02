@@ -92,6 +92,7 @@ function ClientFilesPanel({ clientId }: ClientFilesPanelProps) {
   }
 
   async function deleteFile(id: string) {
+    if (!window.confirm("Удалить этот файл?")) return;
     setPendingDeleteId(id);
     setError(null);
     try {
