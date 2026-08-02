@@ -196,6 +196,7 @@ model Client {
   fulfillmentOrders FulfillmentOrder[]
   quoteDraftRequests QuoteDraftRequest[]
   dailyPlanItems DailyPlanItem[]
+  containerShipments ContainerShipment[]
 
   @@index([createdByManagerId])
 }
@@ -257,6 +258,7 @@ model Manager {
   completedFulfillmentServices FulfillmentOrderItemService[]
   quoteDraftRequests QuoteDraftRequest[]
   dailyPlanItems DailyPlanItem[]
+  containerShipments ContainerShipment[]
 }
 
 // Which tier of the "Поиск товара" service a quote is billed under — the
@@ -887,6 +889,7 @@ model Quote {
 
   attachedServices QuoteAttachedService[]
   fulfillmentOrders FulfillmentOrder[]
+  containerShipmentItems ContainerShipmentItem[]
 
   @@index([clientId])
   @@index([managerId])
@@ -912,6 +915,80 @@ model QuoteAttachedService {
   createdAt           DateTime            @default(now())
 
   @@index([quoteId])
+}
+
+// A completely separate shipping method from every Quote's own cargo
+// pricing (density/volume tariff, priced per kg/m³) — a manager batches
+// several of a client's ALREADY-PRICED quotes into one physical rail
+// container instead, and the container's own flat delivery price gets
+// split back across those quotes proportionally by volume. Deliberately
+// does not touch Quote.cargoDeliveryRub/cargoRateUsd/etc at all — those
+// stay exactly what they were, this is an alternate, additional pricing
+// view for the same underlying goods, presented on its own PDF. See PB-V5
+// chat 2026-08-02.
+enum ContainerType {
+  ft20
+  ft40
+}
+
+model ContainerShipment {
+  id        String   @id @default(cuid())
+  displayId Int      @unique
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id])
+  managerId String
+  manager   Manager  @relation(fields: [managerId], references: [id])
+  containerType ContainerType
+  // What the client is charged for the whole container's delivery, in $ —
+  // entered by whoever forms the container (any manager), same $
+  // denomination as Quote.cargoRateUsd/cargoDeliveryUsd. Split across items
+  // proportionally by volume at PDF-render time (see
+  // lib/desk-services/container-shipment-pdf.tsx) — not stored per item,
+  // since it's a pure function of totalDeliveryUsd and each item's own
+  // snapshotted totalVolumeM3 below.
+  totalDeliveryUsd     Decimal
+  // Owner-confidential real cost of the container delivery — owner-only to
+  // enter and see (same confidentiality boundary as Quote.cargoCostUsd),
+  // null if a plain manager formed the container without the owner present.
+  // Internal profit reference only, never rendered on the client PDF.
+  totalDeliveryCostUsd Decimal?
+  // $→₽ rate snapshotted at creation (from TariffSettings.usdRateRub, same
+  // as Quote.usdRateUsed) — the PDF's ₽ figures need one, and a container
+  // is a one-off event, not something that gets edited/re-priced later.
+  usdRateRub Decimal
+  createdAt  DateTime @default(now())
+
+  items ContainerShipmentItem[]
+}
+
+// One line item = one Quote included in a ContainerShipment. Every number
+// here is a snapshot taken the moment the quote was added — editing the
+// original Quote afterward (or it being recalculated) must never silently
+// shift a number on a container PDF that may already be in the client's
+// hands, same "frozen at the time" philosophy as Quote's own
+// cnyRateUsed/usdRateUsed snapshots.
+model ContainerShipmentItem {
+  id                  String            @id @default(cuid())
+  containerShipmentId String
+  containerShipment   ContainerShipment @relation(fields: [containerShipmentId], references: [id], onDelete: Cascade)
+  quoteId             String
+  quote               Quote             @relation(fields: [quoteId], references: [id])
+
+  productName   String
+  color         String?
+  dimensions    String?
+  quantity      Int
+  totalWeightKg Decimal
+  totalVolumeM3 Decimal
+  // Everything the client owes for this quote EXCEPT cargo delivery (goods
+  // + China delivery + search fee + buyout commission + services +
+  // производство под заказ) — quote.totalRub minus quote.cargoDeliveryRub
+  // at snapshot time. The container's own proportional delivery share
+  // (computed from totalVolumeM3 above vs the shipment's total) replaces
+  // the quote's original cargo delivery entirely on this PDF.
+  goodsAndFeesRub Decimal
+
+  @@unique([containerShipmentId, quoteId])
 }
 
 // Catalog of sellable services with prices, picked from a dropdown when a

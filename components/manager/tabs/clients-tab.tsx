@@ -7,6 +7,7 @@ import {
   Banknote,
   Check,
   ChevronDown,
+  Container,
   Copy,
   Download,
   FileSpreadsheet,
@@ -52,6 +53,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { EmptyState } from "@/components/desk/empty-state";
 import { QuoteDialog } from "@/components/manager/quote-dialog";
 import { ClientFilesPanel } from "@/components/manager/client-files-panel";
+import { ContainerShipmentDialog } from "@/components/manager/container-shipment-dialog";
 import {
   QUOTE_STATUSES,
   QUOTE_STATUS_LABEL,
@@ -448,6 +450,7 @@ function ClientQuotes({
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [exportingPdfBundle, setExportingPdfBundle] = useState(false);
   const [pdfBundleError, setPdfBundleError] = useState<string | null>(null);
+  const [containerDialogOpen, setContainerDialogOpen] = useState(false);
   const [expandedCommentId, setExpandedCommentId] = useState<string | null>(null);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
@@ -1133,6 +1136,19 @@ function ClientQuotes({
           Счёт на услуги {selectedIds.length > 0 && `(${selectedIds.length})`}
         </button>
 
+        {!isGlobal && clientId && (
+          <button
+            type="button"
+            onClick={() => setContainerDialogOpen(true)}
+            disabled={selectedIds.length === 0}
+            title="Собрать выбранные просчёты в один контейнер ЖД доставки с пропорциональной ценой"
+            className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Container className="h-3.5 w-3.5" />
+            Сформировать контейнер ЖД {selectedIds.length > 0 && `(${selectedIds.length})`}
+          </button>
+        )}
+
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <button
@@ -1799,6 +1815,25 @@ function ClientQuotes({
           })()}
         </DialogContent>
       </Dialog>
+
+      {!isGlobal && clientId && (
+        <ContainerShipmentDialog
+          open={containerDialogOpen}
+          onOpenChange={setContainerDialogOpen}
+          clientId={clientId}
+          quotes={quotes
+            .filter((q) => selectedIds.includes(q.id))
+            .map((q) => ({
+              id: q.id,
+              displayId: q.displayId,
+              productName: q.productName,
+              totalVolumeM3: q.totalVolumeM3,
+              totalWeightKg: q.totalWeightKg,
+            }))}
+          isOwner={allManagers !== null}
+          onDone={() => setSelectedIds([])}
+        />
+      )}
     </div>
     </TooltipProvider>
   );
