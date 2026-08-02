@@ -1842,7 +1842,12 @@ function ClientQuotes({
 function ManagerClientsTab() {
   const [clients, setClients] = useState<ClientRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedClientId, setExpandedClientId] = useState<string | null>(null);
+  // Which client's own quotes/details show in the right-hand panel — a
+  // plain selection now (master-detail layout), not an accordion toggle
+  // per row, so clicking a different client never closes the pane, and
+  // the same client's data stays visible while the manager works through
+  // its quote list. See PB-V5 chat 2026-08-02.
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
   const [quoteDialogClientId, setQuoteDialogClientId] = useState<string | null>(null);
   const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
   const [quotesRefreshKey, setQuotesRefreshKey] = useState(0);
@@ -2153,6 +2158,7 @@ function ManagerClientsTab() {
   }
 
   const quoteDialogClient = clients.find((c) => c.id === quoteDialogClientId) ?? null;
+  const selectedClient = clients.find((c) => c.id === selectedClientId) ?? null;
 
   // Free-text search over name/company/phone/email/messenger, plus an
   // optional manager filter — client-side over the already-scoped
@@ -2174,397 +2180,414 @@ function ManagerClientsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-sm font-bold text-text">Клиенты</h2>
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-1.5 text-xs text-text-secondary">
-            <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
-            Показывать архивные
-          </label>
-          {!showNewForm && (
-            <Button type="button" size="sm" variant="outline" onClick={() => setShowNewForm(true)}>
-              <Plus className="h-4 w-4" /> Новый клиент
-            </Button>
+      <div className="flex flex-col gap-4 lg:h-[calc(100vh-260px)] lg:min-h-140 lg:flex-row">
+        {/* LEFT: client list */}
+        <div className="flex w-full shrink-0 flex-col rounded-xl border border-border bg-surface lg:w-80">
+          <div className="space-y-2 border-b border-border p-3">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-bold text-text">Клиенты · {filteredClients.length}</h2>
+              {!showNewForm && (
+                <Button type="button" size="sm" variant="outline" onClick={() => setShowNewForm(true)}>
+                  <Plus className="h-3.5 w-3.5" /> Новый
+                </Button>
+              )}
+            </div>
+            <Input
+              placeholder="Поиск по имени, компании, телефону, email…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-8 text-xs"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              {teamManagers && teamManagers.length > 1 && (
+                <Select value={managerFilter} onValueChange={setManagerFilter}>
+                  <SelectTrigger className="h-7 flex-1 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все менеджеры</SelectItem>
+                    {teamManagers.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <label className="flex shrink-0 items-center gap-1.5 text-[11px] text-text-secondary">
+                <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+                архивные
+              </label>
+            </div>
+          </div>
+
+          {showNewForm && (
+            <form onSubmit={handleCreate} className="space-y-2 border-b border-border p-3">
+              <p className="text-xs font-semibold text-text-secondary">Новый клиент</p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNewClientSelfSourced(false)}
+                  className={cn(
+                    "flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
+                    !newClientSelfSourced ? "border-error/40 bg-error/10 text-error" : "border-border text-text-secondary hover:border-error/30",
+                  )}
+                >
+                  Клиент компании
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewClientSelfSourced(true)}
+                  className={cn(
+                    "flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
+                    newClientSelfSourced ? "border-success/40 bg-success/10 text-success" : "border-border text-text-secondary hover:border-success/30",
+                  )}
+                >
+                  Мой личный клиент
+                </button>
+              </div>
+              <div className="space-y-2">
+                <Input placeholder="Имя клиента" value={name} onChange={(e) => setName(e.target.value)} required />
+                <Input placeholder="Компания (необязательно)" value={company} onChange={(e) => setCompany(e.target.value)} />
+                <Input
+                  placeholder="+7 (___) ___-__-__ (необязательно)"
+                  value={phone}
+                  onChange={(e) => setPhone(formatPhoneMask(e.target.value, phone))}
+                />
+                <Input placeholder="Telegram / WeChat" value={messenger} onChange={(e) => setMessenger(e.target.value)} />
+                <Input type="email" placeholder="Email (необязательно)" value={email} onChange={(e) => setEmail(e.target.value)} />
+                <Select value={source} onValueChange={setSource}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(SOURCE_LABELS).map(([key, label]) => (
+                      <SelectItem key={key} value={key}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {error && <p className="text-xs text-error">{error}</p>}
+              <div className="flex gap-2">
+                <Button type="submit" size="sm" disabled={creating}>
+                  {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Добавить"}
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setShowNewForm(false)}>
+                  Отмена
+                </Button>
+              </div>
+            </form>
+          )}
+
+          <div className="flex-1 overflow-y-auto p-2 lg:min-h-0">
+            {loading ? (
+              <p className="p-2 text-sm text-text-secondary">Загрузка…</p>
+            ) : clients.length === 0 ? (
+              <EmptyState icon={UserRound} message="Клиентов пока нет — добавьте первого кнопкой выше." />
+            ) : filteredClients.length === 0 ? (
+              <EmptyState icon={UserRound} message="Ничего не найдено — измените поиск или фильтр." />
+            ) : (
+              <div className="space-y-1">
+                {filteredClients.map((client) => {
+                  const isSelected = selectedClientId === client.id;
+                  return (
+                    <button
+                      key={client.id}
+                      type="button"
+                      onClick={() => setSelectedClientId(client.id)}
+                      className={cn(
+                        "flex w-full items-start gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors",
+                        isSelected ? "border-primary/30 bg-primary/5" : "border-transparent hover:bg-bg",
+                        client.archivedAt && "opacity-60",
+                      )}
+                    >
+                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                        {client.name.trim().charAt(0).toUpperCase() || "?"}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-medium text-text">
+                          <span className="text-text-secondary">№{client.displayId}</span> {client.name}
+                        </div>
+                        {client.company && (
+                          <div className="truncate text-[11px] text-text-secondary">{client.company}</div>
+                        )}
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          <span
+                            className={cn(
+                              "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                              client.selfSourcedClaimed ? "bg-success/10 text-success" : "bg-error/10 text-error",
+                            )}
+                          >
+                            {client.selfSourcedClaimed ? "свой клиент" : "клиент компании"}
+                          </span>
+                          {newRequestCounts[client.id] > 0 && (
+                            <span className="flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                              <Inbox className="h-3 w-3" /> {newRequestCounts[client.id]}
+                            </span>
+                          )}
+                          {draftCounts[client.id] > 0 && (
+                            <span className="flex items-center gap-1 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+                              <AlertTriangle className="h-3 w-3" /> {draftCounts[client.id]}
+                            </span>
+                          )}
+                          {needsReplacementCounts[client.id] > 0 && (
+                            <span className="flex items-center gap-1 rounded-full bg-error/15 px-1.5 py-0.5 text-[10px] font-semibold text-error">
+                              <AlertTriangle className="h-3 w-3" /> {needsReplacementCounts[client.id]}
+                            </span>
+                          )}
+                          {client.vladShareRatePercentOverride !== null && client.vladShareRatePercentOverride !== undefined && (
+                            <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+                              Влад: {client.vladShareRatePercentOverride}%
+                            </span>
+                          )}
+                          {client.archivedAt && <span className="text-[10px] font-medium text-error">архив</span>}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT: selected client's details + quotes */}
+        <div className="min-w-0 flex-1 overflow-y-auto rounded-xl border border-border bg-bg p-4 lg:min-h-0">
+          {!selectedClient ? (
+            <EmptyState icon={UserRound} message="Выберите клиента слева, чтобы увидеть его данные и просчёты." />
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <h3 className="text-sm font-bold text-text">
+                  <span className="text-text-secondary">№{selectedClient.displayId}</span> {selectedClient.name}
+                  {selectedClient.company && <span className="text-text-secondary"> · {selectedClient.company}</span>}
+                  {selectedClient.archivedAt && <span className="ml-1.5 text-xs font-normal text-error">архив</span>}
+                </h3>
+                <div className="text-xs text-text-secondary">
+                  {selectedClient.contactsHidden ? (
+                    <span className="italic">контакты скрыты</span>
+                  ) : (
+                    <>
+                      {selectedClient.email ?? "без email"}
+                      {selectedClient.phone ? ` · ${selectedClient.phone}` : ""}
+                    </>
+                  )}
+                  {selectedClient.source ? ` · ${SOURCE_LABELS[selectedClient.source] ?? selectedClient.source}` : ""}
+                </div>
+              </div>
+
+              {allManagers && (
+                <p className="text-xs text-text-secondary">
+                  Сейчас у менеджера: <span className="font-medium text-text">{selectedClient.createdByManager?.name ?? "—"}</span>
+                </p>
+              )}
+              {teamManagers ? (
+                <label className="flex items-center gap-1.5 text-xs text-text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={!selectedClient.contactsHiddenFromManager}
+                    disabled={contactsToggleBusyId === selectedClient.id}
+                    onChange={(e) => handleToggleContactsHidden(selectedClient.id, !e.target.checked)}
+                  />
+                  Показывать контакты менеджеру
+                  {contactsToggleBusyId === selectedClient.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                </label>
+              ) : (
+                selectedClient.contactsHidden && (
+                  <p className="text-xs text-text-secondary">
+                    Контакты скрыты старшим менеджером или руководителем.
+                  </p>
+                )
+              )}
+              {allManagers && (
+                <label className="flex flex-wrap items-center gap-1.5 text-xs text-text-secondary">
+                  Доля Влада для этого клиента, % (пусто — обычная ставка из «Настроек»):
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="0.1"
+                    placeholder="—"
+                    value={vladShareDrafts[selectedClient.id] ?? selectedClient.vladShareRatePercentOverride ?? ""}
+                    onChange={(e) => setVladShareDrafts((c) => ({ ...c, [selectedClient.id]: e.target.value }))}
+                    onBlur={() => handleSaveVladShareOverride(selectedClient.id, selectedClient.vladShareRatePercentOverride)}
+                    disabled={vladShareBusyId === selectedClient.id}
+                    className="h-7 w-20 px-1.5 text-sm"
+                  />
+                  {vladShareBusyId === selectedClient.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                  {selectedClient.vladShareRatePercentOverride !== null && selectedClient.vladShareRatePercentOverride !== undefined && (
+                    <span className="font-medium text-warning">переопределено</span>
+                  )}
+                </label>
+              )}
+              {selectedClient.selfSourcedConfirmed ? (
+                <p className="text-xs font-medium text-success">✓ Личный клиент менеджера — повышенная премия с даты подтверждения</p>
+              ) : selectedClient.selfSourcedClaimed ? (
+                <p className="flex flex-wrap items-center gap-2 text-xs text-warning">
+                  Заявлен как личный, ждёт подтверждения
+                  {canConfirmBuyout && (
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmSelfSourced(selectedClient.id)}
+                      disabled={selfSourcedBusyId === selectedClient.id}
+                      className="rounded-lg border border-border bg-bg px-2 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
+                    >
+                      {selfSourcedBusyId === selectedClient.id && <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />}
+                      Подтвердить
+                    </button>
+                  )}
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleClaimSelfSourced(selectedClient.id)}
+                  disabled={selfSourcedBusyId === selectedClient.id}
+                  className="text-xs font-medium text-text-secondary underline decoration-dotted underline-offset-2 transition-colors hover:text-primary disabled:opacity-50"
+                >
+                  {selfSourcedBusyId === selectedClient.id && <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />}
+                  Заявить как личного клиента (повышенная премия)
+                </button>
+              )}
+              {selfSourcedError && <p className="text-xs text-error">{selfSourcedError}</p>}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" size="sm" variant="outline" onClick={() => startEditing(selectedClient)}>
+                    <Pencil className="h-3.5 w-3.5" /> Редактировать
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleToggleArchive(selectedClient)}
+                    disabled={archivingId === selectedClient.id}
+                  >
+                    {archivingId === selectedClient.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : selectedClient.archivedAt ? (
+                      "Из архива"
+                    ) : (
+                      "В архив"
+                    )}
+                  </Button>
+                  {teamManagers && (
+                    <Select
+                      value=""
+                      onValueChange={(managerId) => handleTransfer(selectedClient.id, managerId)}
+                      disabled={transferringClientId === selectedClient.id}
+                    >
+                      <SelectTrigger className="h-8 w-44 text-xs">
+                        <SelectValue placeholder="Передать менеджеру" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {teamManagers
+                          .filter((m) => m.id !== selectedClient.createdByManagerId)
+                          .map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+                <Button type="button" size="sm" onClick={() => setQuoteDialogClientId(selectedClient.id)}>
+                  Сформировать просчёт
+                </Button>
+              </div>
+
+              {editingClientId === selectedClient.id && (
+                <div className="space-y-2 rounded-lg bg-surface p-3">
+                  <p className="text-xs font-semibold text-text-secondary">Редактирование клиента</p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Input
+                      placeholder="Имя клиента"
+                      value={editDraft.name}
+                      onChange={(e) => setEditDraft((d) => ({ ...d, name: e.target.value }))}
+                    />
+                    <Input
+                      placeholder="Компания"
+                      value={editDraft.company}
+                      onChange={(e) => setEditDraft((d) => ({ ...d, company: e.target.value }))}
+                    />
+                    {selectedClient.contactsHidden ? (
+                      <p className="text-xs text-text-secondary sm:col-span-2">
+                        Телефон, Telegram/WeChat и email скрыты — недоступны для редактирования.
+                      </p>
+                    ) : (
+                      <>
+                        <Input
+                          placeholder="+7 (___) ___-__-__"
+                          value={editDraft.phone}
+                          onChange={(e) => setEditDraft((d) => ({ ...d, phone: formatPhoneMask(e.target.value, d.phone) }))}
+                        />
+                        <Input
+                          placeholder="Telegram / WeChat"
+                          value={editDraft.messenger}
+                          onChange={(e) => setEditDraft((d) => ({ ...d, messenger: e.target.value }))}
+                        />
+                        <Input
+                          type="email"
+                          placeholder="Email (необязательно)"
+                          value={editDraft.email}
+                          onChange={(e) => setEditDraft((d) => ({ ...d, email: e.target.value }))}
+                        />
+                      </>
+                    )}
+                    <Select value={editDraft.source} onValueChange={(v) => setEditDraft((d) => ({ ...d, source: v }))}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(SOURCE_LABELS).map(([key, label]) => (
+                          <SelectItem key={key} value={key}>
+                            {label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {editError && <p className="text-xs text-error">{editError}</p>}
+                  <div className="flex gap-2">
+                    <Button type="button" size="sm" onClick={() => handleSaveEdit(selectedClient.id)} disabled={editSaving}>
+                      {editSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Сохранить"}
+                    </Button>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setEditingClientId(null)}>
+                      Отмена
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <ClientDraftRequests clientId={selectedClient.id} refreshKey={quotesRefreshKey} onChange={loadDraftCounts} />
+
+              <ClientFilesPanel clientId={selectedClient.id} />
+
+              <div className="flex items-center justify-between gap-2">
+                <Label>Просчёты клиента</Label>
+                <Button type="button" size="sm" onClick={() => setQuoteDialogClientId(selectedClient.id)}>
+                  Сформировать просчёт
+                </Button>
+              </div>
+              <ClientQuotes
+                clientId={selectedClient.id}
+                refreshKey={quotesRefreshKey}
+                allManagers={allManagers}
+                teamManagers={teamManagers}
+                canConfirmBuyout={canConfirmBuyout}
+                clientSelfSourcedConfirmed={selectedClient.selfSourcedConfirmed}
+                clientCreatedByManagerId={selectedClient.createdByManagerId}
+                onEdit={(quoteId) => {
+                  setQuoteDialogClientId(selectedClient.id);
+                  setEditingQuoteId(quoteId);
+                }}
+                onChanged={() => setQuotesRefreshKey((key) => key + 1)}
+              />
+            </div>
           )}
         </div>
       </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          placeholder="Поиск по имени, компании, телефону, email…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full sm:max-w-xs"
-        />
-        {teamManagers && teamManagers.length > 1 && (
-          <Select value={managerFilter} onValueChange={setManagerFilter}>
-            <SelectTrigger className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Все менеджеры</SelectItem>
-              {teamManagers.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  {m.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-      </div>
-
-      {showNewForm && (
-        <form onSubmit={handleCreate} className="space-y-2 rounded-xl border border-dashed border-border p-3">
-          <p className="text-xs font-semibold text-text-secondary">Новый клиент</p>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setNewClientSelfSourced(false)}
-              className={cn(
-                "flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
-                !newClientSelfSourced ? "border-error/40 bg-error/10 text-error" : "border-border text-text-secondary hover:border-error/30",
-              )}
-            >
-              Клиент компании
-            </button>
-            <button
-              type="button"
-              onClick={() => setNewClientSelfSourced(true)}
-              className={cn(
-                "flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors",
-                newClientSelfSourced ? "border-success/40 bg-success/10 text-success" : "border-border text-text-secondary hover:border-success/30",
-              )}
-            >
-              Мой личный клиент
-            </button>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <Input placeholder="Имя клиента" value={name} onChange={(e) => setName(e.target.value)} required />
-            <Input placeholder="Компания (необязательно)" value={company} onChange={(e) => setCompany(e.target.value)} />
-            <Input
-              placeholder="+7 (___) ___-__-__ (необязательно)"
-              value={phone}
-              onChange={(e) => setPhone(formatPhoneMask(e.target.value, phone))}
-            />
-            <Input placeholder="Telegram / WeChat" value={messenger} onChange={(e) => setMessenger(e.target.value)} />
-            <Input type="email" placeholder="Email (необязательно)" value={email} onChange={(e) => setEmail(e.target.value)} />
-            <Select value={source} onValueChange={setSource}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(SOURCE_LABELS).map(([key, label]) => (
-                  <SelectItem key={key} value={key}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {error && <p className="text-xs text-error">{error}</p>}
-          <div className="flex gap-2">
-            <Button type="submit" size="sm" disabled={creating}>
-              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : "Добавить"}
-            </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => setShowNewForm(false)}>
-              Отмена
-            </Button>
-          </div>
-        </form>
-      )}
-
-      {loading ? (
-        <p className="text-sm text-text-secondary">Загрузка…</p>
-      ) : clients.length === 0 ? (
-        <EmptyState icon={UserRound} message="Клиентов пока нет — добавьте первого кнопкой выше." />
-      ) : filteredClients.length === 0 ? (
-        <EmptyState icon={UserRound} message="Ничего не найдено — измените поиск или фильтр." />
-      ) : (
-        <div className="space-y-2">
-          {filteredClients.map((client) => {
-            const isOpen = expandedClientId === client.id;
-            const isEditing = editingClientId === client.id;
-            return (
-              <div
-                key={client.id}
-                className={cn("rounded-xl border border-border bg-surface", client.archivedAt && "opacity-60")}
-              >
-                <button
-                  type="button"
-                  onClick={() => setExpandedClientId(isOpen ? null : client.id)}
-                  className="flex w-full items-center justify-between gap-3 p-3 text-left"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                      {client.name.trim().charAt(0).toUpperCase() || "?"}
-                    </span>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-text">
-                        <span>
-                          <span className="text-text-secondary">№{client.displayId}</span> {client.name}
-                          {client.company && <span className="text-text-secondary"> · {client.company}</span>}
-                        </span>
-                        <span
-                          className={cn(
-                            "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
-                            client.selfSourcedClaimed ? "bg-success/10 text-success" : "bg-error/10 text-error",
-                          )}
-                        >
-                          {client.selfSourcedClaimed ? "свой клиент" : "клиент компании"}
-                        </span>
-                        {newRequestCounts[client.id] > 0 && (
-                          <span className="flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                            <Inbox className="h-3 w-3" /> новые заявки: {newRequestCounts[client.id]}
-                          </span>
-                        )}
-                        {draftCounts[client.id] > 0 && (
-                          <span className="flex items-center gap-1 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
-                            <AlertTriangle className="h-3 w-3" /> заявки на поиск не обработаны: {draftCounts[client.id]}
-                          </span>
-                        )}
-                        {needsReplacementCounts[client.id] > 0 && (
-                          <span className="flex items-center gap-1 rounded-full bg-error/15 px-1.5 py-0.5 text-[10px] font-semibold text-error">
-                            <AlertTriangle className="h-3 w-3" /> нужна замена: {needsReplacementCounts[client.id]}
-                          </span>
-                        )}
-                        {client.vladShareRatePercentOverride !== null && client.vladShareRatePercentOverride !== undefined && (
-                          <span className="rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
-                            доля Влада: {client.vladShareRatePercentOverride}%
-                          </span>
-                        )}
-                        {client.archivedAt && <span className="text-xs font-normal text-error">архив</span>}
-                      </div>
-                      <div className="text-xs text-text-secondary">
-                        {client.contactsHidden ? (
-                          <span className="italic">контакты скрыты</span>
-                        ) : (
-                          <>
-                            {client.email ?? "без email"}
-                            {client.phone ? ` · ${client.phone}` : ""}
-                          </>
-                        )}
-                        {client.source ? ` · ${SOURCE_LABELS[client.source] ?? client.source}` : ""}
-                      </div>
-                    </div>
-                  </div>
-                  <ChevronDown className={cn("h-4 w-4 shrink-0 text-text-secondary transition-transform", isOpen && "rotate-180")} />
-                </button>
-
-                {isOpen && (
-                  <div className="space-y-3 rounded-b-xl border-t border-border bg-bg p-3">
-                    {allManagers && (
-                      <p className="text-xs text-text-secondary">
-                        Сейчас у менеджера: <span className="font-medium text-text">{client.createdByManager?.name ?? "—"}</span>
-                      </p>
-                    )}
-                    {teamManagers ? (
-                      <label className="flex items-center gap-1.5 text-xs text-text-secondary">
-                        <input
-                          type="checkbox"
-                          checked={!client.contactsHiddenFromManager}
-                          disabled={contactsToggleBusyId === client.id}
-                          onChange={(e) => handleToggleContactsHidden(client.id, !e.target.checked)}
-                        />
-                        Показывать контакты менеджеру
-                        {contactsToggleBusyId === client.id && <Loader2 className="h-3 w-3 animate-spin" />}
-                      </label>
-                    ) : (
-                      client.contactsHidden && (
-                        <p className="text-xs text-text-secondary">
-                          Контакты скрыты старшим менеджером или руководителем.
-                        </p>
-                      )
-                    )}
-                    {allManagers && (
-                      <label className="flex flex-wrap items-center gap-1.5 text-xs text-text-secondary">
-                        Доля Влада для этого клиента, % (пусто — обычная ставка из «Настроек»):
-                        <Input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step="0.1"
-                          placeholder="—"
-                          value={vladShareDrafts[client.id] ?? client.vladShareRatePercentOverride ?? ""}
-                          onChange={(e) => setVladShareDrafts((c) => ({ ...c, [client.id]: e.target.value }))}
-                          onBlur={() => handleSaveVladShareOverride(client.id, client.vladShareRatePercentOverride)}
-                          disabled={vladShareBusyId === client.id}
-                          className="h-7 w-20 px-1.5 text-sm"
-                        />
-                        {vladShareBusyId === client.id && <Loader2 className="h-3 w-3 animate-spin" />}
-                        {client.vladShareRatePercentOverride !== null && client.vladShareRatePercentOverride !== undefined && (
-                          <span className="font-medium text-warning">переопределено</span>
-                        )}
-                      </label>
-                    )}
-                    {client.selfSourcedConfirmed ? (
-                      <p className="text-xs font-medium text-success">✓ Личный клиент менеджера — повышенная премия с даты подтверждения</p>
-                    ) : client.selfSourcedClaimed ? (
-                      <p className="flex flex-wrap items-center gap-2 text-xs text-warning">
-                        Заявлен как личный, ждёт подтверждения
-                        {canConfirmBuyout && (
-                          <button
-                            type="button"
-                            onClick={() => handleConfirmSelfSourced(client.id)}
-                            disabled={selfSourcedBusyId === client.id}
-                            className="rounded-lg border border-border bg-bg px-2 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
-                          >
-                            {selfSourcedBusyId === client.id && <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />}
-                            Подтвердить
-                          </button>
-                        )}
-                      </p>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleClaimSelfSourced(client.id)}
-                        disabled={selfSourcedBusyId === client.id}
-                        className="text-xs font-medium text-text-secondary underline decoration-dotted underline-offset-2 transition-colors hover:text-primary disabled:opacity-50"
-                      >
-                        {selfSourcedBusyId === client.id && <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />}
-                        Заявить как личного клиента (повышенная премия)
-                      </button>
-                    )}
-                    {selfSourcedError && <p className="text-xs text-error">{selfSourcedError}</p>}
-                    <div className="flex items-center justify-between">
-                      <div className="flex gap-2">
-                        <Button type="button" size="sm" variant="outline" onClick={() => startEditing(client)}>
-                          <Pencil className="h-3.5 w-3.5" /> Редактировать
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleToggleArchive(client)}
-                          disabled={archivingId === client.id}
-                        >
-                          {archivingId === client.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : client.archivedAt ? (
-                            "Из архива"
-                          ) : (
-                            "В архив"
-                          )}
-                        </Button>
-                        {teamManagers && (
-                          <Select
-                            value=""
-                            onValueChange={(managerId) => handleTransfer(client.id, managerId)}
-                            disabled={transferringClientId === client.id}
-                          >
-                            <SelectTrigger className="h-8 w-44 text-xs">
-                              <SelectValue placeholder="Передать менеджеру" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {teamManagers
-                                .filter((m) => m.id !== client.createdByManagerId)
-                                .map((m) => (
-                                  <SelectItem key={m.id} value={m.id}>
-                                    {m.name}
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
-                        )}
-                      </div>
-                      <Button type="button" size="sm" onClick={() => setQuoteDialogClientId(client.id)}>
-                        Сформировать просчёт
-                      </Button>
-                    </div>
-
-                    {isEditing && (
-                      <div className="space-y-2 rounded-lg bg-bg p-3">
-                        <p className="text-xs font-semibold text-text-secondary">Редактирование клиента</p>
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <Input
-                            placeholder="Имя клиента"
-                            value={editDraft.name}
-                            onChange={(e) => setEditDraft((d) => ({ ...d, name: e.target.value }))}
-                          />
-                          <Input
-                            placeholder="Компания"
-                            value={editDraft.company}
-                            onChange={(e) => setEditDraft((d) => ({ ...d, company: e.target.value }))}
-                          />
-                          {client.contactsHidden ? (
-                            <p className="text-xs text-text-secondary sm:col-span-2">
-                              Телефон, Telegram/WeChat и email скрыты — недоступны для редактирования.
-                            </p>
-                          ) : (
-                            <>
-                              <Input
-                                placeholder="+7 (___) ___-__-__"
-                                value={editDraft.phone}
-                                onChange={(e) => setEditDraft((d) => ({ ...d, phone: formatPhoneMask(e.target.value, d.phone) }))}
-                              />
-                              <Input
-                                placeholder="Telegram / WeChat"
-                                value={editDraft.messenger}
-                                onChange={(e) => setEditDraft((d) => ({ ...d, messenger: e.target.value }))}
-                              />
-                              <Input
-                                type="email"
-                                placeholder="Email (необязательно)"
-                                value={editDraft.email}
-                                onChange={(e) => setEditDraft((d) => ({ ...d, email: e.target.value }))}
-                              />
-                            </>
-                          )}
-                          <Select value={editDraft.source} onValueChange={(v) => setEditDraft((d) => ({ ...d, source: v }))}>
-                            <SelectTrigger className="w-full">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {Object.entries(SOURCE_LABELS).map(([key, label]) => (
-                                <SelectItem key={key} value={key}>
-                                  {label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        {editError && <p className="text-xs text-error">{editError}</p>}
-                        <div className="flex gap-2">
-                          <Button type="button" size="sm" onClick={() => handleSaveEdit(client.id)} disabled={editSaving}>
-                            {editSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Сохранить"}
-                          </Button>
-                          <Button type="button" size="sm" variant="ghost" onClick={() => setEditingClientId(null)}>
-                            Отмена
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-
-                    <ClientDraftRequests clientId={client.id} refreshKey={quotesRefreshKey} onChange={loadDraftCounts} />
-
-                    <ClientFilesPanel clientId={client.id} />
-
-                    <div className="flex items-center justify-between gap-2">
-                      <Label>Просчёты клиента</Label>
-                      <Button type="button" size="sm" onClick={() => setQuoteDialogClientId(client.id)}>
-                        Сформировать просчёт
-                      </Button>
-                    </div>
-                    <ClientQuotes
-                      clientId={client.id}
-                      refreshKey={quotesRefreshKey}
-                      allManagers={allManagers}
-                      teamManagers={teamManagers}
-                      canConfirmBuyout={canConfirmBuyout}
-                      clientSelfSourcedConfirmed={client.selfSourcedConfirmed}
-                      clientCreatedByManagerId={client.createdByManagerId}
-                      onEdit={(quoteId) => {
-                        setQuoteDialogClientId(client.id);
-                        setEditingQuoteId(quoteId);
-                      }}
-                      onChanged={() => setQuotesRefreshKey((key) => key + 1)}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
 
       {quoteDialogClient && (
         <QuoteDialog
