@@ -135,6 +135,7 @@ function QuotesListPdfDocument({ client, rows, showTariff, cargoInUsd }: QuotesL
   const grandTotal = rows.reduce((sum, row) => sum + row.totalRub, 0);
   const totalWeightKg = rows.reduce((sum, row) => sum + row.totalWeightKg, 0);
   const totalVolumeM3 = rows.reduce((sum, row) => sum + row.totalVolumeM3, 0);
+  const totalCargoUsd = rows.reduce((sum, row) => sum + (row.cargoDeliveryUsd ?? 0), 0);
 
   return (
     <Document>
@@ -215,6 +216,12 @@ function QuotesListPdfDocument({ client, rows, showTariff, cargoInUsd }: QuotesL
           <Text style={styles.totalsSubValue}>{totalWeightKg.toFixed(1)} кг</Text>
           <Text style={styles.totalsSubLabel}>Общий объём:</Text>
           <Text style={styles.totalsSubValue}>{totalVolumeM3.toFixed(3)} м³</Text>
+          {cargoInUsd && (
+            <>
+              <Text style={styles.totalsSubLabel}>Общий карго:</Text>
+              <Text style={styles.totalsSubValue}>${totalCargoUsd.toFixed(2)}</Text>
+            </>
+          )}
           <Text style={styles.totalsLabel}>ИТОГО ПО ВСЕМ ПРОСЧЁТАМ</Text>
           <Text style={styles.totalsValue}>{fmt(grandTotal)} ₽</Text>
         </View>
