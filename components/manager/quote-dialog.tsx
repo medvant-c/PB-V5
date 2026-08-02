@@ -1143,6 +1143,20 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
             {preview && (
               <div className="space-y-1 rounded-lg border border-border bg-bg p-3 text-sm">
                 <div className="flex justify-between text-text-secondary">
+                  <span>Стоимость товара</span>
+                  <span>{fmt(preview.totalPriceRub)} ₽</span>
+                </div>
+                {preview.chinaDeliveryRub > 0 && (
+                  <div className="flex justify-between text-text-secondary">
+                    <span>Доставка по Китаю</span>
+                    <span>{fmt(preview.chinaDeliveryRub)} ₽</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-text-secondary">
+                  <span>Карго доставка</span>
+                  <span>{fmt(preview.cargoDeliveryRub)} ₽</span>
+                </div>
+                <div className="flex justify-between text-text-secondary">
                   <span>Услуга поиска</span>
                   <span>{fmt(preview ? (quoteType === "standard" ? Number(tariffs.standardPriceRub) : quoteType === "expert" ? Number(tariffs.expertPriceRub) : Number(tariffs.proPriceRub)) : 0)} ₽</span>
                 </div>
@@ -1153,6 +1167,21 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                   </span>
                   <span>{fmt(preview.buyoutCommissionRub)} ₽</span>
                 </div>
+                {isCustomProduction && (
+                  <div className="flex justify-between text-text-secondary">
+                    <span>Производство под заказ</span>
+                    <span>
+                      {fmt(
+                        quoteType === "standard"
+                          ? Number(tariffs.customProductionStandardRub)
+                          : quoteType === "expert"
+                            ? Number(tariffs.customProductionExpertRub)
+                            : Number(tariffs.customProductionProRub),
+                      )}{" "}
+                      ₽
+                    </span>
+                  </div>
+                )}
                 {attachedServices.map((service, index) => (
                   <div key={index} className="flex justify-between text-text-secondary">
                     <span className="truncate">{service.name}</span>
