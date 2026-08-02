@@ -62,6 +62,7 @@ import {
 } from "@/lib/quote-statuses";
 import { cn } from "@/lib/utils";
 import { formatPhoneMask } from "@/lib/phone";
+import { destinationCountryLabel } from "@/lib/destination-countries";
 
 const BULK_QUOTE_TYPES = [
   { value: "standard", label: "Standart" },
@@ -105,6 +106,7 @@ interface ClientRecord {
 interface QuoteRecord {
   id: string;
   displayId: number;
+  destinationCountry: string;
   productName: string;
   quoteType: string;
   status: QuoteStatus;
@@ -1272,6 +1274,11 @@ function ClientQuotes({
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium text-text">
                     №{quote.displayId} · {quote.productName}
+                    {quote.destinationCountry !== "russia" && (
+                      <span className="ml-1.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                        {destinationCountryLabel(quote.destinationCountry)}
+                      </span>
+                    )}
                   </span>
                   <span className="block truncate text-xs text-text-secondary">
                     {formatDate(quote.createdAt)} ·{" "}

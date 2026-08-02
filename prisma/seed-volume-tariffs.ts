@@ -24,7 +24,9 @@ const VOLUME_TARIFFS: [string, string, number, number][] = [
 
 async function main() {
   for (const [categoryKey, categoryLabel, rateUsdPerCbm, costUsdPerCbm] of VOLUME_TARIFFS) {
-    const existing = await prisma.volumeTariff.findUnique({ where: { categoryKey } });
+    const existing = await prisma.volumeTariff.findUnique({
+      where: { destinationCountry_categoryKey: { destinationCountry: "russia", categoryKey } },
+    });
     if (existing) {
       console.log(`Skipping ${categoryKey} — already has a volume tariff.`);
       continue;

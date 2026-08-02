@@ -5,6 +5,8 @@ import { Check, Loader2, Lock, Plus, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DESTINATION_COUNTRIES, type DestinationCountry } from "@/lib/destination-countries";
 
 interface TariffCargoFields {
   volumeRateUsdPerCbm: string;
@@ -70,6 +72,10 @@ function ManagerCargoSettingsTab() {
   const [savedThreshold, setSavedThreshold] = useState(false);
   const [thresholdError, setThresholdError] = useState<string | null>(null);
 
+  // Density/volume tariffs are scoped per destination country — both
+  // tables below reload whenever this changes. See PB-V5 chat 2026-08-02.
+  const [selectedCountry, setSelectedCountry] = useState<DestinationCountry>("russia");
+
   const [tiers, setTiers] = useState<DensityTierRecord[]>([]);
   const [loadingTiers, setLoadingTiers] = useState(true);
   const [showNewTierForm, setShowNewTierForm] = useState(false);
@@ -129,7 +135,7 @@ function ManagerCargoSettingsTab() {
   const loadTiers = useCallback(async () => {
     setLoadingTiers(true);
     try {
-      const res = await fetch("/api/manager-density-tariffs");
+      const res = await fetch(`/api/manager-density-tariffs?country=${selectedCountry}`);
       const data = await res.json();
       if (res.ok) {
         setTiers(data.tiers);
@@ -143,12 +149,12 @@ function ManagerCargoSettingsTab() {
     } finally {
       setLoadingTiers(false);
     }
-  }, []);
+  }, [selectedCountry]);
 
   const loadVolumeTariffs = useCallback(async () => {
     setLoadingVolumeTariffs(true);
     try {
-      const res = await fetch("/api/manager-volume-tariffs");
+      const res = await fetch(`/api/manager-volume-tariffs?country=${selectedCountry}`);
       const data = await res.json();
       if (res.ok) {
         setVolumeTariffs(data.tariffs);
@@ -164,7 +170,7 @@ function ManagerCargoSettingsTab() {
     } finally {
       setLoadingVolumeTariffs(false);
     }
-  }, []);
+  }, [selectedCountry]);
 
   useEffect(() => {
     loadTariffs();
@@ -233,7 +239,7 @@ function ManagerCargoSettingsTab() {
       const res = await fetch("/api/manager-density-tariffs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...newTier, maxDensity: newTier.maxDensity || null }),
+        body: JSON.stringify({ ...newTier, maxDensity: newTier.maxDensity || null, destinationCountry: selectedCountry }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -311,7 +317,7 @@ function ManagerCargoSettingsTab() {
       const res = await fetch("/api/manager-volume-tariffs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newVolumeTariff),
+        body: JSON.stringify({ ...newVolumeTariff, destinationCountry: selectedCountry }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -478,6 +484,26 @@ function ManagerCargoSettingsTab() {
             </Button>
           </form>
         )}
+      </div>
+
+      <div className="border-t border-border pt-6">
+        <Label>Страна назначения</Label>
+        <p className="mt-1 text-xs text-text-secondary">
+          Тарифы по плотности и по объёму ниже — отдельные для каждой страны. Пока настоящие ставки заведены только
+          для России; остальные страны появятся здесь заготовкой без тарифов, пока вы их не заполните.
+        </p>
+        <Select value={selectedCountry} onValueChange={(v) => setSelectedCountry(v as DestinationCountry)}>
+          <SelectTrigger className="mt-2 w-56">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {DESTINATION_COUNTRIES.map((c) => (
+              <SelectItem key={c.value} value={c.value}>
+                {c.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="border-t border-border pt-6">

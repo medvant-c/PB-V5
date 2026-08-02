@@ -285,6 +285,24 @@ enum DeliveryPricingMode {
   volume
 }
 
+// Where the cargo actually ships to — every DensityTariff/VolumeTariff row
+// is scoped to exactly one of these (see both models below), and a Quote
+// picks one up front (the very first field in the create form) before
+// category/rate lookups can even happen, since which categories/rates
+// exist depends entirely on this. Only russia has real tariffs as of
+// 2026-08-02 — the other three exist so the owner can fill in rates later
+// without another schema change; quoting for one of them before its
+// tariffs are filled in fails loudly (see lookupDensityRate/
+// lookupVolumeRate in lib/quote-engine.ts — empty tiers for a country
+// throws the same "нет тарифа" error as an empty category always has).
+// See PB-V5 chat 2026-08-02.
+enum DestinationCountry {
+  russia
+  kazakhstan
+  kyrgyzstan
+  uzbekistan
+}
+
 // Daily manager input ("Тарифы" tab): FX rates, the flat volume-based cargo
 // rate, the buyout-commission percentage, and the three fixed service
 // prices. Append-only (a new row per save, not an overwritten singleton) so
@@ -473,6 +491,10 @@ model Investor {
 // the Тарифы tab without a schema migration.
 model DensityTariff {
   id            String   @id @default(cuid())
+  // Which country's cargo this tier prices — see DestinationCountry above.
+  // Defaults to russia so every pre-existing row (the only tariffs that
+  // ever existed before 2026-08-02) backfills correctly.
+  destinationCountry DestinationCountry @default(russia)
   categoryKey   String
   categoryLabel String
   // Upper bound of this tier, exclusive — null means "no upper bound" (the
@@ -490,7 +512,7 @@ model DensityTariff {
   costPerKgUsd  Decimal  @default(0)
   createdAt     DateTime @default(now())
 
-  @@index([categoryKey])
+  @@index([destinationCountry, categoryKey])
 }
 
 // Per-category "по объёму" ($/m³) rate — e.g. "Мелкий хозяйственный товар"
@@ -504,13 +526,20 @@ model DensityTariff {
 // this table never changes an already-issued quote's numbers.
 model VolumeTariff {
   id            String   @id @default(cuid())
-  categoryKey   String   @unique
+  // See DensityTariff.destinationCountry above — same reasoning, same
+  // default. categoryKey alone used to be globally unique; now it only
+  // needs to be unique per country (Kazakhstan can have its own "Одежда"
+  // row once its rates are filled in, independent of Russia's).
+  destinationCountry DestinationCountry @default(russia)
+  categoryKey   String
   categoryLabel String
   rateUsdPerCbm Decimal
   // Owner-confidential real cost per m³ — same reasoning as
   // DensityTariff.costPerKgUsd.
   costUsdPerCbm Decimal  @default(0)
   createdAt     DateTime @default(now())
+
+  @@unique([destinationCountry, categoryKey])
 }
 
 // Graduated buyout/purchasing-organization commission — replaces the old
@@ -624,6 +653,14 @@ model Quote {
 
   densityKgM3 Decimal
 
+  // Chosen at the very first step of creating a quote (see quote-dialog.tsx)
+  // — decides which DensityTariff/VolumeTariff rows are even eligible to
+  // look up a rate from, so it has to be known before cargo category/rate
+  // selection can happen at all. Snapshotted here same as every other
+  // pricing input; changing this on an edit re-picks the category the same
+  // way switching deliveryPricingMode already does. See DestinationCountry
+  // above, PB-V5 chat 2026-08-02.
+  destinationCountry  DestinationCountry  @default(russia)
   deliveryPricingMode DeliveryPricingMode
   // Only meaningful when deliveryPricingMode is "density".
   cargoCategoryKey    String?

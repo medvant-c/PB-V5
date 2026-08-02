@@ -92,8 +92,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const { fields } = parsed;
 
   const [densityTiers, volumeTariffs, systemSettings] = await Promise.all([
-    prisma.densityTariff.findMany(),
-    prisma.volumeTariff.findMany(),
+    prisma.densityTariff.findMany({ where: { destinationCountry: fields.destinationCountry } }),
+    prisma.volumeTariff.findMany({ where: { destinationCountry: fields.destinationCountry } }),
     getSystemSettings(),
   ]);
 
@@ -256,6 +256,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       totalHeightCm: engineInputs.totalHeightCm,
       totalVolumeM3: computed.totalVolumeM3,
       densityKgM3: computed.densityKgM3,
+      destinationCountry: fields.destinationCountry,
       deliveryPricingMode: fields.deliveryPricingMode,
       // Required for both modes now — see the POST route's comment.
       cargoCategoryKey,

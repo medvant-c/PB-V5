@@ -9,6 +9,7 @@ import type {
   QuoteEngineInputs,
   QuoteEngineOutputs,
 } from "@/lib/quote-engine";
+import { DESTINATION_COUNTRIES, type DestinationCountry } from "@/lib/destination-countries";
 
 // cargoCostUsd/cargoCostRub are owner-confidential (see Quote in
 // prisma/schema.prisma) — every route that returns a Quote row to the
@@ -49,6 +50,11 @@ function optionalNumber(value: FormDataEntryValue | null): number | undefined {
 
 interface ParsedQuoteFields {
   clientId: string;
+  // Chosen at the very first step of the form — decides which
+  // DensityTariff/VolumeTariff rows the route is even allowed to look a
+  // rate up from (see manager-quotes POST/PATCH/recalculate). See
+  // DestinationCountry in prisma/schema.prisma, PB-V5 chat 2026-08-02.
+  destinationCountry: DestinationCountry;
   quoteType: "standard" | "expert" | "pro";
   productName: string;
   productLink: string | null;
@@ -109,6 +115,10 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
   const weightPerUnitKg = requiredNumber(formData.get("weightPerUnitKg"));
   const volumeInputMode = requiredString(formData.get("volumeInputMode"));
   const deliveryPricingMode = requiredString(formData.get("deliveryPricingMode"));
+  const destinationCountryRaw = requiredString(formData.get("destinationCountry"));
+  const destinationCountry = DESTINATION_COUNTRIES.some((c) => c.value === destinationCountryRaw)
+    ? (destinationCountryRaw as DestinationCountry)
+    : "russia";
 
   if (!clientId) return { error: "Не выбран клиент." };
   if (quoteType !== "standard" && quoteType !== "expert" && quoteType !== "pro") {
@@ -136,6 +146,7 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
   return {
     fields: {
       clientId,
+      destinationCountry,
       quoteType,
       productName,
       productLink: requiredString(formData.get("productLink")),

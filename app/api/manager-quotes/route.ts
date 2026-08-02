@@ -103,8 +103,8 @@ export async function POST(req: NextRequest) {
   }
 
   const [densityTiers, volumeTariffs, buyoutCommissionTiers, systemSettings] = await Promise.all([
-    prisma.densityTariff.findMany(),
-    prisma.volumeTariff.findMany(),
+    prisma.densityTariff.findMany({ where: { destinationCountry: fields.destinationCountry } }),
+    prisma.volumeTariff.findMany({ where: { destinationCountry: fields.destinationCountry } }),
     prisma.buyoutCommissionTariff.findMany(),
     getSystemSettings(),
   ]);
@@ -237,6 +237,7 @@ export async function POST(req: NextRequest) {
       totalHeightCm: engineInputs.totalHeightCm,
       totalVolumeM3: computed.totalVolumeM3,
       densityKgM3: computed.densityKgM3,
+      destinationCountry: fields.destinationCountry,
       deliveryPricingMode: fields.deliveryPricingMode,
       // Now required for both modes — "по объёму" prices per category too
       // (see VolumeTariff), not just "по плотности".

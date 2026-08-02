@@ -23,6 +23,7 @@ import {
 import { SEARCH_TIER_INFO } from "@/lib/desk-services/search-tier-info";
 import { parseLocaleNumber } from "@/lib/number";
 import { cn } from "@/lib/utils";
+import { DESTINATION_COUNTRIES, type DestinationCountry } from "@/lib/destination-countries";
 
 interface TariffSettingsRecord {
   cnyRateRub: string;
@@ -102,6 +103,7 @@ function guessPriceRub(priceText: string): string {
 }
 
 interface QuoteDetail {
+  destinationCountry: DestinationCountry;
   quoteType: "standard" | "expert" | "pro";
   productName: string;
   productLink: string | null;
@@ -166,6 +168,7 @@ function fmt(value: number): string {
 }
 
 const BLANK_FORM = {
+  destinationCountry: "russia" as DestinationCountry,
   quoteType: "standard" as "standard" | "expert" | "pro",
   isCustomProduction: false,
   productName: "",
@@ -221,6 +224,10 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     searchFeeWaived: boolean;
   } | null>(null);
 
+  // First field in the form — decides which country's DensityTariff/
+  // VolumeTariff rows are even eligible below (see the tariff-loading
+  // effect). See PB-V5 chat 2026-08-02.
+  const [destinationCountry, setDestinationCountry] = useState<DestinationCountry>(BLANK_FORM.destinationCountry);
   const [quoteType, setQuoteType] = useState(BLANK_FORM.quoteType);
   const [isCustomProduction, setIsCustomProduction] = useState(BLANK_FORM.isCustomProduction);
   const [photos, setPhotos] = useState<File[]>([]);
@@ -276,16 +283,12 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     setLoadingTariffs(true);
     Promise.all([
       fetch("/api/manager-tariffs").then((res) => res.json()),
-      fetch("/api/manager-density-tariffs").then((res) => res.json()),
-      fetch("/api/manager-volume-tariffs").then((res) => res.json()),
       fetch("/api/manager-buyout-commission-tariffs").then((res) => res.json()),
       fetch("/api/manager-service-catalog").then((res) => res.json()),
       fetch("/api/manager-settings").then((res) => res.json()),
     ])
-      .then(([settingsData, tiersData, volumeTariffsData, buyoutCommissionTariffsData, catalogData, systemSettingsData]) => {
+      .then(([settingsData, buyoutCommissionTariffsData, catalogData, systemSettingsData]) => {
         setTariffs(settingsData.settings ?? null);
-        setTiers(tiersData.tiers ?? []);
-        setVolumeTariffs(volumeTariffsData.tariffs ?? []);
         setBuyoutCommissionTariffs(buyoutCommissionTariffsData.tiers ?? []);
         setCatalog(catalogData.items ?? []);
         if (systemSettingsData.settings?.lowDensityVolumeThresholdKgM3 !== undefined) {
@@ -294,6 +297,22 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       })
       .finally(() => setLoadingTariffs(false));
   }, [open]);
+
+  // Density/volume tariffs are scoped per destinationCountry (see
+  // prisma/schema.prisma) — re-fetched whenever the country changes, not
+  // just when the dialog opens, so switching countries before submitting
+  // immediately shows that country's own categories (empty for anything
+  // but Russia today). See PB-V5 chat 2026-08-02.
+  useEffect(() => {
+    if (!open) return;
+    Promise.all([
+      fetch(`/api/manager-density-tariffs?country=${destinationCountry}`).then((res) => res.json()),
+      fetch(`/api/manager-volume-tariffs?country=${destinationCountry}`).then((res) => res.json()),
+    ]).then(([tiersData, volumeTariffsData]) => {
+      setTiers(tiersData.tiers ?? []);
+      setVolumeTariffs(volumeTariffsData.tariffs ?? []);
+    });
+  }, [open, destinationCountry]);
 
   // Load (or reset) the form when the dialog opens — pre-fill from the
   // existing quote in edit mode, blank out for a fresh "Новый просчёт".
@@ -306,6 +325,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     if (!editingQuoteId) {
       setAttachedServices([]);
       setServicesOpen(false);
+      setDestinationCountry(BLANK_FORM.destinationCountry);
       setQuoteType(BLANK_FORM.quoteType);
       setIsCustomProduction(BLANK_FORM.isCustomProduction);
       setProductName(BLANK_FORM.productName);
@@ -349,6 +369,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           attachedServices: { serviceCatalogItemId: string | null; name: string; priceRub: string }[];
         }) => {
           const q = data.quote;
+          setDestinationCountry(q.destinationCountry);
           setQuoteType(q.quoteType);
           setIsCustomProduction(q.isCustomProduction);
           setProductName(q.productName);
@@ -614,6 +635,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     try {
       const formData = new FormData();
       formData.append("clientId", client.id);
+      formData.append("destinationCountry", destinationCountry);
       formData.append("quoteType", quoteType);
       formData.append("isCustomProduction", String(isCustomProduction));
       if (productName.trim()) formData.append("productName", productName.trim());
@@ -720,6 +742,28 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           <p className="text-sm text-error">Тарифы не заданы — заполните вкладку «Тарифы» перед созданием просчёта.</p>
         ) : (
           <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Страна назначения</Label>
+              <Select value={destinationCountry} onValueChange={(v) => setDestinationCountry(v as DestinationCountry)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DESTINATION_COUNTRIES.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {tiers.length === 0 && volumeTariffs.length === 0 && (
+                <p className="text-xs text-warning">
+                  Для этой страны тарифы карго ещё не заданы — просчёт не удастся сохранить, пока руководитель их не
+                  добавит во вкладке «Тарифы» → «Карго».
+                </p>
+              )}
+            </div>
+
             <div className="space-y-1.5">
               <Label>Тип просчёта</Label>
               <TooltipProvider>

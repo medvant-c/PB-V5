@@ -50,8 +50,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: "Тарифы не заданы — заполните вкладку «Тарифы»." }, { status: 400 });
   }
   const [densityTiers, volumeTariffs, buyoutCommissionTiers, systemSettings] = await Promise.all([
-    prisma.densityTariff.findMany(),
-    prisma.volumeTariff.findMany(),
+    prisma.densityTariff.findMany({ where: { destinationCountry: existing.destinationCountry } }),
+    prisma.volumeTariff.findMany({ where: { destinationCountry: existing.destinationCountry } }),
     prisma.buyoutCommissionTariff.findMany(),
     getSystemSettings(),
   ]);

@@ -2,6 +2,11 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canEditTariffs } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
+import { DESTINATION_COUNTRIES, type DestinationCountry } from "@/lib/destination-countries";
+
+function parseCountry(value: string | null): DestinationCountry {
+  return DESTINATION_COUNTRIES.some((c) => c.value === value) ? (value as DestinationCountry) : "russia";
+}
 
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
@@ -9,7 +14,8 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: "Не авторизовано." }, { status: 401 });
   }
 
-  const tariffs = await prisma.volumeTariff.findMany({ orderBy: { categoryKey: "asc" } });
+  const destinationCountry = parseCountry(req.nextUrl.searchParams.get("country"));
+  const tariffs = await prisma.volumeTariff.findMany({ where: { destinationCountry }, orderBy: { categoryKey: "asc" } });
   // costUsdPerCbm is owner-confidential — same reasoning as
   // DensityTariff.costPerKgUsd (see app/api/manager-density-tariffs).
   const responseTariffs =
@@ -44,13 +50,18 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
 
-  const { categoryKey, categoryLabel, rateUsdPerCbm, costUsdPerCbm } =
+  const { categoryKey, categoryLabel, rateUsdPerCbm, costUsdPerCbm, destinationCountry } =
     (body as {
       categoryKey?: unknown;
       categoryLabel?: unknown;
       rateUsdPerCbm?: unknown;
       costUsdPerCbm?: unknown;
+      destinationCountry?: unknown;
     }) ?? {};
+
+  const country = DESTINATION_COUNTRIES.some((c) => c.value === destinationCountry)
+    ? (destinationCountry as DestinationCountry)
+    : "russia";
 
   if (typeof categoryKey !== "string" || !categoryKey.trim()) {
     return Response.json({ error: "Укажите ключ категории." }, { status: 400 });
@@ -63,7 +74,9 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Укажите тариф в $/м³." }, { status: 400 });
   }
 
-  const existing = await prisma.volumeTariff.findUnique({ where: { categoryKey: categoryKey.trim() } });
+  const existing = await prisma.volumeTariff.findUnique({
+    where: { destinationCountry_categoryKey: { destinationCountry: country, categoryKey: categoryKey.trim() } },
+  });
   if (existing) {
     return Response.json({ error: "Тариф по объёму для этой категории уже есть — отредактируйте его." }, { status: 400 });
   }
@@ -86,6 +99,7 @@ export async function POST(req: NextRequest) {
 
   const tariff = await prisma.volumeTariff.create({
     data: {
+      destinationCountry: country,
       categoryKey: categoryKey.trim(),
       categoryLabel: categoryLabel.trim(),
       rateUsdPerCbm: rate,
