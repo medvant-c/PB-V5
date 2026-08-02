@@ -21,6 +21,7 @@ import {
   type VolumeInputMode,
 } from "@/lib/quote-engine";
 import { SEARCH_TIER_INFO } from "@/lib/desk-services/search-tier-info";
+import { cargoCategoryHint } from "@/lib/desk-services/cargo-category-hints";
 import { parseLocaleNumber } from "@/lib/number";
 import { cn } from "@/lib/utils";
 import { DESTINATION_COUNTRIES, type DestinationCountry } from "@/lib/destination-countries";
@@ -435,6 +436,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   // "по плотности" — both modes need a category selected, just from
   // whichever tariff table matches the active mode.
   const categories = deliveryPricingMode === "density" ? densityCategories : volumeCategories;
+
+  const selectedCategoryHint = cargoCategoryHint(destinationCountry, cargoCategoryKey);
 
   useEffect(() => {
     if (categories.length === 0) return;
@@ -1027,6 +1030,11 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                   ))}
                 </SelectContent>
               </Select>
+              {selectedCategoryHint && (
+                <p className="text-xs text-text-secondary">
+                  <span className="font-medium">Что сюда входит:</span> {selectedCategoryHint}
+                </p>
+              )}
               {preview && (
                 <p className="text-xs text-text-secondary">
                   Ставка: ${preview.cargoRateUsd.toFixed(2)}/{preview.cargoPricingBasis === "density" ? "кг" : "м³"}
