@@ -17,6 +17,7 @@ import {
   Inbox,
   Loader2,
   MessageSquare,
+  MoreHorizontal,
   Package,
   Pencil,
   Percent,
@@ -50,6 +51,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { EmptyState } from "@/components/desk/empty-state";
 import { QuoteDialog } from "@/components/manager/quote-dialog";
 import { ClientFilesPanel } from "@/components/manager/client-files-panel";
@@ -451,6 +453,17 @@ function ClientQuotes({
   const [exportingPdfBundle, setExportingPdfBundle] = useState(false);
   const [pdfBundleError, setPdfBundleError] = useState<string | null>(null);
   const [containerDialogOpen, setContainerDialogOpen] = useState(false);
+  // The toolbar below used to be seven-plus separate pill buttons in a row
+  // (unreadable once the client card moved into the narrower master-detail
+  // right pane) — collapsed into two menus: "Экспорт" (read-only exports)
+  // and "Действия" (everything that changes data). See PB-V5 chat
+  // 2026-08-02.
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  // "Пересчитать тарифы" needs its own confirmation dialog, same as before
+  // — just controlled now (opened from inside the Действия menu) instead
+  // of an AlertDialogTrigger wrapping the button directly.
+  const [recalculateConfirmOpen, setRecalculateConfirmOpen] = useState(false);
   const [expandedCommentId, setExpandedCommentId] = useState<string | null>(null);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
@@ -1081,85 +1094,225 @@ function ClientQuotes({
           />
           Выбрать все
         </label>
-        {!isGlobal && quotes.length > 1 && (
-          <>
-            <a
-              href={`/api/manager-clients/${clientId}/quotes-pdf`}
-              className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
-            >
-              <FileStack className="h-3.5 w-3.5" /> Скачать все просчёты ({quotes.length})
-            </a>
-            <a
-              href={`/api/manager-clients/${clientId}/quotes-pdf?cargoInUsd=1`}
-              title="Карго — в $, остальное — в ₽"
-              className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
-            >
-              <FileStack className="h-3.5 w-3.5" /> Все просчёты (карго в $)
-            </a>
-          </>
-        )}
-        <button
-          type="button"
-          onClick={() => handleExportExcel(false)}
-          disabled={selectedIds.length === 0 || exportingExcel}
-          className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {exportingExcel ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
-          Выгрузить в Excel {selectedIds.length > 0 && `(${selectedIds.length})`}
-        </button>
-        <button
-          type="button"
-          onClick={() => handleExportExcel(true)}
-          disabled={selectedIds.length === 0 || exportingExcel}
-          title="Карго — в $, остальное — в ₽"
-          className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {exportingExcel ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5" />}
-          Excel (карго в $) {selectedIds.length > 0 && `(${selectedIds.length})`}
-        </button>
-        <button
-          type="button"
-          onClick={handleExportPdfBundle}
-          disabled={selectedIds.length === 0 || exportingPdfBundle}
-          className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {exportingPdfBundle ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
-          Скачать PDF {selectedIds.length > 0 && `(${selectedIds.length})`}
-        </button>
-        <button
-          type="button"
-          onClick={handleExportInvoice}
-          disabled={selectedIds.length === 0 || exportingInvoice}
-          className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {exportingInvoice ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Receipt className="h-3.5 w-3.5" />}
-          Счёт на услуги {selectedIds.length > 0 && `(${selectedIds.length})`}
-        </button>
-
-        {!isGlobal && clientId && (
-          <button
-            type="button"
-            onClick={() => setContainerDialogOpen(true)}
-            disabled={selectedIds.length === 0}
-            title="Собрать выбранные просчёты в один контейнер ЖД доставки с пропорциональной ценой"
-            className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Container className="h-3.5 w-3.5" />
-            Сформировать контейнер ЖД {selectedIds.length > 0 && `(${selectedIds.length})`}
-          </button>
+        {selectedIds.length > 0 && (
+          <span className="text-xs text-text-secondary">выбрано: {selectedIds.length}</span>
         )}
 
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
+        {/* "Экспорт" — every read-only export (nothing here changes data),
+            collapsed out of the row so it stays one line even in the
+            narrow master-detail right pane. See PB-V5 chat 2026-08-02. */}
+        <Popover open={exportMenuOpen} onOpenChange={setExportMenuOpen}>
+          <PopoverTrigger asChild>
             <button
               type="button"
-              disabled={selectedIds.length === 0 || bulkBusy !== null}
-              className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
             >
-              {bulkBusy === "recalculate" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              <Download className="h-3.5 w-3.5" /> Экспорт <ChevronDown className="h-3 w-3" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-72 space-y-0.5 p-1.5">
+            {!isGlobal && quotes.length > 1 && (
+              <>
+                <a
+                  href={`/api/manager-clients/${clientId}/quotes-pdf`}
+                  onClick={() => setExportMenuOpen(false)}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary"
+                >
+                  <FileStack className="h-3.5 w-3.5 shrink-0" /> Скачать все просчёты клиента ({quotes.length})
+                </a>
+                <a
+                  href={`/api/manager-clients/${clientId}/quotes-pdf?cargoInUsd=1`}
+                  onClick={() => setExportMenuOpen(false)}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary"
+                >
+                  <FileStack className="h-3.5 w-3.5 shrink-0" /> Все просчёты клиента (карго в $)
+                </a>
+                <div className="my-1 border-t border-border" />
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                handleExportExcel(false);
+                setExportMenuOpen(false);
+              }}
+              disabled={selectedIds.length === 0 || exportingExcel}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {exportingExcel ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />}
+              Выгрузить выбранные в Excel {selectedIds.length > 0 && `(${selectedIds.length})`}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                handleExportExcel(true);
+                setExportMenuOpen(false);
+              }}
+              disabled={selectedIds.length === 0 || exportingExcel}
+              title="Карго — в $, остальное — в ₽"
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {exportingExcel ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />}
+              Выбранные в Excel, карго в $ {selectedIds.length > 0 && `(${selectedIds.length})`}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                handleExportPdfBundle();
+                setExportMenuOpen(false);
+              }}
+              disabled={selectedIds.length === 0 || exportingPdfBundle}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {exportingPdfBundle ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FileText className="h-3.5 w-3.5 shrink-0" />}
+              Скачать PDF выбранных {selectedIds.length > 0 && `(${selectedIds.length})`}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                handleExportInvoice();
+                setExportMenuOpen(false);
+              }}
+              disabled={selectedIds.length === 0 || exportingInvoice}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {exportingInvoice ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Receipt className="h-3.5 w-3.5 shrink-0" />}
+              Счёт на услуги {selectedIds.length > 0 && `(${selectedIds.length})`}
+            </button>
+          </PopoverContent>
+        </Popover>
+
+        {/* "Действия" — everything that changes data (recalculate,
+            duplicate, container, status/type/manager reassignment). Same
+            collapsing reasoning as "Экспорт" above. */}
+        <Popover open={actionsMenuOpen} onOpenChange={setActionsMenuOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" /> Действия <ChevronDown className="h-3 w-3" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-72 space-y-0.5 p-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setRecalculateConfirmOpen(true);
+                setActionsMenuOpen(false);
+              }}
+              disabled={selectedIds.length === 0 || bulkBusy !== null}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {bulkBusy === "recalculate" ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 shrink-0" />}
               Пересчитать тарифы {selectedIds.length > 0 && `(${selectedIds.length})`}
             </button>
-          </AlertDialogTrigger>
+            <button
+              type="button"
+              onClick={() => {
+                handleBulkDuplicate();
+                setActionsMenuOpen(false);
+              }}
+              disabled={selectedIds.length === 0 || bulkBusy !== null}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {bulkBusy === "duplicate" ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Copy className="h-3.5 w-3.5 shrink-0" />}
+              Дублировать {selectedIds.length > 0 && `(${selectedIds.length})`}
+            </button>
+            {!isGlobal && clientId && (
+              <button
+                type="button"
+                onClick={() => {
+                  setContainerDialogOpen(true);
+                  setActionsMenuOpen(false);
+                }}
+                disabled={selectedIds.length === 0}
+                title="Собрать выбранные просчёты в один контейнер ЖД доставки с пропорциональной ценой"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Container className="h-3.5 w-3.5 shrink-0" />
+                Сформировать контейнер ЖД {selectedIds.length > 0 && `(${selectedIds.length})`}
+              </button>
+            )}
+
+            <div className="my-1 border-t border-border" />
+
+            <div className="space-y-1 px-1 pb-1">
+              <Select
+                value=""
+                onValueChange={(v) => {
+                  handleBulkStatusChange(v);
+                  setActionsMenuOpen(false);
+                }}
+                disabled={selectedIds.length === 0 || bulkBusy !== null}
+              >
+                <SelectTrigger className="h-8 w-full text-xs">
+                  <SelectValue placeholder={`Изменить статус выбранным${selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}`} />
+                </SelectTrigger>
+                <SelectContent>
+                  {QUOTE_STATUSES.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: QUOTE_STATUS_DOT_COLOR[status] }} />
+                      {QUOTE_STATUS_LABEL[status]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select
+                value=""
+                onValueChange={(v) => {
+                  handleBulkQuoteType(v);
+                  setActionsMenuOpen(false);
+                }}
+                disabled={selectedIds.length === 0 || bulkBusy !== null}
+              >
+                <SelectTrigger className="h-8 w-full text-xs">
+                  {bulkBusy === "quoteType" ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <SelectValue placeholder={`Присвоить тип поиска${selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}`} />
+                  )}
+                </SelectTrigger>
+                <SelectContent>
+                  {BULK_QUOTE_TYPES.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>
+                      {t.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {teamManagers && teamManagers.length > 1 && (
+                <Select
+                  value=""
+                  onValueChange={(v) => {
+                    handleBulkReassign(v);
+                    setActionsMenuOpen(false);
+                  }}
+                  disabled={selectedIds.length === 0 || bulkBusy !== null}
+                >
+                  <SelectTrigger className="h-8 w-full text-xs">
+                    {bulkBusy === "reassign" ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <SelectValue placeholder={`Передать менеджеру${selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}`} />
+                    )}
+                  </SelectTrigger>
+                  <SelectContent>
+                    {teamManagers.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
+
+        <AlertDialog open={recalculateConfirmOpen} onOpenChange={setRecalculateConfirmOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Пересчитать тарифы?</AlertDialogTitle>
@@ -1175,66 +1328,6 @@ function ClientQuotes({
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-
-        <button
-          type="button"
-          onClick={handleBulkDuplicate}
-          disabled={selectedIds.length === 0 || bulkBusy !== null}
-          className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {bulkBusy === "duplicate" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
-          Дублировать {selectedIds.length > 0 && `(${selectedIds.length})`}
-        </button>
-
-        <Select value="" onValueChange={handleBulkStatusChange} disabled={selectedIds.length === 0 || bulkBusy !== null}>
-          <SelectTrigger className="h-8 w-52 text-xs">
-            <SelectValue placeholder={`Изменить статус выбранным${selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}`} />
-          </SelectTrigger>
-          <SelectContent>
-            {QUOTE_STATUSES.map((status) => (
-              <SelectItem key={status} value={status}>
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: QUOTE_STATUS_DOT_COLOR[status] }} />
-                {QUOTE_STATUS_LABEL[status]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value="" onValueChange={handleBulkQuoteType} disabled={selectedIds.length === 0 || bulkBusy !== null}>
-          <SelectTrigger className="h-8 w-52 text-xs">
-            {bulkBusy === "quoteType" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <SelectValue placeholder={`Присвоить тип поиска${selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}`} />
-            )}
-          </SelectTrigger>
-          <SelectContent>
-            {BULK_QUOTE_TYPES.map((t) => (
-              <SelectItem key={t.value} value={t.value}>
-                {t.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        {teamManagers && teamManagers.length > 1 && (
-          <Select value="" onValueChange={handleBulkReassign} disabled={selectedIds.length === 0 || bulkBusy !== null}>
-            <SelectTrigger className="h-8 w-52 text-xs">
-              {bulkBusy === "reassign" ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <SelectValue placeholder={`Передать менеджеру${selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}`} />
-              )}
-            </SelectTrigger>
-            <SelectContent>
-              {teamManagers.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  {m.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
       </div>
       {bulkError && <p className="text-xs text-error">{bulkError}</p>}
       {exportError && <p className="text-xs text-error">{exportError}</p>}
@@ -2560,16 +2653,15 @@ function ManagerClientsTab() {
                 </div>
               )}
 
-              <ClientDraftRequests clientId={selectedClient.id} refreshKey={quotesRefreshKey} onChange={loadDraftCounts} />
-
-              <ClientFilesPanel clientId={selectedClient.id} />
-
-              <div className="flex items-center justify-between gap-2">
-                <Label>Просчёты клиента</Label>
-                <Button type="button" size="sm" onClick={() => setQuoteDialogClientId(selectedClient.id)}>
-                  Сформировать просчёт
-                </Button>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+                <div className="min-w-0 flex-1">
+                  <ClientDraftRequests clientId={selectedClient.id} refreshKey={quotesRefreshKey} onChange={loadDraftCounts} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <ClientFilesPanel clientId={selectedClient.id} />
+                </div>
               </div>
+
               <ClientQuotes
                 clientId={selectedClient.id}
                 refreshKey={quotesRefreshKey}
