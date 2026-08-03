@@ -1158,7 +1158,7 @@ function ClientQuotes({
                 onClick={() => setExportMenuOpen(false)}
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary"
               >
-                <FileStack className="h-3.5 w-3.5 shrink-0" /> Скачать все просчёты клиента ({quotes.length})
+                <FileStack className="h-3.5 w-3.5 shrink-0" /> Скачать все просчёты клиента в PDF ({quotes.length})
               </a>
             )}
             <button
