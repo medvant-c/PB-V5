@@ -389,7 +389,7 @@ function ManagerCashTab() {
           <h2 className="text-sm font-bold text-text">Отчёты по дням</h2>
           <p className="mt-1 text-sm text-text-secondary">Кассовая книга — приход и расход по статьям, баланс в юанях.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" variant="ghost" onClick={() => setMonth(shiftMonth(month, -1))}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -435,7 +435,7 @@ function ManagerCashTab() {
           <Plus className="h-4 w-4" /> Расходный ордер
         </Button>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <Select value={filterType} onValueChange={setFilterType}>
             <SelectTrigger className="w-36">
               <SelectValue />

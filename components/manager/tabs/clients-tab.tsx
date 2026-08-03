@@ -1339,7 +1339,7 @@ function ClientQuotes({
       <ul className="space-y-1.5">
         {visibleQuotes.map((quote) => (
           <li key={quote.id} className="rounded-lg border border-border bg-surface px-3 py-2 text-sm">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <input
                 type="checkbox"
                 checked={selectedIds.includes(quote.id)}
