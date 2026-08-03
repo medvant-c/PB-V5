@@ -142,7 +142,7 @@ async function renderQuotesExcel(props: {
   sheet.views = [{ state: "frozen", ySplit: 1 }];
 
   const headerRow = sheet.getRow(1);
-  headerRow.height = 26;
+  headerRow.height = 52;
   headerRow.eachCell((cell) => {
     cell.font = { bold: true, size: FONT_SIZE, color: { argb: HEADER_FONT_COLOR } };
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: HEADER_FILL } };
