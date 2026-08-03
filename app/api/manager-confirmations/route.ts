@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     select: { id: true, name: true },
   });
 
-  const [pendingBuyouts, pendingClients, pendingCargoRates, pendingCnyRates, pendingUsdRates, pendingBuyoutCommissions] = await Promise.all([
+  const [pendingBuyouts, pendingClients, pendingCargoRates, pendingCnyRates, pendingUsdRates, pendingBuyoutCommissions, pendingUnassignedClients] = await Promise.all([
     prisma.quote.findMany({
       where: { ...managerFilter, status: { in: POST_BUYOUT_STATUSES }, buyoutFactConfirmed: false },
       orderBy: { statusChangedAt: "asc" },
@@ -140,6 +140,21 @@ export async function GET(req: NextRequest) {
         client: { select: { name: true, company: true } },
       },
     }),
+    // A client who self-registered at /account (no manager ever touched
+    // them — createdByManagerId is only ever null right after that, or for
+    // a handful of legacy rows from before this field existed) sits
+    // invisible to the whole team until someone assigns them. Owner-only:
+    // deciding who picks up a brand-new lead is the руководитель's call,
+    // not something a senior triages on their own. Assignment itself
+    // reuses the existing client-transfer PATCH (see clients-tab.tsx's
+    // handleTransfer), not a new endpoint. See PB-V5 chat 2026-08-03.
+    session.role === "owner"
+      ? prisma.client.findMany({
+          where: { createdByManagerId: null },
+          orderBy: { createdAt: "asc" },
+          select: { id: true, displayId: true, name: true, company: true, email: true, phone: true, source: true, createdAt: true },
+        })
+      : Promise.resolve([]),
   ]);
 
   return Response.json({
@@ -149,6 +164,7 @@ export async function GET(req: NextRequest) {
     pendingCnyRates,
     pendingUsdRates,
     pendingBuyoutCommissions,
+    pendingUnassignedClients,
     teamManagers,
   });
 }

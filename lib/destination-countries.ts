@@ -17,5 +17,21 @@ function destinationCountryLabel(value: string): string {
   return DESTINATION_COUNTRIES.find((c) => c.value === value)?.label ?? value;
 }
 
-export { DESTINATION_COUNTRIES, destinationCountryLabel };
+// One distinct color per non-Russia country, for the small badge shown next
+// to a quote's product name (see clients-tab.tsx) — russia never renders a
+// badge at all, so it has no color here. Same "hex + style prop" approach
+// as QUOTE_STATUS_DOT_COLOR in lib/quote-statuses.ts, not a Tailwind
+// token, so a fourth country can get its own color later without needing a
+// new theme color registered.
+const DESTINATION_COUNTRY_COLOR: Record<Exclude<DestinationCountry, "russia">, string> = {
+  kazakhstan: "#4f7bff",
+  kyrgyzstan: "#7c4dff",
+  uzbekistan: "#06b6d4",
+};
+
+function destinationCountryColor(value: string): string {
+  return (DESTINATION_COUNTRY_COLOR as Record<string, string>)[value] ?? "#64748b";
+}
+
+export { DESTINATION_COUNTRIES, destinationCountryLabel, destinationCountryColor };
 export type { DestinationCountry };

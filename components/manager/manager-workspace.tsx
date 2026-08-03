@@ -80,13 +80,15 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
   const [activeSection, setActiveSection] = useState<(typeof ALL_SECTIONS)[number]["id"]>("home");
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Badge on the "Подтверждения" nav tab — how many buyout facts and
-  // self-sourced client claims are waiting on a старший менеджер/руководитель
-  // right now, so it's visible without opening the tab. Same two counts
-  // ManagerConfirmationsTab itself lists. Owner/senior only (that's who
-  // sees the tab at all — see seniorOrOwnerOnly below), refetched whenever
-  // the active tab changes so acting in Подтверждения and switching away
-  // clears/updates the count without a dedicated polling loop.
+  // Badge on the "Подтверждения" nav tab — sum of every pending queue
+  // ManagerConfirmationsTab itself lists (buyout facts, self-sourced
+  // claims, manual cargo/¥/$ rates, manual buyout commission, and
+  // unassigned self-registered clients), so it's visible without opening
+  // the tab. Owner/senior only (that's who sees the tab at all — see
+  // seniorOrOwnerOnly below; unassignedClients is itself owner-only and
+  // just comes back empty for a senior), refetched whenever the active tab
+  // changes so acting in Подтверждения and switching away clears/updates
+  // the count without a dedicated polling loop.
   const [pendingConfirmationsCount, setPendingConfirmationsCount] = useState(0);
   useEffect(() => {
     if (role !== "owner" && role !== "senior") return;
@@ -97,7 +99,10 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
         const clients = data.pendingClients?.length ?? 0;
         const cargoRates = data.pendingCargoRates?.length ?? 0;
         const cnyRates = data.pendingCnyRates?.length ?? 0;
-        setPendingConfirmationsCount(buyouts + clients + cargoRates + cnyRates);
+        const usdRates = data.pendingUsdRates?.length ?? 0;
+        const buyoutCommissions = data.pendingBuyoutCommissions?.length ?? 0;
+        const unassignedClients = data.pendingUnassignedClients?.length ?? 0;
+        setPendingConfirmationsCount(buyouts + clients + cargoRates + cnyRates + usdRates + buyoutCommissions + unassignedClients);
       })
       .catch(() => {});
   }, [role, activeSection]);

@@ -67,7 +67,7 @@ import {
 } from "@/lib/quote-statuses";
 import { cn } from "@/lib/utils";
 import { formatPhoneMask } from "@/lib/phone";
-import { destinationCountryLabel } from "@/lib/destination-countries";
+import { destinationCountryLabel, destinationCountryColor } from "@/lib/destination-countries";
 
 const BULK_QUOTE_TYPES = [
   { value: "standard", label: "Standart" },
@@ -1476,7 +1476,13 @@ function ClientQuotes({
                       №{quote.displayId} · {quote.productName}
                     </span>
                     {quote.destinationCountry !== "russia" && (
-                      <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                      <span
+                        className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                        style={{
+                          backgroundColor: `${destinationCountryColor(quote.destinationCountry)}1a`,
+                          color: destinationCountryColor(quote.destinationCountry),
+                        }}
+                      >
                         {destinationCountryLabel(quote.destinationCountry)}
                       </span>
                     )}

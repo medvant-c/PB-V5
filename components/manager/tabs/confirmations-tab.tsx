@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Archive, CheckCircle2, ChevronDown, Coins, DollarSign, Loader2, Paperclip, Percent, Ruler, UserCheck, Wallet } from "lucide-react";
+import { Archive, CheckCircle2, ChevronDown, Coins, DollarSign, Loader2, Paperclip, Percent, Ruler, UserCheck, UserPlus, Wallet } from "lucide-react";
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -30,6 +30,17 @@ interface PendingClient {
   company: string | null;
   selfSourcedClaimedAt: string | null;
   createdByManager: { id: string; name: string } | null;
+}
+
+interface PendingUnassignedClient {
+  id: string;
+  displayId: number;
+  name: string;
+  company: string | null;
+  email: string | null;
+  phone: string | null;
+  source: string | null;
+  createdAt: string;
 }
 
 interface PendingCargoRate {
@@ -361,6 +372,13 @@ function ManagerConfirmationsTab() {
   const [pendingCnyRates, setPendingCnyRates] = useState<PendingCnyRate[]>([]);
   const [pendingUsdRates, setPendingUsdRates] = useState<PendingUsdRate[]>([]);
   const [pendingBuyoutCommissions, setPendingBuyoutCommissions] = useState<PendingBuyoutCommission[]>([]);
+  // Owner-only (see /api/manager-confirmations) — empty for senior/manager
+  // sessions without any extra gating needed here, since the API itself
+  // never sends anything for them.
+  const [pendingUnassignedClients, setPendingUnassignedClients] = useState<PendingUnassignedClient[]>([]);
+  const [teamManagers, setTeamManagers] = useState<{ id: string; name: string }[]>([]);
+  const [assigningClientId, setAssigningClientId] = useState<string | null>(null);
+  const [assignError, setAssignError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const [drafts, setDrafts] = useState<Record<string, { cny: string; rate: string; rub: string; rateRub: string }>>({});
@@ -394,8 +412,35 @@ function ManagerConfirmationsTab() {
         setPendingCnyRates(data.pendingCnyRates ?? []);
         setPendingUsdRates(data.pendingUsdRates ?? []);
         setPendingBuyoutCommissions(data.pendingBuyoutCommissions ?? []);
+        setPendingUnassignedClients(data.pendingUnassignedClients ?? []);
+        setTeamManagers(data.teamManagers ?? []);
       })
       .finally(() => setLoading(false));
+  }
+
+  async function handleAssignClient(clientId: string, managerId: string) {
+    if (!managerId) return;
+    setAssigningClientId(clientId);
+    setAssignError(null);
+    try {
+      // Reuses the same client-transfer PATCH clients-tab.tsx's "Передать
+      // менеджеру" already calls — it sets createdByManagerId, reassigns
+      // every quote of theirs, and hides contacts from the new manager by
+      // default, exactly the same as a manual transfer.
+      const res = await fetch(`/api/manager-clients/${clientId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transferToManagerId: managerId }),
+      });
+      if (res.ok) {
+        await load();
+      } else {
+        const data = await res.json();
+        setAssignError(data.error ?? "Не удалось назначить менеджера.");
+      }
+    } finally {
+      setAssigningClientId(null);
+    }
   }
 
   async function handleConfirmCargoRate(quoteId: string) {
@@ -591,7 +636,8 @@ function ManagerConfirmationsTab() {
     pendingCargoRates.length === 0 &&
     pendingCnyRates.length === 0 &&
     pendingUsdRates.length === 0 &&
-    pendingBuyoutCommissions.length === 0;
+    pendingBuyoutCommissions.length === 0 &&
+    pendingUnassignedClients.length === 0;
 
   return (
     <div className="space-y-6">
@@ -609,6 +655,53 @@ function ManagerConfirmationsTab() {
         <EmptyState icon={CheckCircle2} message="Очередь пуста — все факты и заявки на личных клиентов подтверждены." />
       ) : (
         <>
+          {pendingUnassignedClients.length > 0 && (
+            <div>
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
+                <UserPlus className="h-3.5 w-3.5" /> Новые клиенты без менеджера ({pendingUnassignedClients.length})
+              </h3>
+              <p className="mt-1 text-xs text-text-secondary">
+                Зарегистрировались сами на сайте — пока их не видит ни один менеджер. Выберите, кому передать.
+              </p>
+              {assignError && <p className="mt-1 text-xs text-error">{assignError}</p>}
+              <ul className="mt-2 space-y-2">
+                {pendingUnassignedClients.map((client) => (
+                  <li key={client.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface p-3 text-sm">
+                    <div>
+                      <span className="font-medium text-text">
+                        №{client.displayId} · {client.name}
+                        {client.company ? ` · ${client.company}` : ""}
+                      </span>
+                      <span className="ml-2 text-xs text-text-secondary">
+                        {[client.email, client.phone].filter(Boolean).join(" · ") || "без контактов"} · зарегистрировался {formatDate(client.createdAt)}
+                      </span>
+                    </div>
+                    <Select
+                      value=""
+                      onValueChange={(managerId) => handleAssignClient(client.id, managerId)}
+                      disabled={assigningClientId === client.id}
+                    >
+                      <SelectTrigger className="h-8 w-52 text-xs">
+                        {assigningClientId === client.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <SelectValue placeholder="Передать менеджеру" />
+                        )}
+                      </SelectTrigger>
+                      <SelectContent>
+                        {teamManagers.map((m) => (
+                          <SelectItem key={m.id} value={m.id}>
+                            {m.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {pendingBuyouts.length > 0 && (
             <div>
               <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
