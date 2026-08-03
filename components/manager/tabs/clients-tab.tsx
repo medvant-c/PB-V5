@@ -1153,14 +1153,28 @@ function ClientQuotes({
           </PopoverTrigger>
           <PopoverContent align="start" className="w-72 space-y-0.5 p-1.5">
             {!isGlobal && quotes.length > 1 && (
+              <a
+                href={`/api/manager-clients/${clientId}/quotes-pdf`}
+                onClick={() => setExportMenuOpen(false)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary"
+              >
+                <FileStack className="h-3.5 w-3.5 shrink-0" /> Скачать все просчёты клиента ({quotes.length})
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                handleExportPdfBundle();
+                setExportMenuOpen(false);
+              }}
+              disabled={selectedIds.length === 0 || exportingPdfBundle}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {exportingPdfBundle ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FileText className="h-3.5 w-3.5 shrink-0" />}
+              Скачать PDF выбранных {selectedIds.length > 0 && `(${selectedIds.length})`}
+            </button>
+            {!isGlobal && quotes.length > 1 && (
               <>
-                <a
-                  href={`/api/manager-clients/${clientId}/quotes-pdf`}
-                  onClick={() => setExportMenuOpen(false)}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary"
-                >
-                  <FileStack className="h-3.5 w-3.5 shrink-0" /> Скачать все просчёты клиента ({quotes.length})
-                </a>
                 <a
                   href={`/api/manager-clients/${clientId}/quotes-pdf?cargoInUsd=1`}
                   onClick={() => setExportMenuOpen(false)}
@@ -1195,18 +1209,6 @@ function ClientQuotes({
             >
               {exportingExcel ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />}
               Выбранные в Excel, карго в $ {selectedIds.length > 0 && `(${selectedIds.length})`}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                handleExportPdfBundle();
-                setExportMenuOpen(false);
-              }}
-              disabled={selectedIds.length === 0 || exportingPdfBundle}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {exportingPdfBundle ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FileText className="h-3.5 w-3.5 shrink-0" />}
-              Скачать PDF выбранных {selectedIds.length > 0 && `(${selectedIds.length})`}
             </button>
             <button
               type="button"
