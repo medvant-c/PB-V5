@@ -15,6 +15,7 @@ import {
   FileText,
   ImageOff,
   Inbox,
+  Info,
   Loader2,
   MessageSquare,
   MoreHorizontal,
@@ -464,6 +465,11 @@ function ClientQuotes({
   // — just controlled now (opened from inside the Действия menu) instead
   // of an AlertDialogTrigger wrapping the button directly.
   const [recalculateConfirmOpen, setRecalculateConfirmOpen] = useState(false);
+  // Owner-only bulk cargo discount, computed off cargo MARGIN, not the full
+  // cargo charge — see app/api/manager-quotes/bulk-cargo-discount/route.ts.
+  const [cargoMarginDiscountPercent, setCargoMarginDiscountPercent] = useState("");
+  const [bulkCargoDiscountBusy, setBulkCargoDiscountBusy] = useState(false);
+  const [bulkCargoDiscountMessage, setBulkCargoDiscountMessage] = useState<string | null>(null);
   const [expandedCommentId, setExpandedCommentId] = useState<string | null>(null);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
@@ -766,6 +772,41 @@ function ClientQuotes({
       setBulkError("Не удалось связаться с сервером.");
     } finally {
       setBulkBusy(null);
+    }
+  }
+
+  async function handleBulkCargoMarginDiscount() {
+    const percent = Number(cargoMarginDiscountPercent.replace(",", "."));
+    if (!Number.isFinite(percent) || percent <= 0 || percent > 100) {
+      setBulkCargoDiscountMessage("Укажите скидку от 1 до 100%.");
+      return;
+    }
+    if (selectedIds.length === 0 || bulkCargoDiscountBusy) return;
+    setBulkCargoDiscountBusy(true);
+    setBulkCargoDiscountMessage(null);
+    try {
+      const res = await fetch("/api/manager-quotes/bulk-cargo-discount", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quoteIds: selectedIds, discountPercent: percent }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBulkCargoDiscountMessage(data.error ?? "Не удалось применить скидку.");
+        return;
+      }
+      await load();
+      onChanged();
+      setCargoMarginDiscountPercent("");
+      setBulkCargoDiscountMessage(
+        data.skipped > 0
+          ? `Применено к ${data.updated} из ${selectedIds.length} — у ${data.skipped} нет маржи по карго (пропущены).`
+          : `Скидка применена к ${data.updated} просчётам.`,
+      );
+    } catch {
+      setBulkCargoDiscountMessage("Не удалось связаться с сервером.");
+    } finally {
+      setBulkCargoDiscountBusy(false);
     }
   }
 
@@ -1307,6 +1348,55 @@ function ClientQuotes({
                     ))}
                   </SelectContent>
                 </Select>
+              )}
+
+              {allManagers !== null && (
+                <>
+                  <div className="my-1 border-t border-border" />
+                  <div className="space-y-1.5 px-1 pb-1">
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs font-medium text-text-secondary">Скидка на карго от маржи, %</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button type="button" className="text-text-secondary hover:text-primary">
+                            <Info className="h-3.5 w-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-64">
+                          Скидка считается не от полной суммы карго доставки, а от маржи (прибыли) по карго
+                          каждого просчёта. Пример: маржа по карго — $100, скидка 30% → клиент получит скидку
+                          $30 (не 30% от всей доставки). Если у просчёта маржи нет (ставка на уровне себестоимости
+                          или ниже) — он пропускается. Доступно только руководителю.
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={100}
+                        step="1"
+                        placeholder="напр. 30"
+                        value={cargoMarginDiscountPercent}
+                        onChange={(e) => setCargoMarginDiscountPercent(e.target.value)}
+                        disabled={bulkCargoDiscountBusy}
+                        className="h-8 flex-1 text-xs"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleBulkCargoMarginDiscount}
+                        disabled={selectedIds.length === 0 || !cargoMarginDiscountPercent.trim() || bulkCargoDiscountBusy}
+                      >
+                        {bulkCargoDiscountBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Применить"}
+                        {selectedIds.length > 0 && ` (${selectedIds.length})`}
+                      </Button>
+                    </div>
+                    {bulkCargoDiscountMessage && (
+                      <p className="text-[11px] text-text-secondary">{bulkCargoDiscountMessage}</p>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           </PopoverContent>
