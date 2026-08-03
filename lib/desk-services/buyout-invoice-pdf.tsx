@@ -75,48 +75,67 @@ interface BuyoutInvoicePdfProps {
   rateNote: string | null;
 }
 
-function BuyoutInvoicePdfDocument({ displayId, client, productName, currency, lineItems, totalAmount, rateNote }: BuyoutInvoicePdfProps) {
+// Just the <Page> — extracted so a multi-quote bundle can render several of
+// these as siblings under one <Document> (react-pdf's merge unit is the
+// Page, not the Document), same split as QuotePdfPage in quote-pdf.tsx.
+function BuyoutInvoicePdfPage({ displayId, client, productName, currency, lineItems, totalAmount, rateNote }: BuyoutInvoicePdfProps) {
   const currencySuffix = ` ${CURRENCY_LABEL[currency]}`;
   return (
+    <Page size="A4" style={styles.page}>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.title}>
+            Счёт на выкуп — просчёт №{displayId}
+          </Text>
+          <Text style={styles.subLine}>
+            {client.name}
+            {client.company ? ` · ${client.company}` : ""} · {productName}
+          </Text>
+        </View>
+        <Text style={styles.meta}>{new Date().toLocaleDateString("ru-RU")}</Text>
+      </View>
+
+      <View style={styles.table}>
+        <View style={styles.headRow}>
+          <Text style={styles.headCellLabel}>Статья</Text>
+          <Text style={styles.headCellAmount}>Сумма{currencySuffix}</Text>
+        </View>
+        {lineItems.map((item, index) => (
+          <View key={index} style={styles.bodyRow}>
+            <Text style={styles.cellLabel}>{item.label}</Text>
+            <Text style={styles.cellAmount}>{fmt(item.amount, currency)}{currencySuffix}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.totalsRow}>
+        <Text style={styles.totalsLabel}>ИТОГО К ОПЛАТЕ</Text>
+        <Text style={styles.totalsValue}>{fmt(totalAmount, currency)}{currencySuffix}</Text>
+      </View>
+
+      {rateNote && <Text style={styles.note}>{rateNote}</Text>}
+
+      <Text style={styles.footer} fixed>
+        Panda Bridge — экосистема для бизнеса с Китаем.
+      </Text>
+    </Page>
+  );
+}
+
+function BuyoutInvoicePdfDocument(props: BuyoutInvoicePdfProps) {
+  return (
     <Document>
-      <Page size="A4" style={styles.page}>
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.title}>
-              Счёт на выкуп — просчёт №{displayId}
-            </Text>
-            <Text style={styles.subLine}>
-              {client.name}
-              {client.company ? ` · ${client.company}` : ""} · {productName}
-            </Text>
-          </View>
-          <Text style={styles.meta}>{new Date().toLocaleDateString("ru-RU")}</Text>
-        </View>
+      <BuyoutInvoicePdfPage {...props} />
+    </Document>
+  );
+}
 
-        <View style={styles.table}>
-          <View style={styles.headRow}>
-            <Text style={styles.headCellLabel}>Статья</Text>
-            <Text style={styles.headCellAmount}>Сумма{currencySuffix}</Text>
-          </View>
-          {lineItems.map((item, index) => (
-            <View key={index} style={styles.bodyRow}>
-              <Text style={styles.cellLabel}>{item.label}</Text>
-              <Text style={styles.cellAmount}>{fmt(item.amount, currency)}{currencySuffix}</Text>
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.totalsRow}>
-          <Text style={styles.totalsLabel}>ИТОГО К ОПЛАТЕ</Text>
-          <Text style={styles.totalsValue}>{fmt(totalAmount, currency)}{currencySuffix}</Text>
-        </View>
-
-        {rateNote && <Text style={styles.note}>{rateNote}</Text>}
-
-        <Text style={styles.footer} fixed>
-          Panda Bridge — экосистема для бизнеса с Китаем.
-        </Text>
-      </Page>
+function BuyoutInvoiceBundlePdfDocument({ invoices }: { invoices: BuyoutInvoicePdfProps[] }) {
+  return (
+    <Document>
+      {invoices.map((invoice, index) => (
+        <BuyoutInvoicePdfPage key={index} {...invoice} />
+      ))}
     </Document>
   );
 }
@@ -126,5 +145,10 @@ async function renderBuyoutInvoicePdf(props: BuyoutInvoicePdfProps): Promise<Buf
   return renderToBuffer(<BuyoutInvoicePdfDocument {...props} />);
 }
 
-export { renderBuyoutInvoicePdf };
+async function renderBuyoutInvoiceBundlePdf(invoices: BuyoutInvoicePdfProps[]): Promise<Buffer> {
+  await ensureFontsRegistered();
+  return renderToBuffer(<BuyoutInvoiceBundlePdfDocument invoices={invoices} />);
+}
+
+export { renderBuyoutInvoicePdf, renderBuyoutInvoiceBundlePdf };
 export type { BuyoutInvoiceLineItem, BuyoutInvoiceCurrency, BuyoutInvoicePdfProps };

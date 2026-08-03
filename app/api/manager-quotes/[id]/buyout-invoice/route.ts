@@ -2,17 +2,12 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canAccessManagerQuote } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
-import { renderBuyoutInvoicePdf, type BuyoutInvoiceLineItem, type BuyoutInvoiceCurrency } from "@/lib/desk-services/buyout-invoice-pdf";
+import { renderBuyoutInvoicePdf, type BuyoutInvoiceCurrency } from "@/lib/desk-services/buyout-invoice-pdf";
+import { buildBuyoutInvoiceAmounts } from "@/lib/desk-services/buyout-invoice-calc";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
-
-const QUOTE_TYPE_LABEL: Record<string, string> = {
-  standard: "Standart",
-  expert: "Expert",
-  pro: "Pro",
-};
 
 // "Счёт на выкуп" — everything the client owes EXCEPT cargo delivery
 // (goods, China-domestic delivery, search fee, buyout commission,
@@ -49,44 +44,8 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     orderBy: { createdAt: "asc" },
   });
 
-  const totalPriceRub = Number(quote.totalPriceRub);
-  const chinaDeliveryRub = Number(quote.chinaDeliveryRub);
-  const searchServiceFeeRub = Number(quote.searchServiceFeeRub);
-  const customProductionFeeRub = Number(quote.customProductionFeeRub);
-  const buyoutCommissionRub = Number(quote.buyoutCommissionRub);
-  const buyoutCommissionPercent = Number(quote.buyoutCommissionPercent);
-  const cargoDeliveryRub = Number(quote.cargoDeliveryRub);
-  const totalRub = Number(quote.totalRub);
-  const cnyRateUsed = Number(quote.cnyRateUsed);
-  const usdRateUsed = Number(quote.usdRateUsed);
-
-  const rubLineItems: BuyoutInvoiceLineItem[] = [
-    { label: "Стоимость товара", amount: totalPriceRub },
-    { label: "Доставка по Китаю", amount: chinaDeliveryRub },
-    {
-      label: `Услуга поиска товара (${QUOTE_TYPE_LABEL[quote.quoteType] ?? quote.quoteType})`,
-      amount: searchServiceFeeRub,
-    },
-  ];
-  if (quote.isCustomProduction) {
-    rubLineItems.push({ label: "Производство под заказ", amount: customProductionFeeRub });
-  }
-  rubLineItems.push({ label: `Организация выкупа (${buyoutCommissionPercent}%)`, amount: buyoutCommissionRub });
-  for (const service of attachedServiceRecords) {
-    rubLineItems.push({ label: service.name, amount: Number(service.priceRub) });
-  }
-
-  const totalAmountRub = totalRub - cargoDeliveryRub;
-
-  let lineItems = rubLineItems;
-  let totalAmount = totalAmountRub;
-  let rateNote: string | null = null;
-
-  if (currency === "usd") {
-    lineItems = rubLineItems.map((item) => ({ label: item.label, amount: item.amount / usdRateUsed }));
-    totalAmount = totalAmountRub / usdRateUsed;
-    rateNote = `Курс на момент расчёта: 1$ = ${usdRateUsed.toFixed(2)} ₽.`;
-  } else if (currency === "usdt") {
+  let usdt: { usdtRateCny: number } | null = null;
+  if (currency === "usdt") {
     const currentTariffs = await prisma.tariffSettings.findFirst({ orderBy: { createdAt: "desc" } });
     if (!currentTariffs || currentTariffs.usdtRateCny === null) {
       return Response.json(
@@ -100,12 +59,28 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
         { status: 400 },
       );
     }
-    const usdtRate = Number(currentTariffs.usdtRateCny);
-    const totalAmountCny = totalAmountRub / cnyRateUsed;
-    lineItems = rubLineItems.map((item) => ({ label: item.label, amount: item.amount / cnyRateUsed / usdtRate }));
-    totalAmount = totalAmountCny / usdtRate;
-    rateNote = `Курс на момент выставления счёта: 1¥ = ${cnyRateUsed.toFixed(2)} ₽, 1 USDT = ${usdtRate.toFixed(2)} ¥.`;
+    usdt = { usdtRateCny: Number(currentTariffs.usdtRateCny) };
   }
+
+  const { lineItems, totalAmount, rateNote } = buildBuyoutInvoiceAmounts(
+    {
+      totalPriceRub: Number(quote.totalPriceRub),
+      chinaDeliveryRub: Number(quote.chinaDeliveryRub),
+      searchServiceFeeRub: Number(quote.searchServiceFeeRub),
+      quoteType: quote.quoteType,
+      isCustomProduction: quote.isCustomProduction,
+      customProductionFeeRub: Number(quote.customProductionFeeRub),
+      buyoutCommissionPercent: Number(quote.buyoutCommissionPercent),
+      buyoutCommissionRub: Number(quote.buyoutCommissionRub),
+      cargoDeliveryRub: Number(quote.cargoDeliveryRub),
+      totalRub: Number(quote.totalRub),
+      cnyRateUsed: Number(quote.cnyRateUsed),
+      usdRateUsed: Number(quote.usdRateUsed),
+      attachedServices: attachedServiceRecords.map((s) => ({ name: s.name, priceRub: Number(s.priceRub) })),
+    },
+    currency,
+    usdt,
+  );
 
   const buffer = await renderBuyoutInvoicePdf({
     displayId: quote.displayId,

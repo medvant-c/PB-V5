@@ -455,6 +455,12 @@ function ClientQuotes({
   const [pdfBundleError, setPdfBundleError] = useState<string | null>(null);
   const [buyoutInvoiceBusyId, setBuyoutInvoiceBusyId] = useState<string | null>(null);
   const [buyoutInvoiceError, setBuyoutInvoiceError] = useState<string | null>(null);
+  // Bulk "Счёт на выкуп" — one PDF, one page per selected quote (see
+  // app/api/manager-quotes/buyout-invoice-pdf-bundle). Separate busy/error
+  // state from the per-row buyoutInvoiceBusyId above since this acts on
+  // the whole selection at once, not one quote.
+  const [bulkBuyoutInvoiceCurrency, setBulkBuyoutInvoiceCurrency] = useState<"rub" | "usd" | "usdt" | null>(null);
+  const [bulkBuyoutInvoiceError, setBulkBuyoutInvoiceError] = useState<string | null>(null);
   const [containerDialogOpen, setContainerDialogOpen] = useState(false);
   // The toolbar below used to be seven-plus separate pill buttons in a row
   // (unreadable once the client card moved into the narrower master-detail
@@ -978,6 +984,47 @@ function ClientQuotes({
     }
   }
 
+  // "Счёт на выкуп списком" — same merge-into-one-PDF pattern as
+  // handleExportPdfBundle above (one page per selected quote), just
+  // pointed at buyout-invoice-pdf-bundle instead of quotes-pdf-bundle, and
+  // with a currency to pick.
+  async function handleExportBuyoutInvoiceBundle(currency: "rub" | "usd" | "usdt") {
+    if (bulkBuyoutInvoiceCurrency || selectedIds.length === 0) return;
+    setBulkBuyoutInvoiceCurrency(currency);
+    setBulkBuyoutInvoiceError(null);
+    try {
+      const res = await fetch(
+        isGlobal ? "/api/manager-quotes/buyout-invoice-pdf-bundle" : `/api/manager-clients/${clientId}/buyout-invoice-pdf-bundle`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ quoteIds: selectedIds, currency }),
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json();
+        setBulkBuyoutInvoiceError(data.error ?? "Не удалось сформировать счета.");
+        return;
+      }
+      const disposition = res.headers.get("content-disposition") ?? "";
+      const fileNameMatch = disposition.match(/filename\*=UTF-8''([^;]+)/);
+      const fileName = fileNameMatch ? decodeURIComponent(fileNameMatch[1]) : "Счета на выкуп.pdf";
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+      setExportMenuOpen(false);
+    } catch {
+      setBulkBuyoutInvoiceError("Не удалось связаться с сервером.");
+    } finally {
+      setBulkBuyoutInvoiceCurrency(null);
+    }
+  }
+
   function getCommentDraft(quote: QuoteRecord): string {
     return commentDrafts[quote.id] ?? quote.managerComment;
   }
@@ -1263,6 +1310,25 @@ function ClientQuotes({
               {exportingInvoice ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Receipt className="h-3.5 w-3.5 shrink-0" />}
               Счёт на услуги {selectedIds.length > 0 && `(${selectedIds.length})`}
             </button>
+            <div className="my-1 border-t border-border" />
+            {bulkBuyoutInvoiceError && <p className="px-2.5 py-1 text-xs text-error">{bulkBuyoutInvoiceError}</p>}
+            {(["rub", "usd", "usdt"] as const).map((currency) => (
+              <button
+                key={currency}
+                type="button"
+                onClick={() => handleExportBuyoutInvoiceBundle(currency)}
+                disabled={selectedIds.length === 0 || bulkBuyoutInvoiceCurrency !== null}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {bulkBuyoutInvoiceCurrency === currency ? (
+                  <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                ) : (
+                  <Receipt className="h-3.5 w-3.5 shrink-0" />
+                )}
+                Счёт на выкуп списком — {currency === "rub" ? "₽" : currency === "usd" ? "$" : "USDT"}{" "}
+                {selectedIds.length > 0 && `(${selectedIds.length})`}
+              </button>
+            ))}
           </PopoverContent>
         </Popover>
 
