@@ -60,8 +60,11 @@ export async function POST(req: NextRequest) {
         dimensions: quote.dimensions,
         quantity: quote.quantity,
         priceRubPerUnit: Number(quote.priceRubPerUnit),
+        priceCnyPerUnit: Number(quote.priceCnyPerUnit),
         totalPriceRub: Number(quote.totalPriceRub),
+        totalPriceCny: Number(quote.totalPriceCny),
         chinaDeliveryRub: Number(quote.chinaDeliveryRub),
+        chinaDeliveryCny: Number(quote.chinaDeliveryCny),
         totalWeightKg: Number(quote.totalWeightKg),
         densityKgM3: Number(quote.densityKgM3),
         totalVolumeM3: Number(quote.totalVolumeM3),
@@ -73,6 +76,7 @@ export async function POST(req: NextRequest) {
         cargoDeliveryRub: Number(quote.cargoDeliveryRub),
         cargoDeliveryUsd: Number(quote.cargoDeliveryUsd),
         totalRub: Number(quote.totalRub),
+        cnyRateUsed: Number(quote.cnyRateUsed),
       };
     }),
   );

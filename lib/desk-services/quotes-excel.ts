@@ -28,6 +28,12 @@ const FONT_SIZE = 14;
 // extended 2026-08-01.
 const MONEY_FORMAT_RUB = '#,##0" ₽"';
 const MONEY_FORMAT_USD = '"$"#,##0.00';
+// ¥ columns sit next to their ₽ counterpart (goods price, total, China
+// delivery, and every internal service fee) so a manager can read both
+// currencies off the same row without a calculator — same rounding
+// convention as ₽ (every value already Math.round()'d before it's
+// written). See PB-V5 chat 2026-08-03.
+const MONEY_FORMAT_CNY = '#,##0" ¥"';
 // Approximate FONT_SIZE line height in points, for the row-height
 // estimate below — not pixel-perfect, just enough that a long wrapped
 // cell isn't silently clipped by the fixed photo-aligned row height.
@@ -46,7 +52,7 @@ const QUOTE_TYPE_LABEL: Record<string, string> = {
 // row array below — keep both in sync if either changes. `money` is which
 // format applies, not just whether one does — only the cargo column ever
 // switches to "usd" (see buildColumns/cargoInUsd).
-type MoneyKind = false | "rub" | "usd";
+type MoneyKind = false | "rub" | "usd" | "cny";
 function buildColumns(cargoInUsd: boolean): { header: string; width: number; wrap: boolean; money: MoneyKind }[] {
   return [
     { header: "Клиент", width: 18, wrap: true, money: false },
@@ -63,15 +69,22 @@ function buildColumns(cargoInUsd: boolean): { header: string; width: number; wra
     { header: "Размеры", width: 16, wrap: true, money: false },
     { header: "Количество", width: 11, wrap: false, money: false },
     { header: "Цена, ₽", width: 12, wrap: false, money: "rub" },
+    { header: "Цена, ¥", width: 12, wrap: false, money: "cny" },
     { header: "Общая стоимость, ₽", width: 16, wrap: false, money: "rub" },
+    { header: "Общая стоимость, ¥", width: 16, wrap: false, money: "cny" },
     { header: "Доставка по Китаю, ₽", width: 16, wrap: false, money: "rub" },
+    { header: "Доставка по Китаю, ¥", width: 16, wrap: false, money: "cny" },
     { header: "Вес, кг", width: 10, wrap: false, money: false },
     { header: "Плотность, кг/м³", width: 14, wrap: false, money: false },
     { header: "Объём, м³", width: 11, wrap: false, money: false },
     { header: "Услуга поиска, ₽", width: 14, wrap: false, money: "rub" },
+    { header: "Услуга поиска, ¥", width: 14, wrap: false, money: "cny" },
     { header: "Производство под заказ, ₽", width: 16, wrap: false, money: "rub" },
+    { header: "Производство под заказ, ¥", width: 16, wrap: false, money: "cny" },
     { header: "Комиссия за выкуп, ₽", width: 16, wrap: false, money: "rub" },
+    { header: "Комиссия за выкуп, ¥", width: 16, wrap: false, money: "cny" },
     { header: "Доп. услуги, ₽", width: 13, wrap: false, money: "rub" },
+    { header: "Доп. услуги, ¥", width: 13, wrap: false, money: "cny" },
     { header: cargoInUsd ? "Доставка карго, $" : "Доставка карго, ₽", width: 14, wrap: false, money: cargoInUsd ? "usd" : "rub" },
     { header: "ИТОГО, ₽", width: 13, wrap: false, money: "rub" },
   ];
@@ -88,8 +101,11 @@ interface QuoteExcelRow {
   dimensions: string | null;
   quantity: number;
   priceRubPerUnit: number;
+  priceCnyPerUnit: number;
   totalPriceRub: number;
+  totalPriceCny: number;
   chinaDeliveryRub: number;
+  chinaDeliveryCny: number;
   totalWeightKg: number;
   densityKgM3: number;
   totalVolumeM3: number;
@@ -101,6 +117,11 @@ interface QuoteExcelRow {
   cargoDeliveryRub: number;
   cargoDeliveryUsd: number;
   totalRub: number;
+  // The quote's own frozen ¥→₽ rate — the only way to derive a ¥ figure
+  // for the three fee fields above (search/production/commission/services)
+  // that are only ever stored in ₽, never their own ¥ column on Quote
+  // itself. See PB-V5 chat 2026-08-03.
+  cnyRateUsed: number;
 }
 
 // Crude but sufficient estimate of how many lines `text` wraps to inside a
@@ -163,15 +184,22 @@ async function renderQuotesExcel(props: {
       row.dimensions ?? "",
       row.quantity,
       Math.round(row.priceRubPerUnit),
+      Math.round(row.priceCnyPerUnit),
       Math.round(row.totalPriceRub),
+      Math.round(row.totalPriceCny),
       Math.round(row.chinaDeliveryRub),
+      Math.round(row.chinaDeliveryCny),
       Number(row.totalWeightKg.toFixed(1)),
       Math.round(row.densityKgM3),
       Number(row.totalVolumeM3.toFixed(3)),
       row.searchFeeWaived ? "БЕСПЛАТНО" : Math.round(row.searchServiceFeeRub),
+      row.searchFeeWaived ? "БЕСПЛАТНО" : Math.round(row.searchServiceFeeRub / row.cnyRateUsed),
       Math.round(row.customProductionFeeRub),
+      Math.round(row.customProductionFeeRub / row.cnyRateUsed),
       Math.round(row.buyoutCommissionRub),
+      Math.round(row.buyoutCommissionRub / row.cnyRateUsed),
       Math.round(row.attachedServicesTotalRub),
+      Math.round(row.attachedServicesTotalRub / row.cnyRateUsed),
       cargoInUsd ? Number(row.cargoDeliveryUsd.toFixed(2)) : Math.round(row.cargoDeliveryRub),
       Math.round(row.totalRub),
     ];
@@ -193,7 +221,7 @@ async function renderQuotesExcel(props: {
       };
       cell.font = colNumber === TOTAL_COLUMN_INDEX ? { bold: true, size: FONT_SIZE } : { size: FONT_SIZE };
       const money = COLUMNS[colNumber - 1]?.money;
-      if (money) cell.numFmt = money === "usd" ? MONEY_FORMAT_USD : MONEY_FORMAT_RUB;
+      if (money) cell.numFmt = money === "usd" ? MONEY_FORMAT_USD : money === "cny" ? MONEY_FORMAT_CNY : MONEY_FORMAT_RUB;
       if (stripeFill) cell.fill = stripeFill;
     });
 
