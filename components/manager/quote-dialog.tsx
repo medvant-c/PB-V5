@@ -314,13 +314,30 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   // but Russia today). See PB-V5 chat 2026-08-02.
   useEffect(() => {
     if (!open) return;
+    // Guards against exactly the race that broke saving on already-
+    // migrated Kazakhstan/Kyrgyzstan quotes: this effect fires once for
+    // the initial "russia" default the moment the dialog opens, then AGAIN
+    // once the edit-load effect below learns the quote's real
+    // destinationCountry — two overlapping fetches for two different
+    // countries. Without this flag, if the stale "russia" request happens
+    // to resolve AFTER the real country's request (ordinary network
+    // jitter, not rare), it silently overwrites tiers/volumeTariffs back
+    // to Russia's list, and the auto-correct effect below then "fixes" a
+    // perfectly valid category like equipment_goods into whatever Russia's
+    // first category happens to be — which then fails to save server-side
+    // ("Нет тарифа для категории «clothing»..."). See PB-V5 chat 2026-08-03.
+    let cancelled = false;
     Promise.all([
       fetch(`/api/manager-density-tariffs?country=${destinationCountry}`).then((res) => res.json()),
       fetch(`/api/manager-volume-tariffs?country=${destinationCountry}`).then((res) => res.json()),
     ]).then(([tiersData, volumeTariffsData]) => {
+      if (cancelled) return;
       setTiers(tiersData.tiers ?? []);
       setVolumeTariffs(volumeTariffsData.tariffs ?? []);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [open, destinationCountry]);
 
   // Load (or reset) the form when the dialog opens — pre-fill from the
