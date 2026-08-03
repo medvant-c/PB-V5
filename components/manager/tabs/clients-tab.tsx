@@ -65,6 +65,13 @@ import {
   STALE_IN_PROGRESS_MS,
   type QuoteStatus,
 } from "@/lib/quote-statuses";
+import {
+  CLIENT_STATUSES,
+  CLIENT_STATUS_LABEL,
+  CLIENT_STATUS_BADGE_CLASSES,
+  CLIENT_STATUS_DOT_COLOR,
+  type ClientStatus,
+} from "@/lib/client-statuses";
 import { cn } from "@/lib/utils";
 import { formatPhoneMask } from "@/lib/phone";
 import { destinationCountryLabel, destinationCountryColor } from "@/lib/destination-countries";
@@ -92,6 +99,7 @@ interface ClientRecord {
   email: string | null;
   phone: string | null;
   source: string | null;
+  status: ClientStatus;
   createdByManagerId: string | null;
   createdByManager: { name: string } | null;
   selfSourcedClaimed: boolean;
@@ -2252,6 +2260,20 @@ function ManagerClientsTab() {
     }
   }
 
+  async function handleClientStatusChange(clientId: string, status: string) {
+    setChangingClientStatusId(clientId);
+    try {
+      const res = await fetch(`/api/manager-clients/${clientId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) await loadClients();
+    } finally {
+      setChangingClientStatusId(null);
+    }
+  }
+
   // Owner-only override of Влад's cut for this one client — see
   // Client.vladShareRatePercentOverride in prisma/schema.prisma. Own
   // draft/busy state (not folded into editDraft/handleSaveEdit) since it
@@ -2336,6 +2358,8 @@ function ManagerClientsTab() {
   const [showArchived, setShowArchived] = useState(false);
   const [search, setSearch] = useState("");
   const [managerFilter, setManagerFilter] = useState("all");
+  const [clientStatusFilter, setClientStatusFilter] = useState<ClientStatus | "all">("all");
+  const [changingClientStatusId, setChangingClientStatusId] = useState<string | null>(null);
   const [editingClientId, setEditingClientId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState({ name: "", company: "", phone: "", messenger: "", email: "", source: "other" });
   const [editSaving, setEditSaving] = useState(false);
@@ -2507,6 +2531,7 @@ function ManagerClientsTab() {
   const filteredClients = useMemo(() => {
     return clients.filter((client) => {
       if (managerFilter !== "all" && client.createdByManagerId !== managerFilter) return false;
+      if (clientStatusFilter !== "all" && client.status !== clientStatusFilter) return false;
       if (!normalizedSearch) return true;
       const haystack = [client.name, client.company, client.phone, client.email, client.messenger]
         .filter(Boolean)
@@ -2514,7 +2539,7 @@ function ManagerClientsTab() {
         .toLowerCase();
       return haystack.includes(normalizedSearch);
     });
-  }, [clients, managerFilter, normalizedSearch]);
+  }, [clients, managerFilter, clientStatusFilter, normalizedSearch]);
 
   return (
     <div className="space-y-4">
@@ -2552,6 +2577,20 @@ function ManagerClientsTab() {
                   </SelectContent>
                 </Select>
               )}
+              <Select value={clientStatusFilter} onValueChange={(v) => setClientStatusFilter(v as ClientStatus | "all")}>
+                <SelectTrigger className="h-7 flex-1 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все статусы</SelectItem>
+                  {CLIENT_STATUSES.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: CLIENT_STATUS_DOT_COLOR[status] }} />
+                      {CLIENT_STATUS_LABEL[status]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <label className="flex shrink-0 items-center gap-1.5 text-[11px] text-text-secondary">
                 <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
                 архивные
@@ -2660,6 +2699,11 @@ function ManagerClientsTab() {
                           >
                             {client.selfSourcedClaimed ? "свой клиент" : "клиент компании"}
                           </span>
+                          <span
+                            className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", CLIENT_STATUS_BADGE_CLASSES[client.status])}
+                          >
+                            {CLIENT_STATUS_LABEL[client.status]}
+                          </span>
                           {newRequestCounts[client.id] > 0 && (
                             <span className="flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
                               <Inbox className="h-3 w-3" /> {newRequestCounts[client.id]}
@@ -2715,6 +2759,29 @@ function ManagerClientsTab() {
                   {selectedClient.source ? ` · ${SOURCE_LABELS[selectedClient.source] ?? selectedClient.source}` : ""}
                 </div>
               </div>
+
+              <Select
+                value={selectedClient.status}
+                onValueChange={(status) => handleClientStatusChange(selectedClient.id, status)}
+                disabled={changingClientStatusId === selectedClient.id}
+              >
+                <SelectTrigger
+                  className={cn(
+                    "h-7 w-fit rounded-full border-0 text-xs font-medium",
+                    CLIENT_STATUS_BADGE_CLASSES[selectedClient.status],
+                  )}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CLIENT_STATUSES.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: CLIENT_STATUS_DOT_COLOR[status] }} />
+                      {CLIENT_STATUS_LABEL[status]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
               {allManagers && (
                 <p className="text-xs text-text-secondary">

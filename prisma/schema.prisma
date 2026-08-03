@@ -113,6 +113,18 @@ enum ClientSource {
   other
 }
 
+// Manual, manager-set status — same "plain dropdown, no derived logic"
+// design as Quote.status (see QuoteStatus in lib/quote-statuses.ts), just
+// four values reflecting where the RELATIONSHIP with this client stands,
+// independent of any individual quote's own status. See PB-V5 chat
+// 2026-08-03.
+enum ClientStatus {
+  new
+  making_quotes
+  rejected
+  no_active_requests
+}
+
 model Client {
   id           String   @id @default(cuid())
   // Short human-friendly number shown in the desk UI ("Клиент №N") — the
@@ -133,6 +145,9 @@ model Client {
   country      String?
   city         String?
   source       ClientSource?
+  // See ClientStatus above — manually set, defaults to "new" for every
+  // freshly created client (manager cabinet or self-registration alike).
+  status       ClientStatus @default(new)
   // Which manager brought in this client — null for clients created before
   // this field existed or via the older shared-password /desk "Клиенты" tab.
   // Needed for KPI attribution ("новых клиентов за месяц" per manager).

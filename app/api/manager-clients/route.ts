@@ -36,6 +36,7 @@ export async function GET(req: NextRequest) {
       email: true,
       phone: true,
       source: true,
+      status: true,
       createdByManagerId: true,
       createdByManager: { select: { name: true } },
       selfSourcedClaimed: true,
