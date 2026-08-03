@@ -1343,6 +1343,13 @@ model DailyPlanItem {
   // convention as buyoutConfirmedByManagerId elsewhere in this schema
   // (resolved with one extra manager lookup where needed, not an include).
   assignedByManagerId String?
+  // When the assigned manager clicked "Понятно, принято к исполнению" on
+  // the pop-up shown for a newly assigned task (see
+  // daily-plan-assigned-modal.tsx) — null until then. Only meaningful when
+  // assignedByManagerId is set; a manager's own self-added items are never
+  // shown in that pop-up, so this just stays null for them forever. See
+  // PB-V5 chat 2026-08-03.
+  acknowledgedAt DateTime?
 
   @@index([managerId, planDate])
 }

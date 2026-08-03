@@ -18,6 +18,7 @@ import { ManagerProfitReportTab } from "@/components/manager/tabs/profit-report-
 import { ManagerDashboard } from "@/components/manager/manager-dashboard";
 import { DailyPlanPanel } from "@/components/manager/daily-plan-panel";
 import { DailyPlanReviewModal } from "@/components/manager/daily-plan-review-modal";
+import { DailyPlanAssignedModal } from "@/components/manager/daily-plan-assigned-modal";
 import { AutoRefresh } from "@/components/manager/auto-refresh";
 import { DeploymentWatcher } from "@/components/manager/deployment-watcher";
 
@@ -235,6 +236,7 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
         remounted/scrolled away with whichever tab is active. */}
     <DailyPlanPanel />
     <DailyPlanReviewModal />
+    <DailyPlanAssignedModal />
     <AutoRefresh />
     <DeploymentWatcher />
     </div>

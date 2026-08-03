@@ -28,14 +28,20 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { done } = (body as { done?: unknown }) ?? {};
-  if (typeof done !== "boolean") {
+  const { done, acknowledged } = (body as { done?: unknown; acknowledged?: unknown }) ?? {};
+  if (typeof done !== "boolean" && acknowledged !== true) {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
 
   const item = await prisma.dailyPlanItem.update({
     where: { id },
-    data: { doneAt: done ? new Date() : null },
+    data: {
+      ...(typeof done === "boolean" ? { doneAt: done ? new Date() : null } : {}),
+      // One-way — the pop-up's whole point is proof the manager actually
+      // saw the task, so there's no "un-acknowledge" action to pair it
+      // with (unlike doneAt, which toggles freely).
+      ...(acknowledged === true ? { acknowledgedAt: new Date() } : {}),
+    },
   });
 
   return Response.json({ item });
