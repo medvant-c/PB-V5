@@ -157,6 +157,15 @@ export async function GET(req: NextRequest) {
       : Promise.resolve([]),
   ]);
 
+  // Single shared rate (TariffSettings.usdtRateCny), not per-quote — so
+  // this is one object or null, not a list like everything else above. See
+  // app/api/manager-tariffs/confirm-usdt-rate/route.ts.
+  const currentTariffs = await prisma.tariffSettings.findFirst({ orderBy: { createdAt: "desc" } });
+  const pendingUsdtRateConfirmation =
+    currentTariffs && currentTariffs.usdtRateCny !== null && !currentTariffs.usdtRateCnyConfirmed
+      ? { usdtRateCny: currentTariffs.usdtRateCny, createdAt: currentTariffs.createdAt }
+      : null;
+
   return Response.json({
     pendingBuyouts,
     pendingClients,
@@ -165,6 +174,7 @@ export async function GET(req: NextRequest) {
     pendingUsdRates,
     pendingBuyoutCommissions,
     pendingUnassignedClients,
+    pendingUsdtRateConfirmation,
     teamManagers,
   });
 }

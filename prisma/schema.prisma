@@ -338,6 +338,25 @@ model TariffSettings {
   cnyRateRubTier10000      Decimal?
   cnyRateRubTier30000      Decimal?
 
+  // "1 USDT = X¥" — the real cost-basis rate the руководитель actually gets
+  // when cashing out, entered manually after each real deal (unlike
+  // cnyRateRub* above, there is no reliable live/bot-parsed source for
+  // this — the channel's posted USDT table is indicative, not the
+  // executed rate). Used by the "Счёт на выкуп" invoice feature to bill a
+  // client in USDT: ₽ → ¥ via the quote's own frozen cnyRateUsed, then
+  // ¥ → USDT via this rate. Owner/senior-only field (see canEditTariffs in
+  // lib/manager-scope.ts) — same append-only carry-forward rule as every
+  // other Тарифы field: unchanged unless a save explicitly sends a new
+  // value. Changing the value resets usdtRateCnyConfirmed to false, same
+  // as Quote.usdRateOverrideConfirmed's reset-on-change rule — a regular
+  // manager can't issue a USDT invoice until this is confirmed again (see
+  // app/api/manager-quotes/[id]/buyout-invoice/route.ts). See PB-V5 chat
+  // 2026-08-03.
+  usdtRateCny                  Decimal?
+  usdtRateCnyConfirmed         Boolean   @default(false)
+  usdtRateCnyConfirmedByManagerId String?
+  usdtRateCnyConfirmedAt       DateTime?
+
   // Owner-only profit accounting — how many ₽ of profit PB actually earns
   // per ¥ converted at each of the same four volume tiers above. NOT part
   // of what the client is charged (that's cnyRateRub* above) — this is

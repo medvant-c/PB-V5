@@ -102,7 +102,10 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
         const usdRates = data.pendingUsdRates?.length ?? 0;
         const buyoutCommissions = data.pendingBuyoutCommissions?.length ?? 0;
         const unassignedClients = data.pendingUnassignedClients?.length ?? 0;
-        setPendingConfirmationsCount(buyouts + clients + cargoRates + cnyRates + usdRates + buyoutCommissions + unassignedClients);
+        const usdtRateConfirmation = data.pendingUsdtRateConfirmation ? 1 : 0;
+        setPendingConfirmationsCount(
+          buyouts + clients + cargoRates + cnyRates + usdRates + buyoutCommissions + unassignedClients + usdtRateConfirmation,
+        );
       })
       .catch(() => {});
   }, [role, activeSection]);

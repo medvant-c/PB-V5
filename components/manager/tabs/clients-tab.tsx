@@ -453,6 +453,8 @@ function ClientQuotes({
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [exportingPdfBundle, setExportingPdfBundle] = useState(false);
   const [pdfBundleError, setPdfBundleError] = useState<string | null>(null);
+  const [buyoutInvoiceBusyId, setBuyoutInvoiceBusyId] = useState<string | null>(null);
+  const [buyoutInvoiceError, setBuyoutInvoiceError] = useState<string | null>(null);
   const [containerDialogOpen, setContainerDialogOpen] = useState(false);
   // The toolbar below used to be seven-plus separate pill buttons in a row
   // (unreadable once the client card moved into the narrower master-detail
@@ -474,6 +476,9 @@ function ClientQuotes({
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
   const [reassigningId, setReassigningId] = useState<string | null>(null);
+  // Per-row "Счёт на выкуп" currency-picker popover — see
+  // app/api/manager-quotes/[id]/buyout-invoice/route.ts.
+  const [invoiceMenuQuoteId, setInvoiceMenuQuoteId] = useState<string | null>(null);
   const [expandedBuyoutId, setExpandedBuyoutId] = useState<string | null>(null);
   const [buyoutDrafts, setBuyoutDrafts] = useState<Record<string, { cny: string; rate: string }>>({});
   const [savingBuyoutId, setSavingBuyoutId] = useState<string | null>(null);
@@ -934,6 +939,42 @@ function ClientQuotes({
       setPdfBundleError("Не удалось связаться с сервером.");
     } finally {
       setExportingPdfBundle(false);
+    }
+  }
+
+  // Plain <a href> works fine for the ₽/$ PDF exports elsewhere in this
+  // file (they basically never fail), but the USDT option can legitimately
+  // 400 — the shared TariffSettings.usdtRateCny rate might not be set or
+  // not yet confirmed (see app/api/manager-tariffs/confirm-usdt-rate) — and
+  // a plain anchor would navigate the whole tab to raw JSON on that error.
+  // fetch+blob keeps the manager on the page and shows the reason instead.
+  async function handleDownloadBuyoutInvoice(quoteId: string, currency: "rub" | "usd" | "usdt") {
+    if (buyoutInvoiceBusyId) return;
+    setBuyoutInvoiceBusyId(quoteId);
+    setBuyoutInvoiceError(null);
+    try {
+      const res = await fetch(`/api/manager-quotes/${quoteId}/buyout-invoice?currency=${currency}`);
+      if (!res.ok) {
+        const data = await res.json();
+        setBuyoutInvoiceError(data.error ?? "Не удалось сформировать счёт.");
+        return;
+      }
+      const disposition = res.headers.get("content-disposition") ?? "";
+      const fileNameMatch = disposition.match(/filename\*=UTF-8''([^;]+)/);
+      const fileName = fileNameMatch ? decodeURIComponent(fileNameMatch[1]) : "Счёт на выкуп.pdf";
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+      setInvoiceMenuQuoteId(null);
+    } catch {
+      setBuyoutInvoiceError("Не удалось связаться с сервером.");
+    } finally {
+      setBuyoutInvoiceBusyId(null);
     }
   }
 
@@ -1574,6 +1615,43 @@ function ClientQuotes({
               >
                 <Download className="h-4 w-4" />
               </a>
+
+              <Popover
+                open={invoiceMenuQuoteId === quote.id}
+                onOpenChange={(open) => setInvoiceMenuQuoteId(open ? quote.id : null)}
+              >
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary"
+                    aria-label="Выставить счёт на выкуп"
+                    title="Выставить счёт на выкуп"
+                  >
+                    <Receipt className="h-4 w-4" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-56 space-y-0.5 p-1.5">
+                  {buyoutInvoiceError && invoiceMenuQuoteId === quote.id && (
+                    <p className="px-2.5 py-1 text-xs text-error">{buyoutInvoiceError}</p>
+                  )}
+                  {(["rub", "usd", "usdt"] as const).map((currency) => (
+                    <button
+                      key={currency}
+                      type="button"
+                      onClick={() => handleDownloadBuyoutInvoice(quote.id, currency)}
+                      disabled={buyoutInvoiceBusyId === quote.id}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {buyoutInvoiceBusyId === quote.id ? (
+                        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                      ) : (
+                        <Receipt className="h-3.5 w-3.5 shrink-0" />
+                      )}
+                      Счёт на выкуп — в {currency === "rub" ? "₽" : currency === "usd" ? "$" : "USDT"}
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
 
               <Select
                 value={quote.status}

@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, Loader2, Lock } from "lucide-react";
+import { Check, Loader2, Lock, ShieldCheck } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface TariffSettingsRecord {
   cnyRateRub: string;
@@ -26,6 +27,11 @@ interface TariffSettingsRecord {
   cnyProfitPerYuanRubTier3000?: string | null;
   cnyProfitPerYuanRubTier10000?: string | null;
   cnyProfitPerYuanRubTier30000?: string | null;
+  // "1 USDT = X¥" cost-basis rate for "Счёт на выкуп" — see
+  // TariffSettings.usdtRateCny in prisma/schema.prisma.
+  usdtRateCny: string | null;
+  usdtRateCnyConfirmed: boolean;
+  usdtRateCnyConfirmedAt: string | null;
 }
 
 interface TelegramCnyRateUpdateRecord {
@@ -51,6 +57,9 @@ const FIELD_LABELS: Record<
     | "cnyProfitPerYuanRubTier3000"
     | "cnyProfitPerYuanRubTier10000"
     | "cnyProfitPerYuanRubTier30000"
+    | "usdtRateCny"
+    | "usdtRateCnyConfirmed"
+    | "usdtRateCnyConfirmedAt"
   >,
   string
 > = {
@@ -96,11 +105,14 @@ const CNY_PROFIT_TIER_FIELD_LABELS: Record<
 function ManagerTariffsTab() {
   const [settings, setSettings] = useState<TariffSettingsRecord | null>(null);
   const [canEdit, setCanEdit] = useState(false);
+  const [canConfirmUsdtRate, setCanConfirmUsdtRate] = useState(false);
   const [form, setForm] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingUsdtRate, setConfirmingUsdtRate] = useState(false);
+  const [confirmUsdtRateError, setConfirmUsdtRateError] = useState<string | null>(null);
 
   const [telegramUpdates, setTelegramUpdates] = useState<TelegramCnyRateUpdateRecord[]>([]);
   const [loadingTelegramUpdates, setLoadingTelegramUpdates] = useState(false);
@@ -113,6 +125,7 @@ function ManagerTariffsTab() {
       if (res.ok) {
         setSettings(data.settings);
         setCanEdit(Boolean(data.canEdit));
+        setCanConfirmUsdtRate(Boolean(data.canConfirmUsdtRate));
         const baseForm = Object.fromEntries(Object.keys(FIELD_LABELS).map((key) => [key, String(data.settings[key])]));
         const tierForm = Object.fromEntries(
           [...Object.keys(CNY_TIER_FIELD_LABELS), ...Object.keys(CNY_PROFIT_TIER_FIELD_LABELS)].map((key) => [
@@ -120,7 +133,11 @@ function ManagerTariffsTab() {
             data.settings[key] !== null && data.settings[key] !== undefined ? String(data.settings[key]) : "",
           ]),
         );
-        setForm({ ...baseForm, ...tierForm });
+        setForm({
+          ...baseForm,
+          ...tierForm,
+          usdtRateCny: data.settings.usdtRateCny !== null && data.settings.usdtRateCny !== undefined ? String(data.settings.usdtRateCny) : "",
+        });
       }
     } finally {
       setLoading(false);
@@ -169,6 +186,25 @@ function ManagerTariffsTab() {
       setError("Не удалось связаться с сервером.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleConfirmUsdtRate() {
+    if (confirmingUsdtRate) return;
+    setConfirmingUsdtRate(true);
+    setConfirmUsdtRateError(null);
+    try {
+      const res = await fetch("/api/manager-tariffs/confirm-usdt-rate", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setConfirmUsdtRateError(data.error ?? "Не удалось подтвердить курс.");
+        return;
+      }
+      await loadSettings();
+    } catch {
+      setConfirmUsdtRateError("Не удалось связаться с сервером.");
+    } finally {
+      setConfirmingUsdtRate(false);
     }
   }
 
@@ -238,6 +274,49 @@ function ManagerTariffsTab() {
                 </div>
               ))}
             </div>
+          </div>
+
+          <div className="space-y-3 rounded-xl border border-dashed border-border bg-bg p-3 sm:col-span-2">
+            <div className="text-xs font-semibold text-text-secondary">Курс USDT для «Счёта на выкуп»</div>
+            <p className="text-xs text-text-secondary">
+              Себестоимость обмена ¥→USDT по факту последней реальной сделки — вносится вручную после каждого
+              обмена, автоматически не обновляется. Пока курс не подтверждён старшим менеджером или руководителем,
+              менеджеры не могут выставить клиенту счёт на выкуп в USDT.
+            </p>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="w-48 space-y-1.5">
+                <Label htmlFor="tariff-usdtRateCny">1 USDT = X¥</Label>
+                <Input
+                  id="tariff-usdtRateCny"
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  placeholder="не задано"
+                  value={form.usdtRateCny ?? ""}
+                  onChange={(e) => setForm((current) => ({ ...current, usdtRateCny: e.target.value }))}
+                  disabled={!canEdit}
+                />
+              </div>
+              {settings?.usdtRateCny !== null && settings?.usdtRateCny !== undefined && (
+                <p className={cn("flex items-center gap-1.5 pb-2 text-xs font-medium", settings.usdtRateCnyConfirmed ? "text-success" : "text-warning")}>
+                  {settings.usdtRateCnyConfirmed ? (
+                    <>
+                      <ShieldCheck className="h-3.5 w-3.5" /> Подтверждён
+                      {settings.usdtRateCnyConfirmedAt &&
+                        ` ${new Date(settings.usdtRateCnyConfirmedAt).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}`}
+                    </>
+                  ) : (
+                    "Не подтверждён — счёт в USDT недоступен"
+                  )}
+                </p>
+              )}
+              {canConfirmUsdtRate && settings?.usdtRateCny !== null && settings?.usdtRateCny !== undefined && !settings?.usdtRateCnyConfirmed && (
+                <Button type="button" variant="outline" size="sm" disabled={confirmingUsdtRate} onClick={handleConfirmUsdtRate}>
+                  {confirmingUsdtRate ? <Loader2 className="h-4 w-4 animate-spin" /> : "Подтвердить курс"}
+                </Button>
+              )}
+            </div>
+            {confirmUsdtRateError && <p className="text-xs text-error">{confirmUsdtRateError}</p>}
           </div>
 
           {isOwner && (

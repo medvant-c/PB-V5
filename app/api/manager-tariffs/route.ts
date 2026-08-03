@@ -64,7 +64,15 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: "Тарифы ещё не заданы." }, { status: 404 });
   }
 
-  return Response.json({ settings: stripMarginForNonOwner(settings, session), canEdit: await canEditTariffs(session) });
+  return Response.json({
+    settings: stripMarginForNonOwner(settings, session),
+    canEdit: await canEditTariffs(session),
+    // Whether THIS session can confirm TariffSettings.usdtRateCny — same
+    // owner/senior gate as confirm-usd-rate/route.ts's per-quote
+    // equivalent (narrower than canEditTariffs, which any flagged manager
+    // can have). See app/api/manager-tariffs/confirm-usdt-rate/route.ts.
+    canConfirmUsdtRate: session.role === "owner" || session.role === "senior",
+  });
 }
 
 function toPositiveNumber(value: unknown): number | null {
@@ -220,12 +228,47 @@ export async function POST(req: NextRequest) {
     tierOverrides[key] = parsed;
   }
 
+  // "1 USDT = X¥" cost-basis rate for the "Счёт на выкуп" USDT option —
+  // owner/senior-only (canEditTariffs, checked above), entered manually
+  // after each real cash-out deal (no reliable live source — see
+  // prisma/schema.prisma). Carries forward unchanged like every other
+  // Тарифы field when this save doesn't touch it; when it DOES change,
+  // usdtRateCnyConfirmed resets to false — same "value changed → needs
+  // fresh sign-off" rule as Quote.usdRateOverrideConfirmed — so a regular
+  // manager is blocked from issuing a USDT invoice until it's reconfirmed
+  // (see app/api/manager-tariffs/confirm-usdt-rate/route.ts and
+  // app/api/manager-quotes/[id]/buyout-invoice/route.ts).
+  let usdtRateCny = previous?.usdtRateCny !== null && previous?.usdtRateCny !== undefined ? Number(previous.usdtRateCny) : null;
+  let usdtRateCnyConfirmed = previous?.usdtRateCnyConfirmed ?? false;
+  let usdtRateCnyConfirmedByManagerId = previous?.usdtRateCnyConfirmedByManagerId ?? null;
+  let usdtRateCnyConfirmedAt = previous?.usdtRateCnyConfirmedAt ?? null;
+  if (raw.usdtRateCny !== undefined) {
+    if (raw.usdtRateCny === null || raw.usdtRateCny === "") {
+      usdtRateCny = null;
+    } else {
+      const parsed = toPositiveNumber(raw.usdtRateCny);
+      if (parsed === null) {
+        return Response.json({ error: "Поле «Курс USDT» должно быть неотрицательным числом." }, { status: 400 });
+      }
+      usdtRateCny = parsed;
+    }
+    if (usdtRateCny !== (previous?.usdtRateCny !== null && previous?.usdtRateCny !== undefined ? Number(previous.usdtRateCny) : null)) {
+      usdtRateCnyConfirmed = false;
+      usdtRateCnyConfirmedByManagerId = null;
+      usdtRateCnyConfirmedAt = null;
+    }
+  }
+
   const settings = await prisma.tariffSettings.create({
     data: {
       cnyRateRub: validated.cnyRateRub,
       cnyRateRubTier3000: tierOverrides.cnyRateRubTier3000,
       cnyRateRubTier10000: tierOverrides.cnyRateRubTier10000,
       cnyRateRubTier30000: tierOverrides.cnyRateRubTier30000,
+      usdtRateCny,
+      usdtRateCnyConfirmed,
+      usdtRateCnyConfirmedByManagerId,
+      usdtRateCnyConfirmedAt,
       usdRateRub: validated.usdRateRub,
       volumeRateUsdPerCbm: validated.volumeRateUsdPerCbm,
       standardPriceRub: validated.standardPriceRub,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Archive, CheckCircle2, ChevronDown, Coins, DollarSign, Loader2, Paperclip, Percent, Ruler, UserCheck, UserPlus, Wallet } from "lucide-react";
+import { Archive, Banknote, CheckCircle2, ChevronDown, Coins, DollarSign, Loader2, Paperclip, Percent, Ruler, UserCheck, UserPlus, Wallet } from "lucide-react";
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -86,6 +86,13 @@ interface PendingBuyoutCommission {
   buyoutCommissionPercentOverride: string;
   manager: { id: string; name: string };
   client: { name: string; company: string | null };
+}
+
+// Single shared TariffSettings.usdtRateCny, not per-quote — see
+// app/api/manager-tariffs/confirm-usdt-rate/route.ts.
+interface PendingUsdtRateConfirmation {
+  usdtRateCny: string;
+  createdAt: string;
 }
 
 function formatDate(value: string): string {
@@ -401,6 +408,10 @@ function ManagerConfirmationsTab() {
   const [busyBuyoutCommissionId, setBusyBuyoutCommissionId] = useState<string | null>(null);
   const [buyoutCommissionError, setBuyoutCommissionError] = useState<string | null>(null);
 
+  const [pendingUsdtRateConfirmation, setPendingUsdtRateConfirmation] = useState<PendingUsdtRateConfirmation | null>(null);
+  const [busyUsdtRateConfirm, setBusyUsdtRateConfirm] = useState(false);
+  const [usdtRateConfirmError, setUsdtRateConfirmError] = useState<string | null>(null);
+
   function load() {
     setLoading(true);
     return fetch("/api/manager-confirmations")
@@ -413,9 +424,26 @@ function ManagerConfirmationsTab() {
         setPendingUsdRates(data.pendingUsdRates ?? []);
         setPendingBuyoutCommissions(data.pendingBuyoutCommissions ?? []);
         setPendingUnassignedClients(data.pendingUnassignedClients ?? []);
+        setPendingUsdtRateConfirmation(data.pendingUsdtRateConfirmation ?? null);
         setTeamManagers(data.teamManagers ?? []);
       })
       .finally(() => setLoading(false));
+  }
+
+  async function handleConfirmUsdtRateConfirmation() {
+    setBusyUsdtRateConfirm(true);
+    setUsdtRateConfirmError(null);
+    try {
+      const res = await fetch("/api/manager-tariffs/confirm-usdt-rate", { method: "POST" });
+      if (res.ok) {
+        await load();
+      } else {
+        const data = await res.json();
+        setUsdtRateConfirmError(data.error ?? "Не удалось подтвердить курс.");
+      }
+    } finally {
+      setBusyUsdtRateConfirm(false);
+    }
   }
 
   async function handleAssignClient(clientId: string, managerId: string) {
@@ -637,7 +665,8 @@ function ManagerConfirmationsTab() {
     pendingCnyRates.length === 0 &&
     pendingUsdRates.length === 0 &&
     pendingBuyoutCommissions.length === 0 &&
-    pendingUnassignedClients.length === 0;
+    pendingUnassignedClients.length === 0 &&
+    !pendingUsdtRateConfirmation;
 
   return (
     <div className="space-y-6">
@@ -940,6 +969,33 @@ function ManagerConfirmationsTab() {
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {pendingUsdtRateConfirmation && (
+            <div>
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
+                <Banknote className="h-3.5 w-3.5" /> Курс USDT для счетов на выкуп
+              </h3>
+              <p className="mt-1 text-xs text-text-secondary">
+                Руководитель ввёл новый курс ¥→USDT (себестоимость по факту сделки) во вкладке «Тарифы» — пока он не
+                подтверждён, менеджеры не могут выставлять клиентам счёт на выкуп в USDT.
+              </p>
+              {usdtRateConfirmError && <p className="mt-1 text-xs text-error">{usdtRateConfirmError}</p>}
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface p-3 text-sm">
+                <span className="font-medium text-text">
+                  1 USDT = {Number(pendingUsdtRateConfirmation.usdtRateCny).toFixed(2)}¥
+                </span>
+                <button
+                  type="button"
+                  onClick={handleConfirmUsdtRateConfirmation}
+                  disabled={busyUsdtRateConfirm}
+                  className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
+                >
+                  {busyUsdtRateConfirm && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  Подтвердить
+                </button>
+              </div>
             </div>
           )}
 

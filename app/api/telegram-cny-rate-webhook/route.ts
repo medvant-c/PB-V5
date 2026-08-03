@@ -110,6 +110,14 @@ export async function POST(req: NextRequest) {
       cnyRateRubTier3000: parsed.rateFrom3000,
       cnyRateRubTier10000: parsed.rateFrom10000,
       cnyRateRubTier30000: parsed.rateFrom30000,
+      // usdtRateCny* fields deliberately NOT touched here — that rate is
+      // entered manually by the owner after each real deal, never parsed
+      // from this bot message. See prisma/schema.prisma and
+      // app/api/manager-tariffs/route.ts.
+      usdtRateCny: currentTariffs.usdtRateCny,
+      usdtRateCnyConfirmed: currentTariffs.usdtRateCnyConfirmed,
+      usdtRateCnyConfirmedByManagerId: currentTariffs.usdtRateCnyConfirmedByManagerId,
+      usdtRateCnyConfirmedAt: currentTariffs.usdtRateCnyConfirmedAt,
       usdRateRub: currentTariffs.usdRateRub,
       volumeRateUsdPerCbm: currentTariffs.volumeRateUsdPerCbm,
       standardPriceRub: currentTariffs.standardPriceRub,
