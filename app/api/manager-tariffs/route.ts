@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest, type ManagerSession } from "@/lib/manager-auth";
 import { canEditTariffs } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
+import { parseLocaleNumber } from "@/lib/number";
 
 // Cargo margin AND the CNY profit-per-yuan tiers are both owner-confidential
 // — a manager needs the sell rate (cnyRateRub*) to price a quote, never the
@@ -75,8 +76,13 @@ export async function GET(req: NextRequest) {
   });
 }
 
+// parseLocaleNumber, not raw Number() — these fields switched to
+// type="text" inputMode="decimal" (see components/manager/tabs/tariffs-tab.tsx)
+// specifically because native type="number" inputs silently reject a
+// comma decimal separator on some keyboards/browsers, so a comma-typed
+// value must still parse correctly once it reaches the server.
 function toPositiveNumber(value: unknown): number | null {
-  const num = typeof value === "string" ? Number(value) : value;
+  const num = typeof value === "string" ? parseLocaleNumber(value) : value;
   return typeof num === "number" && Number.isFinite(num) && num >= 0 ? num : null;
 }
 

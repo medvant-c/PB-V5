@@ -236,9 +236,8 @@ function ManagerTariffsTab() {
               <Label htmlFor={`tariff-${key}`}>{label}</Label>
               <Input
                 id={`tariff-${key}`}
-                type="number"
-                step="0.01"
-                min={0}
+                type="text"
+                inputMode="decimal"
                 value={form[key] ?? ""}
                 onChange={(e) => setForm((current) => ({ ...current, [key]: e.target.value }))}
                 disabled={!canEdit}
@@ -263,9 +262,8 @@ function ManagerTariffsTab() {
                   <Label htmlFor={`tariff-${key}`}>{label}</Label>
                   <Input
                     id={`tariff-${key}`}
-                    type="number"
-                    step="0.01"
-                    min={0}
+                    type="text"
+                    inputMode="decimal"
                     placeholder="не задано"
                     value={form[key] ?? ""}
                     onChange={(e) => setForm((current) => ({ ...current, [key]: e.target.value }))}
@@ -288,9 +286,8 @@ function ManagerTariffsTab() {
                 <Label htmlFor="tariff-usdtRateCny">1 USDT = X¥</Label>
                 <Input
                   id="tariff-usdtRateCny"
-                  type="number"
-                  step="0.01"
-                  min={0}
+                  type="text"
+                  inputMode="decimal"
                   placeholder="не задано"
                   value={form.usdtRateCny ?? ""}
                   onChange={(e) => setForm((current) => ({ ...current, usdtRateCny: e.target.value }))}
@@ -335,9 +332,8 @@ function ManagerTariffsTab() {
                     <Label htmlFor={`tariff-${key}`}>{label}</Label>
                     <Input
                       id={`tariff-${key}`}
-                      type="number"
-                      step="0.01"
-                      min={0}
+                      type="text"
+                      inputMode="decimal"
                       placeholder="0"
                       value={form[key] ?? ""}
                       onChange={(e) => setForm((current) => ({ ...current, [key]: e.target.value }))}
