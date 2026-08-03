@@ -920,7 +920,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                 <Input id="product-link" value={productLink} onChange={(e) => setProductLink(e.target.value)} />
               </div>
               <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="product-description">Описание товара</Label>
+                <Label htmlFor="product-description">Описание товара *</Label>
                 <Textarea id="product-description" value={productDescription} onChange={(e) => setProductDescription(e.target.value)} required />
               </div>
               <div className="space-y-1.5">
@@ -1319,6 +1319,9 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
             </div>
 
             {error && <p className="text-xs text-error">{error}</p>}
+            {!productDescription.trim() && (
+              <p className="text-xs text-warning">Заполните описание товара — без него просчёт не сохранить.</p>
+            )}
             <div className="flex gap-2">
               <Button
                 type="button"
