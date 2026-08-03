@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, Info, Loader2, X } from "lucide-react";
+import { ChevronDown, ExternalLink, Info, Loader2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -169,6 +169,21 @@ const CUSTOM_PRODUCTION_FIELD_BY_TYPE: Record<(typeof QUOTE_TYPES)[number]["valu
 
 function fmt(value: number): string {
   return Number.isFinite(value) ? Math.round(value).toLocaleString("ru-RU") : "—";
+}
+
+// Пусть менеджер вставляет ссылку без протокола (1688 часто копируется как
+// "detail.1688.com/..." без https://) — считаем это ссылкой тоже, просто
+// достраиваем протокол только для href, само поле остаётся как есть и
+// полностью редактируемым.
+function isLikelyUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || /\s/.test(trimmed)) return false;
+  return /^https?:\/\//i.test(trimmed) || /^[\w-]+(\.[\w-]+)+(\/.*)?$/i.test(trimmed);
+}
+
+function toHref(value: string): string {
+  const trimmed = value.trim();
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
 const BLANK_FORM = {
@@ -917,7 +932,26 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               </div>
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="product-link">Ссылка на товар (не показывается клиенту)</Label>
-                <Input id="product-link" value={productLink} onChange={(e) => setProductLink(e.target.value)} />
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="product-link"
+                    value={productLink}
+                    onChange={(e) => setProductLink(e.target.value)}
+                    className="flex-1"
+                  />
+                  {isLikelyUrl(productLink) && (
+                    <a
+                      href={toHref(productLink)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
+                      aria-label="Открыть ссылку в браузере"
+                      title="Открыть ссылку в браузере"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                    </a>
+                  )}
+                </div>
               </div>
               <div className="space-y-1.5 sm:col-span-2">
                 <Label htmlFor="product-description">Описание товара *</Label>
