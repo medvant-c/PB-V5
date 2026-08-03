@@ -1471,10 +1471,12 @@ function ClientQuotes({
                 className="flex min-w-0 flex-1 items-center gap-3 text-left hover:opacity-80"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium text-text">
-                    №{quote.displayId} · {quote.productName}
+                  <span className="flex items-center gap-1.5">
+                    <span className="min-w-0 truncate font-medium text-text">
+                      №{quote.displayId} · {quote.productName}
+                    </span>
                     {quote.destinationCountry !== "russia" && (
-                      <span className="ml-1.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                      <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
                         {destinationCountryLabel(quote.destinationCountry)}
                       </span>
                     )}
