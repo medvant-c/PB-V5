@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
-import { getVisibleManagerIds } from "@/lib/manager-scope";
+import { canAccessManagerClient } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { normalizePhone } from "@/lib/phone";
 
@@ -24,11 +24,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const existing = await prisma.client.findUnique({ where: { id } });
   if (!existing) return Response.json({ error: "Клиент не найден." }, { status: 404 });
 
-  const visibleManagerIds = await getVisibleManagerIds(session);
-  if (
-    visibleManagerIds !== "all" &&
-    (!existing.createdByManagerId || !visibleManagerIds.includes(existing.createdByManagerId))
-  ) {
+  if (!(await canAccessManagerClient(session, existing))) {
     return Response.json({ error: "Этот клиент вне вашей зоны видимости." }, { status: 403 });
   }
 

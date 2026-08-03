@@ -1,16 +1,17 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
-import { getVisibleManagerIds } from "@/lib/manager-scope";
+import { getVisibleManagerIds, clientVisibilityWhere } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { nextClientDisplayId } from "@/lib/display-ids";
 import { normalizePhone } from "@/lib/phone";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// Scoped by role (see lib/manager-scope.ts): a plain manager sees only
-// clients they created, a senior manager also sees their attached
-// managers' clients, and the owner sees everyone's — createdByManagerId is
-// still returned so the UI can show who brought each one in.
+// Scoped by role (see clientVisibilityWhere in lib/manager-scope.ts): a
+// plain manager sees clients they created OR currently hold a quote for, a
+// senior manager also sees the same for their attached managers, and the
+// owner sees everyone's — createdByManagerId is still returned so the UI
+// can show who brought each one in.
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
 
   const clients = await prisma.client.findMany({
     where: {
-      ...(visibleManagerIds === "all" ? {} : { createdByManagerId: { in: visibleManagerIds } }),
+      ...clientVisibilityWhere(visibleManagerIds),
       ...(includeArchived ? {} : { archivedAt: null }),
     },
     orderBy: { createdAt: "desc" },

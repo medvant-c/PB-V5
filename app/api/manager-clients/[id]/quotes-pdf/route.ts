@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
-import { getVisibleManagerIds } from "@/lib/manager-scope";
+import { canAccessManagerClient } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { storage } from "@/lib/storage";
 import { renderQuotesListPdf, type QuoteListRow } from "@/lib/desk-services/quotes-list-pdf";
@@ -25,11 +25,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: "Клиент не найден." }, { status: 404 });
   }
 
-  const visibleManagerIds = await getVisibleManagerIds(session);
-  if (
-    visibleManagerIds !== "all" &&
-    (!client.createdByManagerId || !visibleManagerIds.includes(client.createdByManagerId))
-  ) {
+  if (!(await canAccessManagerClient(session, client))) {
     return Response.json({ error: "Этот клиент вне вашей зоны видимости." }, { status: 403 });
   }
 

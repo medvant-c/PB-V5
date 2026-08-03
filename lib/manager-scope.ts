@@ -25,6 +25,42 @@ async function canAccessManagerQuote(session: ManagerSession, quoteManagerId: st
   return visibleManagerIds === "all" || visibleManagerIds.includes(quoteManagerId);
 }
 
+// Whether a session can see/edit a given client — true either if the
+// session created them (createdByManagerId, the original rule) OR if any
+// of the session's own visible managers currently hold a quote for that
+// client. That second branch matters because a client can be created by
+// one manager (or the owner, or predate this field entirely — null) and
+// then have its actual quotes reassigned to someone else entirely; a
+// senior manager must be able to edit a client their own subordinate is
+// actively working, even if that subordinate didn't create the client
+// record. Previously this was `createdByManagerId`-only, which silently
+// locked a senior out of exactly that case ("вне вашей зоны видимости")
+// even though the underlying quote itself was already correctly visible
+// via canAccessManagerQuote. See PB-V5 chat 2026-08-03.
+async function canAccessManagerClient(session: ManagerSession, client: { id: string; createdByManagerId: string | null }): Promise<boolean> {
+  const visibleManagerIds = await getVisibleManagerIds(session);
+  if (visibleManagerIds === "all") return true;
+  if (client.createdByManagerId && visibleManagerIds.includes(client.createdByManagerId)) return true;
+  const ownQuote = await prisma.quote.findFirst({
+    where: { clientId: client.id, managerId: { in: visibleManagerIds } },
+    select: { id: true },
+  });
+  return Boolean(ownQuote);
+}
+
+// Same rule as canAccessManagerClient above, as a Prisma where-fragment for
+// list queries (GET /api/manager-clients) instead of a per-row check —
+// spread directly into a `where` object; `{}` for "all" (owner, no filter).
+function clientVisibilityWhere(visibleManagerIds: "all" | string[]) {
+  if (visibleManagerIds === "all") return {};
+  return {
+    OR: [
+      { createdByManagerId: { in: visibleManagerIds } },
+      { quotes: { some: { managerId: { in: visibleManagerIds } } } },
+    ],
+  };
+}
+
 // Owner can always edit tariffs (rates, density tiers, price list); anyone
 // else needs Manager.canEditTariffs explicitly turned on — checked live,
 // never trusted from the session token (same pattern as Manager.active).
@@ -36,4 +72,4 @@ async function canEditTariffs(session: ManagerSession): Promise<boolean> {
   return manager?.canEditTariffs ?? false;
 }
 
-export { getVisibleManagerIds, canAccessManagerQuote, canEditTariffs };
+export { getVisibleManagerIds, canAccessManagerQuote, canAccessManagerClient, clientVisibilityWhere, canEditTariffs };

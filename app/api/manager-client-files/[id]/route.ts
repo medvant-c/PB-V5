@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
-import { getVisibleManagerIds } from "@/lib/manager-scope";
+import { canAccessManagerClient } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { storage } from "@/lib/storage";
 
@@ -15,11 +15,7 @@ async function loadRecordIfVisible(fileId: string, session: NonNullable<Awaited<
   const client = await prisma.client.findUnique({ where: { id: record.relatedId } });
   if (!client) return null;
 
-  const visibleManagerIds = await getVisibleManagerIds(session);
-  if (
-    visibleManagerIds !== "all" &&
-    (!client.createdByManagerId || !visibleManagerIds.includes(client.createdByManagerId))
-  ) {
+  if (!(await canAccessManagerClient(session, client))) {
     return null;
   }
   return record;
