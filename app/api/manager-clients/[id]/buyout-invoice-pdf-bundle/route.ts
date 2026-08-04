@@ -2,8 +2,9 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canAccessManagerClient } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
-import { renderBuyoutInvoiceBundlePdf, type BuyoutInvoicePdfProps, type BuyoutInvoiceCurrency } from "@/lib/desk-services/buyout-invoice-pdf";
-import { buildBuyoutInvoiceAmounts } from "@/lib/desk-services/buyout-invoice-calc";
+import { renderBuyoutInvoiceListPdf, type BuyoutInvoiceListRow } from "@/lib/desk-services/buyout-invoice-list-pdf";
+import type { BuyoutInvoiceCurrency } from "@/lib/desk-services/buyout-invoice-pdf";
+import { buildBuyoutInvoiceRowAmounts } from "@/lib/desk-services/buyout-invoice-calc";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -14,7 +15,7 @@ const CURRENCY_FILE_SUFFIX: Record<BuyoutInvoiceCurrency, string> = { rub: "₽"
 // Client-scoped mirror of /api/manager-quotes/buyout-invoice-pdf-bundle —
 // same split as quotes-pdf-bundle (client-anchored access check via
 // canAccessManagerClient vs. the global route's per-quote managerId scan).
-// See PB-V5 chat 2026-08-03.
+// See PB-V5 chat 2026-08-03/04.
 export async function POST(req: NextRequest, { params }: RouteParams) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
@@ -71,14 +72,14 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: "Просчёты не найдены." }, { status: 404 });
   }
 
-  const invoices: BuyoutInvoicePdfProps[] = await Promise.all(
+  const rows: BuyoutInvoiceListRow[] = await Promise.all(
     quotes.map(async (quote) => {
       const attachedServiceRecords = await prisma.quoteAttachedService.findMany({
         where: { quoteId: quote.id },
         orderBy: { createdAt: "asc" },
       });
 
-      const { lineItems, totalAmount, rateNote } = buildBuyoutInvoiceAmounts(
+      const amounts = buildBuyoutInvoiceRowAmounts(
         {
           totalPriceRub: Number(quote.totalPriceRub),
           chinaDeliveryRub: Number(quote.chinaDeliveryRub),
@@ -100,19 +101,17 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
       return {
         displayId: quote.displayId,
-        client: { name: client.name, company: client.company },
         productName: quote.productName,
-        currency,
-        lineItems,
-        totalAmount,
-        rateNote,
+        clientName: client.name,
+        clientCompany: client.company,
+        ...amounts,
       };
     }),
   );
 
-  const buffer = await renderBuyoutInvoiceBundlePdf(invoices);
+  const buffer = await renderBuyoutInvoiceListPdf({ client: { name: client.name, company: client.company }, rows, currency });
 
-  const fileName = `Счета на выкуп — ${client.name} (${quotes.length}, ${CURRENCY_FILE_SUFFIX[currency]}).pdf`;
+  const fileName = `Счета на выкуп списком — ${client.name} (${quotes.length}, ${CURRENCY_FILE_SUFFIX[currency]}).pdf`;
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/pdf",

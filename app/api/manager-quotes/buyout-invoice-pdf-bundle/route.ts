@@ -2,17 +2,19 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { getVisibleManagerIds } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
-import { renderBuyoutInvoiceBundlePdf, type BuyoutInvoicePdfProps, type BuyoutInvoiceCurrency } from "@/lib/desk-services/buyout-invoice-pdf";
-import { buildBuyoutInvoiceAmounts } from "@/lib/desk-services/buyout-invoice-calc";
+import { renderBuyoutInvoiceListPdf, type BuyoutInvoiceListRow } from "@/lib/desk-services/buyout-invoice-list-pdf";
+import type { BuyoutInvoiceCurrency } from "@/lib/desk-services/buyout-invoice-pdf";
+import { buildBuyoutInvoiceRowAmounts } from "@/lib/desk-services/buyout-invoice-calc";
 
 const CURRENCY_FILE_SUFFIX: Record<BuyoutInvoiceCurrency, string> = { rub: "₽", usd: "$", usdt: "USDT" };
 
 // Same as /api/manager-clients/[id]/buyout-invoice-pdf-bundle, just not
 // anchored to one client — mirrors quotes-pdf-bundle's own "Все просчёты"
-// vs. per-client split (see that route's comment). One счёт per selected
-// quote, merged into a single PDF (one page each) via
-// renderBuyoutInvoiceBundlePdf, same "Page is the merge unit" pattern as
-// the existing quote-detail bundle. See PB-V5 chat 2026-08-03.
+// vs. per-client split (see that route's comment). ONE compact table, one
+// ROW per selected quote (not one page per quote — see
+// lib/desk-services/buyout-invoice-list-pdf.tsx), same "печать списком"
+// format as the existing "Скачать все просчёты клиента в PDF"
+// (quotes-list-pdf.tsx). See PB-V5 chat 2026-08-03.
 export async function POST(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
@@ -67,14 +69,14 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Просчёты не найдены." }, { status: 404 });
   }
 
-  const invoices: BuyoutInvoicePdfProps[] = await Promise.all(
+  const rows: BuyoutInvoiceListRow[] = await Promise.all(
     quotes.map(async (quote) => {
       const attachedServiceRecords = await prisma.quoteAttachedService.findMany({
         where: { quoteId: quote.id },
         orderBy: { createdAt: "asc" },
       });
 
-      const { lineItems, totalAmount, rateNote } = buildBuyoutInvoiceAmounts(
+      const amounts = buildBuyoutInvoiceRowAmounts(
         {
           totalPriceRub: Number(quote.totalPriceRub),
           chinaDeliveryRub: Number(quote.chinaDeliveryRub),
@@ -96,19 +98,17 @@ export async function POST(req: NextRequest) {
 
       return {
         displayId: quote.displayId,
-        client: { name: quote.client.name, company: quote.client.company },
         productName: quote.productName,
-        currency,
-        lineItems,
-        totalAmount,
-        rateNote,
+        clientName: quote.client.name,
+        clientCompany: quote.client.company,
+        ...amounts,
       };
     }),
   );
 
-  const buffer = await renderBuyoutInvoiceBundlePdf(invoices);
+  const buffer = await renderBuyoutInvoiceListPdf({ client: null, rows, currency });
 
-  const fileName = `Счета на выкуп (${quotes.length}, ${CURRENCY_FILE_SUFFIX[currency]}).pdf`;
+  const fileName = `Счета на выкуп списком (${quotes.length}, ${CURRENCY_FILE_SUFFIX[currency]}).pdf`;
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/pdf",

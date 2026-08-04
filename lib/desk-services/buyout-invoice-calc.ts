@@ -89,5 +89,57 @@ function buildBuyoutInvoiceAmounts(
   };
 }
 
-export { buildBuyoutInvoiceAmounts };
-export type { BuyoutInvoiceQuoteInput, BuyoutInvoiceAmounts };
+interface BuyoutInvoiceRowAmounts {
+  totalPriceAmount: number;
+  chinaDeliveryAmount: number;
+  searchServiceAmount: number;
+  customProductionAmount: number;
+  buyoutCommissionAmount: number;
+  attachedServicesAmount: number;
+  totalAmount: number;
+}
+
+// Same ₽→$→USDT conversion as buildBuyoutInvoiceAmounts above, but keeps
+// each category as its own field instead of a flat labeled list — used by
+// the compact "Счёт на выкуп списком" table (one row per quote, fixed
+// columns), where a dynamic per-quote label list doesn't fit a table's
+// fixed column set. See lib/desk-services/buyout-invoice-list-pdf.tsx.
+function buildBuyoutInvoiceRowAmounts(
+  quote: BuyoutInvoiceQuoteInput,
+  currency: BuyoutInvoiceCurrency,
+  usdt: { usdtRateCny: number } | null,
+): BuyoutInvoiceRowAmounts {
+  const attachedServicesRub = quote.attachedServices.reduce((sum, s) => sum + s.priceRub, 0);
+  const rub: Omit<BuyoutInvoiceRowAmounts, "totalAmount"> & { totalAmountRub: number } = {
+    totalPriceAmount: quote.totalPriceRub,
+    chinaDeliveryAmount: quote.chinaDeliveryRub,
+    searchServiceAmount: quote.searchServiceFeeRub,
+    customProductionAmount: quote.isCustomProduction ? quote.customProductionFeeRub : 0,
+    buyoutCommissionAmount: quote.buyoutCommissionRub,
+    attachedServicesAmount: attachedServicesRub,
+    totalAmountRub: quote.totalRub - quote.cargoDeliveryRub,
+  };
+
+  let divisor = 1;
+  if (currency === "usd") {
+    divisor = quote.usdRateUsed;
+  } else if (currency === "usdt") {
+    if (!usdt) {
+      throw new Error("buildBuyoutInvoiceRowAmounts called with currency=usdt but no usdtRateCny — caller must validate this first.");
+    }
+    divisor = quote.cnyRateUsed * usdt.usdtRateCny;
+  }
+
+  return {
+    totalPriceAmount: rub.totalPriceAmount / divisor,
+    chinaDeliveryAmount: rub.chinaDeliveryAmount / divisor,
+    searchServiceAmount: rub.searchServiceAmount / divisor,
+    customProductionAmount: rub.customProductionAmount / divisor,
+    buyoutCommissionAmount: rub.buyoutCommissionAmount / divisor,
+    attachedServicesAmount: rub.attachedServicesAmount / divisor,
+    totalAmount: rub.totalAmountRub / divisor,
+  };
+}
+
+export { buildBuyoutInvoiceAmounts, buildBuyoutInvoiceRowAmounts };
+export type { BuyoutInvoiceQuoteInput, BuyoutInvoiceAmounts, BuyoutInvoiceRowAmounts };
