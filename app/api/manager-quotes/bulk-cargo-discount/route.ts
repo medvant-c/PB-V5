@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
   }
 
   const quotes = await prisma.quote.findMany({
-    where: { id: { in: quoteIds as string[] } },
+    where: { id: { in: quoteIds as string[] }, deletedAt: null },
     select: {
       id: true,
       cargoDeliveryUsd: true,

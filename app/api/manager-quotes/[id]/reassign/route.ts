@@ -28,8 +28,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   }
 
   const { id } = await params;
-  const quote = await prisma.quote.findUnique({ where: { id }, select: { id: true, managerId: true } });
-  if (!quote) {
+  const quote = await prisma.quote.findUnique({ where: { id }, select: { id: true, managerId: true, deletedAt: true } });
+  if (!quote || quote.deletedAt) {
     return Response.json({ error: "Просчёт не найден." }, { status: 404 });
   }
   if (!(await canAccessManagerQuote(session, quote.managerId))) {

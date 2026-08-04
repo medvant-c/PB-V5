@@ -22,6 +22,61 @@ interface BuyoutInvoiceQuoteInput {
   attachedServices: { name: string; priceRub: number }[];
 }
 
+// How much of each category has already been paid so far, in ₽ — summed
+// from QuotePaymentAllocation rows (see prisma/schema.prisma) by the
+// caller. All-zero (the common case, nothing paid yet through this flow)
+// makes every function below behave exactly as it did before this field
+// existed. See PB-V5 chat 2026-08-04.
+interface AlreadyPaidRubByCategory {
+  goods: number;
+  chinaDelivery: number;
+  searchService: number;
+  customProduction: number;
+  buyoutCommission: number;
+  attachedServices: number;
+}
+
+const NOTHING_PAID: AlreadyPaidRubByCategory = {
+  goods: 0,
+  chinaDelivery: 0,
+  searchService: 0,
+  customProduction: 0,
+  buyoutCommission: 0,
+  attachedServices: 0,
+};
+
+// Sums QuotePaymentAllocation.amountRub (see prisma/schema.prisma) into
+// the shape buildBuyoutInvoiceAmounts/buildBuyoutInvoiceRowAmounts expect —
+// the counterpart of sumAlreadyPaidPremium in quote-profit.ts, just for ₽
+// already paid per category instead of premium already credited.
+function sumAlreadyPaidRubByCategory(allocations: { category: string; amountRub: unknown }[]): AlreadyPaidRubByCategory {
+  const result: AlreadyPaidRubByCategory = { ...NOTHING_PAID };
+  for (const a of allocations) {
+    const amount = Number(a.amountRub);
+    switch (a.category) {
+      case "goods":
+        result.goods += amount;
+        break;
+      case "china_delivery":
+        result.chinaDelivery += amount;
+        break;
+      case "search_service":
+        result.searchService += amount;
+        break;
+      case "custom_production":
+        result.customProduction += amount;
+        break;
+      case "buyout_commission":
+        result.buyoutCommission += amount;
+        break;
+      case "attached_services":
+        result.attachedServices += amount;
+        break;
+    }
+  }
+  return result;
+}
+
 interface BuyoutInvoiceAmounts {
   lineItems: BuyoutInvoiceLineItem[];
   totalAmount: number;
@@ -41,28 +96,54 @@ interface BuyoutInvoiceAmounts {
 // BEFORE calling this function for that quote (see the two routes above);
 // it's not re-validated here since a bundle only wants to fetch/check that
 // once for the whole batch, not once per quote.
+//
+// alreadyPaidRub (default: nothing paid) — a category already fully paid
+// is dropped from the invoice entirely (not shown as "0 ₽"); a partially
+// paid one shows only its remaining balance. See PB-V5 chat 2026-08-04.
 function buildBuyoutInvoiceAmounts(
   quote: BuyoutInvoiceQuoteInput,
   currency: BuyoutInvoiceCurrency,
   usdt: { usdtRateCny: number } | null,
+  alreadyPaidRub: AlreadyPaidRubByCategory = NOTHING_PAID,
 ): BuyoutInvoiceAmounts {
-  const rubLineItems: BuyoutInvoiceLineItem[] = [
-    { label: "Стоимость товара", amount: quote.totalPriceRub },
-    { label: "Доставка по Китаю", amount: quote.chinaDeliveryRub },
-    {
+  const remainingGoodsRub = Math.max(0, quote.totalPriceRub - alreadyPaidRub.goods);
+  const remainingChinaDeliveryRub = Math.max(0, quote.chinaDeliveryRub - alreadyPaidRub.chinaDelivery);
+  const remainingSearchServiceRub = Math.max(0, quote.searchServiceFeeRub - alreadyPaidRub.searchService);
+  const remainingCustomProductionRub = quote.isCustomProduction
+    ? Math.max(0, quote.customProductionFeeRub - alreadyPaidRub.customProduction)
+    : 0;
+  const remainingBuyoutCommissionRub = Math.max(0, quote.buyoutCommissionRub - alreadyPaidRub.buyoutCommission);
+  const attachedServicesTotalRub = quote.attachedServices.reduce((sum, s) => sum + s.priceRub, 0);
+  const remainingAttachedServicesRub = Math.max(0, attachedServicesTotalRub - alreadyPaidRub.attachedServices);
+
+  const rubLineItems: BuyoutInvoiceLineItem[] = [];
+  if (remainingGoodsRub > 0) rubLineItems.push({ label: "Стоимость товара", amount: remainingGoodsRub });
+  if (remainingChinaDeliveryRub > 0) rubLineItems.push({ label: "Доставка по Китаю", amount: remainingChinaDeliveryRub });
+  if (remainingSearchServiceRub > 0) {
+    rubLineItems.push({
       label: `Услуга поиска товара (${QUOTE_TYPE_LABEL[quote.quoteType] ?? quote.quoteType})`,
-      amount: quote.searchServiceFeeRub,
-    },
-  ];
-  if (quote.isCustomProduction) {
-    rubLineItems.push({ label: "Производство под заказ", amount: quote.customProductionFeeRub });
+      amount: remainingSearchServiceRub,
+    });
   }
-  rubLineItems.push({ label: `Организация выкупа (${quote.buyoutCommissionPercent}%)`, amount: quote.buyoutCommissionRub });
-  for (const service of quote.attachedServices) {
-    rubLineItems.push({ label: service.name, amount: service.priceRub });
+  if (remainingCustomProductionRub > 0) rubLineItems.push({ label: "Производство под заказ", amount: remainingCustomProductionRub });
+  if (remainingBuyoutCommissionRub > 0) {
+    rubLineItems.push({ label: `Организация выкупа (${quote.buyoutCommissionPercent}%)`, amount: remainingBuyoutCommissionRub });
+  }
+  if (remainingAttachedServicesRub > 0) {
+    if (alreadyPaidRub.attachedServices > 0) {
+      // Partially paid — the payment only tracks one lump "Доп. услуги"
+      // category (not per-named-service), so there's no way to say exactly
+      // which named service the remainder belongs to. Falls back to one
+      // combined line instead of the itemized list below.
+      rubLineItems.push({ label: "Доп. услуги (остаток)", amount: remainingAttachedServicesRub });
+    } else {
+      for (const service of quote.attachedServices) {
+        if (service.priceRub > 0) rubLineItems.push({ label: service.name, amount: service.priceRub });
+      }
+    }
   }
 
-  const totalAmountRub = quote.totalRub - quote.cargoDeliveryRub;
+  const totalAmountRub = rubLineItems.reduce((sum, item) => sum + item.amount, 0);
 
   if (currency === "rub") {
     return { lineItems: rubLineItems, totalAmount: totalAmountRub, rateNote: null };
@@ -99,26 +180,34 @@ interface BuyoutInvoiceRowAmounts {
   totalAmount: number;
 }
 
-// Same ₽→$→USDT conversion as buildBuyoutInvoiceAmounts above, but keeps
-// each category as its own field instead of a flat labeled list — used by
-// the compact "Счёт на выкуп списком" table (one row per quote, fixed
-// columns), where a dynamic per-quote label list doesn't fit a table's
-// fixed column set. See lib/desk-services/buyout-invoice-list-pdf.tsx.
+// Same ₽→$→USDT conversion as buildBuyoutInvoiceAmounts above (including
+// the same already-paid-per-category subtraction), but keeps each category
+// as its own field instead of a flat labeled list — used by the compact
+// "Счёт на выкуп списком" table (one row per quote, fixed columns), where
+// a dynamic per-quote label list doesn't fit a table's fixed column set.
+// See lib/desk-services/buyout-invoice-list-pdf.tsx.
 function buildBuyoutInvoiceRowAmounts(
   quote: BuyoutInvoiceQuoteInput,
   currency: BuyoutInvoiceCurrency,
   usdt: { usdtRateCny: number } | null,
+  alreadyPaidRub: AlreadyPaidRubByCategory = NOTHING_PAID,
 ): BuyoutInvoiceRowAmounts {
-  const attachedServicesRub = quote.attachedServices.reduce((sum, s) => sum + s.priceRub, 0);
-  const rub: Omit<BuyoutInvoiceRowAmounts, "totalAmount"> & { totalAmountRub: number } = {
-    totalPriceAmount: quote.totalPriceRub,
-    chinaDeliveryAmount: quote.chinaDeliveryRub,
-    searchServiceAmount: quote.searchServiceFeeRub,
-    customProductionAmount: quote.isCustomProduction ? quote.customProductionFeeRub : 0,
-    buyoutCommissionAmount: quote.buyoutCommissionRub,
-    attachedServicesAmount: attachedServicesRub,
-    totalAmountRub: quote.totalRub - quote.cargoDeliveryRub,
+  const attachedServicesTotalRub = quote.attachedServices.reduce((sum, s) => sum + s.priceRub, 0);
+  const rub = {
+    totalPriceAmount: Math.max(0, quote.totalPriceRub - alreadyPaidRub.goods),
+    chinaDeliveryAmount: Math.max(0, quote.chinaDeliveryRub - alreadyPaidRub.chinaDelivery),
+    searchServiceAmount: Math.max(0, quote.searchServiceFeeRub - alreadyPaidRub.searchService),
+    customProductionAmount: quote.isCustomProduction ? Math.max(0, quote.customProductionFeeRub - alreadyPaidRub.customProduction) : 0,
+    buyoutCommissionAmount: Math.max(0, quote.buyoutCommissionRub - alreadyPaidRub.buyoutCommission),
+    attachedServicesAmount: Math.max(0, attachedServicesTotalRub - alreadyPaidRub.attachedServices),
   };
+  const totalAmountRub =
+    rub.totalPriceAmount +
+    rub.chinaDeliveryAmount +
+    rub.searchServiceAmount +
+    rub.customProductionAmount +
+    rub.buyoutCommissionAmount +
+    rub.attachedServicesAmount;
 
   let divisor = 1;
   if (currency === "usd") {
@@ -137,9 +226,9 @@ function buildBuyoutInvoiceRowAmounts(
     customProductionAmount: rub.customProductionAmount / divisor,
     buyoutCommissionAmount: rub.buyoutCommissionAmount / divisor,
     attachedServicesAmount: rub.attachedServicesAmount / divisor,
-    totalAmount: rub.totalAmountRub / divisor,
+    totalAmount: totalAmountRub / divisor,
   };
 }
 
-export { buildBuyoutInvoiceAmounts, buildBuyoutInvoiceRowAmounts };
-export type { BuyoutInvoiceQuoteInput, BuyoutInvoiceAmounts, BuyoutInvoiceRowAmounts };
+export { buildBuyoutInvoiceAmounts, buildBuyoutInvoiceRowAmounts, sumAlreadyPaidRubByCategory };
+export type { BuyoutInvoiceQuoteInput, BuyoutInvoiceAmounts, BuyoutInvoiceRowAmounts, AlreadyPaidRubByCategory };

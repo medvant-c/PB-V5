@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
   const { id } = await params;
   const quote = await prisma.quote.findUnique({ where: { id }, include: { client: true } });
-  if (!quote) {
+  if (!quote || quote.deletedAt) {
     return Response.json({ error: "Просчёт не найден." }, { status: 404 });
   }
   if (!(await canAccessManagerQuote(session, quote.managerId))) {

@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Этот клиент вне вашей зоны видимости." }, { status: 403 });
   }
 
-  const quotes = await prisma.quote.findMany({ where: { id: { in: quoteIds as string[] } } });
+  const quotes = await prisma.quote.findMany({ where: { id: { in: quoteIds as string[] }, deletedAt: null } });
   if (quotes.length !== quoteIds.length) {
     return Response.json({ error: "Некоторые просчёты не найдены." }, { status: 400 });
   }

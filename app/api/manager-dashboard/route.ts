@@ -16,6 +16,7 @@ import {
   estimatedFxProfitRub,
   investorCargoShareRub,
   splitRemainderRub,
+  sumAlreadyPaidPremium,
   type CnyProfitTiers,
 } from "@/lib/desk-services/quote-profit";
 
@@ -107,6 +108,12 @@ interface QuoteForStats {
     vladShareRatePercentOverride: unknown;
     name: string;
   };
+  // Premium already credited via "Счёт на выкуп" partial payments (see
+  // QuotePaymentAllocation in prisma/schema.prisma) — summed per-bucket by
+  // sumAlreadyPaidPremium and threaded through factualManagerPremiumRub so
+  // confirm-buyout's later full-quote premium never double-pays for the
+  // same profit. See PB-V5 chat 2026-08-04.
+  paymentAllocations: { category: string; premiumRub: unknown }[];
 }
 
 function summarize(
@@ -180,6 +187,7 @@ function summarize(
 
     // Услуги — gated on buyoutFactConfirmed (a flag, independent of
     // Quote.status; see status/route.ts), not on any particular status.
+    const alreadyPaidPremium = sumAlreadyPaidPremium(q.paymentAllocations);
     if (q.buyoutFactConfirmed) {
       const { proscetRub, buyoutRub, discountRub } = factualSourceProfits(q);
       factualProscetRub += proscetRub;
@@ -189,7 +197,17 @@ function summarize(
       // recomputed live — see schema comment on that field. Просчёт gets
       // the full 100% boost for a self-sourced client; Выкуп/Скидка get a
       // smaller 50% boost — not the same rate as Просчёт.
-      factualPremiumRub += factualManagerPremiumRub({ proscetRub, buyoutRub, discountRub }, Boolean(q.buyoutSelfSourcedBoost), premiumRates);
+      // alreadyPaidPremium: whatever a "Счёт на выкуп" partial payment
+      // already credited before this quote reached buyoutFactConfirmed —
+      // factualManagerPremiumRub takes the max of "full formula" vs.
+      // "already paid" per bucket so it's never counted twice. See PB-V5
+      // chat 2026-08-04.
+      factualPremiumRub += factualManagerPremiumRub(
+        { proscetRub, buyoutRub, discountRub },
+        Boolean(q.buyoutSelfSourcedBoost),
+        premiumRates,
+        alreadyPaidPremium,
+      );
     } else {
       const { proscetRub, buyoutRub } = estimatedSourceProfits(q);
       potentialProscetRub += proscetRub;
@@ -198,7 +216,16 @@ function summarize(
       const isBoosted = isSelfSourcedFor(q.client, q.managerId);
       const proscetRate = isBoosted ? premiumRates.selfSourcedProscetRatePercent : premiumRates.normalRatePercent;
       const buyoutRate = isBoosted ? premiumRates.selfSourcedBuyoutDiscountRatePercent : premiumRates.normalRatePercent;
-      potentialPremiumRub += Math.max(0, proscetRub) * (proscetRate / 100) + Math.max(0, buyoutRub) * (buyoutRate / 100);
+      const fullProscetPotentialRub = Math.max(0, proscetRub) * (proscetRate / 100);
+      const fullBuyoutPotentialRub = Math.max(0, buyoutRub) * (buyoutRate / 100);
+      // Not yet confirmed but already partially paid — that slice is real,
+      // credited premium, so it counts as FACTUAL here even though the
+      // quote overall is still "potential", and is subtracted out of the
+      // potential bucket so the two never overlap.
+      factualPremiumRub += alreadyPaidPremium.proscetRub + alreadyPaidPremium.buyoutRub;
+      potentialPremiumRub +=
+        Math.max(0, fullProscetPotentialRub - alreadyPaidPremium.proscetRub) +
+        Math.max(0, fullBuyoutPotentialRub - alreadyPaidPremium.buyoutRub);
     }
 
     // Карго — gated on cargoBonusRatePercent being locked in, which only
@@ -284,7 +311,7 @@ export async function GET(req: NextRequest) {
 
   const visibleManagerIds = await getVisibleManagerIds(session);
   const quotes = await prisma.quote.findMany({
-    where: visibleManagerIds === "all" ? undefined : { managerId: { in: visibleManagerIds } },
+    where: { deletedAt: null, ...(visibleManagerIds === "all" ? {} : { managerId: { in: visibleManagerIds } }) },
     select: {
       id: true,
       managerId: true,
@@ -315,6 +342,7 @@ export async function GET(req: NextRequest) {
       displayId: true,
       productName: true,
       client: { select: { selfSourcedConfirmed: true, createdByManagerId: true, vladShareRatePercentOverride: true, name: true } },
+      paymentAllocations: { select: { category: true, premiumRub: true } },
     },
   });
 
@@ -528,7 +556,9 @@ export async function GET(req: NextRequest) {
             q.cargoBonusRatePercent !== null && q.cargoBonusRatePercent !== undefined && Number(q.cargoBonusRatePercent) > 0
               ? flatCargoBonusRub(q, cargoRates)
               : 0;
-          const managerPremium = factualManagerPremiumRub(sourceProfits, Boolean(q.buyoutSelfSourcedBoost), premiumRates) + cargoBonus;
+          const managerPremium =
+            factualManagerPremiumRub(sourceProfits, Boolean(q.buyoutSelfSourcedBoost), premiumRates, sumAlreadyPaidPremium(q.paymentAllocations)) +
+            cargoBonus;
           const netTotal = Math.max(0, grossTotal - managerPremium);
           const rate = effectiveInvestorRatePercent(q.client, ratePercent);
           return sum + netTotal * (rate / 100);

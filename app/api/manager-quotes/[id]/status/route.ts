@@ -32,7 +32,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
   const { id } = await params;
   const existing = await prisma.quote.findUnique({ where: { id }, include: { client: true } });
-  if (!existing) return Response.json({ error: "Просчёт не найден." }, { status: 404 });
+  if (!existing || existing.deletedAt) return Response.json({ error: "Просчёт не найден." }, { status: 404 });
   if (!(await canAccessManagerQuote(session, existing.managerId))) {
     return Response.json({ error: "Нет доступа к этому просчёту." }, { status: 403 });
   }

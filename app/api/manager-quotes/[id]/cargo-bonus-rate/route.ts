@@ -36,7 +36,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     where: { id },
     include: { client: { select: { selfSourcedConfirmed: true, createdByManagerId: true } } },
   });
-  if (!quote) {
+  if (!quote || quote.deletedAt) {
     return Response.json({ error: "Просчёт не найден." }, { status: 404 });
   }
   if (quote.cargoBonusRatePercent === null) {

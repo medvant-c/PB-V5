@@ -4,7 +4,7 @@ import { canAccessManagerClient } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { renderBuyoutInvoiceListPdf, type BuyoutInvoiceListRow } from "@/lib/desk-services/buyout-invoice-list-pdf";
 import type { BuyoutInvoiceCurrency } from "@/lib/desk-services/buyout-invoice-pdf";
-import { buildBuyoutInvoiceRowAmounts } from "@/lib/desk-services/buyout-invoice-calc";
+import { buildBuyoutInvoiceRowAmounts, sumAlreadyPaidRubByCategory } from "@/lib/desk-services/buyout-invoice-calc";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -65,19 +65,19 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   const quotes = await prisma.quote.findMany({
-    where: { id: { in: quoteIds }, clientId },
+    where: { id: { in: quoteIds }, clientId, deletedAt: null },
     orderBy: { createdAt: "asc" },
   });
   if (quotes.length === 0) {
     return Response.json({ error: "Просчёты не найдены." }, { status: 404 });
   }
 
-  const rows: BuyoutInvoiceListRow[] = await Promise.all(
+  const allRows: BuyoutInvoiceListRow[] = await Promise.all(
     quotes.map(async (quote) => {
-      const attachedServiceRecords = await prisma.quoteAttachedService.findMany({
-        where: { quoteId: quote.id },
-        orderBy: { createdAt: "asc" },
-      });
+      const [attachedServiceRecords, paymentAllocations] = await Promise.all([
+        prisma.quoteAttachedService.findMany({ where: { quoteId: quote.id }, orderBy: { createdAt: "asc" } }),
+        prisma.quotePaymentAllocation.findMany({ where: { quoteId: quote.id }, select: { category: true, amountRub: true } }),
+      ]);
 
       const amounts = buildBuyoutInvoiceRowAmounts(
         {
@@ -97,6 +97,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         },
         currency,
         usdt,
+        sumAlreadyPaidRubByCategory(paymentAllocations),
       );
 
       return {
@@ -109,9 +110,14 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     }),
   );
 
+  const rows = allRows.filter((row) => row.totalAmount > 0);
+  if (rows.length === 0) {
+    return Response.json({ error: "Все выбранные просчёты уже полностью оплачены — выставлять больше нечего." }, { status: 400 });
+  }
+
   const buffer = await renderBuyoutInvoiceListPdf({ client: { name: client.name, company: client.company }, rows, currency });
 
-  const fileName = `Счета на выкуп списком — ${client.name} (${quotes.length}, ${CURRENCY_FILE_SUFFIX[currency]}).pdf`;
+  const fileName = `Счета на выкуп списком — ${client.name} (${rows.length}, ${CURRENCY_FILE_SUFFIX[currency]}).pdf`;
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/pdf",

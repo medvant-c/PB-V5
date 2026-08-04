@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
 
   const quotes = await prisma.quote.findMany({
     where: {
+      deletedAt: null,
       ...(clientId ? { clientId } : {}),
       ...(visibleManagerIds === "all" ? {} : { managerId: { in: visibleManagerIds } }),
     },

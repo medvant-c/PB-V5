@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
 
   const [pendingBuyouts, pendingClients, pendingCargoRates, pendingCnyRates, pendingUsdRates, pendingBuyoutCommissions, pendingUnassignedClients] = await Promise.all([
     prisma.quote.findMany({
-      where: { ...managerFilter, status: { in: POST_BUYOUT_STATUSES }, buyoutFactConfirmed: false },
+      where: { ...managerFilter, status: { in: POST_BUYOUT_STATUSES }, buyoutFactConfirmed: false, deletedAt: null },
       orderBy: { statusChangedAt: "asc" },
       select: {
         id: true,
@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
     // sign-off — the real supplier cost + a proof screenshot — before
     // profit accounting for it can be trusted. See PB-V5 chat 2026-07-30.
     prisma.quote.findMany({
-      where: { ...managerFilter, cargoRateUsdOverride: { not: null }, cargoRateOverrideConfirmed: false },
+      where: { ...managerFilter, cargoRateUsdOverride: { not: null }, cargoRateOverrideConfirmed: false, deletedAt: null },
       orderBy: { createdAt: "asc" },
       select: {
         id: true,
@@ -93,7 +93,7 @@ export async function GET(req: NextRequest) {
     // owner/senior sign-off — proof it's a real agreed rate. See PB-V5
     // chat 2026-07-30.
     prisma.quote.findMany({
-      where: { ...managerFilter, cnyRateRubOverride: { not: null }, cnyRateOverrideConfirmed: false },
+      where: { ...managerFilter, cnyRateRubOverride: { not: null }, cnyRateOverrideConfirmed: false, deletedAt: null },
       orderBy: { createdAt: "asc" },
       select: {
         id: true,
@@ -110,7 +110,7 @@ export async function GET(req: NextRequest) {
     // owner/senior sign-off — proof it's a real agreed rate. See PB-V5
     // chat 2026-08-02.
     prisma.quote.findMany({
-      where: { ...managerFilter, usdRateRubOverride: { not: null }, usdRateOverrideConfirmed: false },
+      where: { ...managerFilter, usdRateRubOverride: { not: null }, usdRateOverrideConfirmed: false, deletedAt: null },
       orderBy: { createdAt: "asc" },
       select: {
         id: true,
@@ -127,7 +127,7 @@ export async function GET(req: NextRequest) {
     // sign-off — proof it's a real agreed commission, not made up. See
     // PB-V5 chat 2026-07-31.
     prisma.quote.findMany({
-      where: { ...managerFilter, buyoutCommissionPercentOverride: { not: null }, buyoutCommissionOverrideConfirmed: false },
+      where: { ...managerFilter, buyoutCommissionPercentOverride: { not: null }, buyoutCommissionOverrideConfirmed: false, deletedAt: null },
       orderBy: { createdAt: "asc" },
       select: {
         id: true,

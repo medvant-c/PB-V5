@@ -13,6 +13,7 @@ import {
   investorCargoShareRub,
   isSelfSourcedFor,
   splitRemainderRub,
+  sumAlreadyPaidPremium,
   type CnyProfitTiers,
   type InvestorConfig,
   type QuoteProfitFields,
@@ -71,12 +72,17 @@ const PROFIT_SELECT = {
       vladShareRatePercentOverride: true,
     },
   },
+  // See sumAlreadyPaidPremium in quote-profit.ts — premium already
+  // credited via "Счёт на выкуп" partial payments, subtracted here so this
+  // report never double-counts it once the quote reaches
+  // buyoutFactConfirmed. See PB-V5 chat 2026-08-04.
+  paymentAllocations: { select: { category: true, premiumRub: true } },
 } as const;
 
 type ProfitQuote = NonNullable<Awaited<ReturnType<typeof fetchProfitQuotes>>>[number];
 
 function fetchProfitQuotes(quoteIds: string[]) {
-  return prisma.quote.findMany({ where: { id: { in: quoteIds } }, select: PROFIT_SELECT });
+  return prisma.quote.findMany({ where: { id: { in: quoteIds }, deletedAt: null }, select: PROFIT_SELECT });
 }
 
 interface PremiumRates {
@@ -110,14 +116,29 @@ function computeQuoteBreakdown(
   const rawTotalRub = proscetRub + buyoutRub + discountRub + fx + cargo;
   const clampedTotalRub = Math.max(0, rawTotalRub);
 
+  // See sumAlreadyPaidPremium in quote-profit.ts — premium already credited
+  // via "Счёт на выкуп" partial payments before this quote reached
+  // buyoutFactConfirmed (or, if it's still open, before now).
+  const alreadyPaidPremium = sumAlreadyPaidPremium(q.paymentAllocations);
   let managerPremiumRub: number;
   if (q.buyoutFactConfirmed) {
-    managerPremiumRub = factualManagerPremiumRub({ proscetRub, buyoutRub, discountRub }, Boolean(q.buyoutSelfSourcedBoost), premiumRates);
+    managerPremiumRub = factualManagerPremiumRub(
+      { proscetRub, buyoutRub, discountRub },
+      Boolean(q.buyoutSelfSourcedBoost),
+      premiumRates,
+      alreadyPaidPremium,
+    );
   } else {
     const isBoosted = isSelfSourcedFor(q.client, q.managerId);
     const proscetRate = isBoosted ? premiumRates.selfSourcedProscetRatePercent : premiumRates.normalRatePercent;
     const buyoutRate = isBoosted ? premiumRates.selfSourcedBuyoutDiscountRatePercent : premiumRates.normalRatePercent;
-    managerPremiumRub = Math.max(0, proscetRub) * (proscetRate / 100) + Math.max(0, buyoutRub) * (buyoutRate / 100);
+    const fullProscetPotentialRub = Math.max(0, proscetRub) * (proscetRate / 100);
+    const fullBuyoutPotentialRub = Math.max(0, buyoutRub) * (buyoutRate / 100);
+    managerPremiumRub =
+      alreadyPaidPremium.proscetRub +
+      alreadyPaidPremium.buyoutRub +
+      Math.max(0, fullProscetPotentialRub - alreadyPaidPremium.proscetRub) +
+      Math.max(0, fullBuyoutPotentialRub - alreadyPaidPremium.buyoutRub);
   }
   // Cargo bonus locks in only at handed_to_client (cargoBonusRatePercent
   // set) — before that it's a live "if this quote were self-sourced today"

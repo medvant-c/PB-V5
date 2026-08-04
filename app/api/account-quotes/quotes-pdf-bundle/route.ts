@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   }
 
   const quotes = await prisma.quote.findMany({
-    where: { id: { in: quoteIds }, clientId },
+    where: { id: { in: quoteIds }, clientId, deletedAt: null },
     include: { client: true },
     orderBy: { createdAt: "asc" },
   });

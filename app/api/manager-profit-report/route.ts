@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
   const [quotes, managers, clients] = await Promise.all([
     prisma.quote.findMany({
       where: {
+        deletedAt: null,
         ...(managerIdParam ? { managerId: managerIdParam } : {}),
         ...(clientIdParam ? { clientId: clientIdParam } : {}),
         ...(statusParam && isQuoteStatus(statusParam) ? { status: statusParam } : {}),

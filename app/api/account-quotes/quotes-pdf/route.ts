@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: "Клиент не найден." }, { status: 404 });
   }
 
-  const quotes = await prisma.quote.findMany({ where: { clientId }, orderBy: { createdAt: "asc" } });
+  const quotes = await prisma.quote.findMany({ where: { clientId, deletedAt: null }, orderBy: { createdAt: "asc" } });
   if (quotes.length === 0) {
     return Response.json({ error: "Просчётов пока нет." }, { status: 404 });
   }

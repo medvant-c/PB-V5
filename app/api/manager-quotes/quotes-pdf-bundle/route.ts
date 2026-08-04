@@ -35,6 +35,7 @@ export async function POST(req: NextRequest) {
   const quotes = await prisma.quote.findMany({
     where: {
       id: { in: quoteIds },
+      deletedAt: null,
       ...(visibleManagerIds === "all" ? {} : { managerId: { in: visibleManagerIds } }),
     },
     include: { client: true },

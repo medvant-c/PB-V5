@@ -1,21 +1,10 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { prisma } from "@/lib/prisma";
+import { getOrCreateBuyoutIncomeCategory } from "@/lib/desk-services/cash-categories";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
-}
-
-// The single income статья that confirm-buyout's client-payment entries
-// land in — flagged (not name-matched) so the owner can rename it freely.
-// Self-heals if the flagged row is ever missing (e.g. deleted by mistake)
-// instead of hard-failing the whole confirmation.
-async function getOrCreateBuyoutIncomeCategory() {
-  const existing = await prisma.cashCategory.findFirst({ where: { type: "income", isBuyoutIncomeDefault: true } });
-  if (existing) return existing;
-  return prisma.cashCategory.create({
-    data: { type: "income", name: "Приход от клиента на выкуп и услуги", isBuyoutIncomeDefault: true },
-  });
 }
 
 // Owner/senior only — deliberately excludes "manager" (including the
@@ -61,7 +50,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     where: { id },
     include: { client: { select: { id: true, createdByManagerId: true, selfSourcedConfirmed: true } } },
   });
-  if (!quote) {
+  if (!quote || quote.deletedAt) {
     return Response.json({ error: "Просчёт не найден." }, { status: 404 });
   }
 

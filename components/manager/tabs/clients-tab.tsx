@@ -57,6 +57,7 @@ import { EmptyState } from "@/components/desk/empty-state";
 import { QuoteDialog } from "@/components/manager/quote-dialog";
 import { ClientFilesPanel } from "@/components/manager/client-files-panel";
 import { ContainerShipmentDialog } from "@/components/manager/container-shipment-dialog";
+import { CreatePaymentDialog } from "@/components/manager/create-payment-dialog";
 import {
   QUOTE_STATUSES,
   QUOTE_STATUS_LABEL,
@@ -470,6 +471,7 @@ function ClientQuotes({
   const [bulkBuyoutInvoiceCurrency, setBulkBuyoutInvoiceCurrency] = useState<"rub" | "usd" | "usdt" | null>(null);
   const [bulkBuyoutInvoiceError, setBulkBuyoutInvoiceError] = useState<string | null>(null);
   const [containerDialogOpen, setContainerDialogOpen] = useState(false);
+  const [createPaymentDialogOpen, setCreatePaymentDialogOpen] = useState(false);
   // The toolbar below used to be seven-plus separate pill buttons in a row
   // (unreadable once the client card moved into the narrower master-detail
   // right pane) — collapsed into two menus: "Экспорт" (read-only exports)
@@ -1392,6 +1394,21 @@ function ClientQuotes({
                 Сформировать контейнер ЖД {selectedIds.length > 0 && `(${selectedIds.length})`}
               </button>
             )}
+            {canConfirmBuyout && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCreatePaymentDialogOpen(true);
+                  setActionsMenuOpen(false);
+                }}
+                disabled={selectedIds.length === 0}
+                title="Зафиксировать оплату клиента и распределить её по услугам выбранных просчётов"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Banknote className="h-3.5 w-3.5 shrink-0" />
+                Приходный ордер {selectedIds.length > 0 && `(${selectedIds.length})`}
+              </button>
+            )}
 
             <div className="my-1 border-t border-border" />
 
@@ -2177,6 +2194,18 @@ function ClientQuotes({
             }))}
           isOwner={allManagers !== null}
           onDone={() => setSelectedIds([])}
+        />
+      )}
+
+      {canConfirmBuyout && (
+        <CreatePaymentDialog
+          open={createPaymentDialogOpen}
+          onOpenChange={setCreatePaymentDialogOpen}
+          quoteIds={selectedIds}
+          onSaved={() => {
+            setSelectedIds([]);
+            load();
+          }}
         />
       )}
     </div>

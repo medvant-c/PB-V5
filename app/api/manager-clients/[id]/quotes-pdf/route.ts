@@ -29,7 +29,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: "Этот клиент вне вашей зоны видимости." }, { status: 403 });
   }
 
-  const quotes = await prisma.quote.findMany({ where: { clientId }, orderBy: { createdAt: "asc" } });
+  const quotes = await prisma.quote.findMany({ where: { clientId, deletedAt: null }, orderBy: { createdAt: "asc" } });
   if (quotes.length === 0) {
     return Response.json({ error: "У клиента пока нет просчётов." }, { status: 404 });
   }

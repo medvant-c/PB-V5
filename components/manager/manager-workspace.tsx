@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, CheckSquare, Database, FileBarChart, FileText, Home, LogOut, Package, Settings, Tag, UserCog, Users, UsersRound, Wallet } from "lucide-react";
+import { Briefcase, CheckSquare, Database, FileBarChart, FileText, Home, LogOut, Package, Settings, Tag, Trash2, UserCog, Users, UsersRound, Wallet } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ManagerClientsTab } from "@/components/manager/tabs/clients-tab";
@@ -11,6 +11,7 @@ import { ManagerStaffTab } from "@/components/manager/tabs/staff-tab";
 import { ManagerPriceListTab } from "@/components/manager/tabs/price-list-tab";
 import { ManagerDatabaseTab } from "@/components/manager/tabs/database-tab";
 import { ManagerConfirmationsTab } from "@/components/manager/tabs/confirmations-tab";
+import { ManagerTrashTab } from "@/components/manager/tabs/trash-tab";
 import { ManagerCashTab } from "@/components/manager/tabs/cash-tab";
 import { ManagerFulfillmentTab } from "@/components/manager/tabs/fulfillment-tab";
 import { ManagerSettingsTab } from "@/components/manager/tabs/settings-tab";
@@ -54,6 +55,7 @@ const ALL_SECTIONS = [
   { id: "all-quotes", label: "Все просчёты", icon: FileText, Component: ManagerAllQuotesTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentTab, ownerOnly: false, seniorOrOwnerOnly: false },
   { id: "confirmations", label: "Подтверждения", icon: CheckSquare, Component: ManagerConfirmationsTab, ownerOnly: false, seniorOrOwnerOnly: true },
+  { id: "trash", label: "Корзина", icon: Trash2, Component: ManagerTrashTab, ownerOnly: true, seniorOrOwnerOnly: false },
   { id: "price-list", label: "Прайс-лист", icon: Tag, Component: ManagerPriceListTab, ownerOnly: true, seniorOrOwnerOnly: false },
   { id: "cash", label: "Отчёты по дням", icon: Wallet, Component: ManagerCashTab, ownerOnly: true, seniorOrOwnerOnly: false },
   { id: "profit-report", label: "Отчёт о прибыли", icon: FileBarChart, Component: ManagerProfitReportTab, ownerOnly: true, seniorOrOwnerOnly: false },

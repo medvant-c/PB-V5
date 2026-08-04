@@ -46,7 +46,7 @@ export default async function AccountPage() {
           orderBy: { uploadedAt: "desc" },
         });
 
-  const quotes = await prisma.quote.findMany({ where: { clientId }, orderBy: { createdAt: "desc" } });
+  const quotes = await prisma.quote.findMany({ where: { clientId, deletedAt: null }, orderBy: { createdAt: "desc" } });
   const [quotePhotos, quoteAttachedServices] = await Promise.all([
     quotes.length === 0
       ? []

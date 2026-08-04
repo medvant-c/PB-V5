@@ -3,7 +3,7 @@ import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canAccessManagerQuote } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { renderBuyoutInvoicePdf, type BuyoutInvoiceCurrency } from "@/lib/desk-services/buyout-invoice-pdf";
-import { buildBuyoutInvoiceAmounts } from "@/lib/desk-services/buyout-invoice-calc";
+import { buildBuyoutInvoiceAmounts, sumAlreadyPaidRubByCategory } from "@/lib/desk-services/buyout-invoice-calc";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -32,17 +32,18 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
   const { id } = await params;
   const quote = await prisma.quote.findUnique({ where: { id }, include: { client: true } });
-  if (!quote) {
+  if (!quote || quote.deletedAt) {
     return Response.json({ error: "Просчёт не найден." }, { status: 404 });
   }
   if (!(await canAccessManagerQuote(session, quote.managerId))) {
     return Response.json({ error: "Нет доступа к этому просчёту." }, { status: 403 });
   }
 
-  const attachedServiceRecords = await prisma.quoteAttachedService.findMany({
-    where: { quoteId: quote.id },
-    orderBy: { createdAt: "asc" },
-  });
+  const [attachedServiceRecords, paymentAllocations] = await Promise.all([
+    prisma.quoteAttachedService.findMany({ where: { quoteId: quote.id }, orderBy: { createdAt: "asc" } }),
+    prisma.quotePaymentAllocation.findMany({ where: { quoteId: quote.id }, select: { category: true, amountRub: true } }),
+  ]);
+  const alreadyPaidRub = sumAlreadyPaidRubByCategory(paymentAllocations);
 
   let usdt: { usdtRateCny: number } | null = null;
   if (currency === "usdt") {
@@ -80,7 +81,12 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     },
     currency,
     usdt,
+    alreadyPaidRub,
   );
+
+  if (lineItems.length === 0) {
+    return Response.json({ error: "Этот просчёт уже полностью оплачен — выставлять больше нечего." }, { status: 400 });
+  }
 
   const buffer = await renderBuyoutInvoicePdf({
     displayId: quote.displayId,

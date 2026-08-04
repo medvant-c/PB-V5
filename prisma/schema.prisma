@@ -263,11 +263,13 @@ model Manager {
 
   clients        Client[]
   quotes         Quote[]
+  deletedQuotes  Quote[] @relation("QuoteDeletedBy")
   tariffUpdates  TariffSettings[]
   systemSettingsUpdates SystemSettings[]
   investorUpdates Investor[]
   uploadedFiles  DeskFile[]
   cashOrders     CashOrder[]
+  quotePaymentAllocations QuotePaymentAllocation[]
   cashOpeningBalanceUpdates CashOpeningBalance[]
   fulfillmentOrders FulfillmentOrder[]
   completedFulfillmentServices FulfillmentOrderItemService[]
@@ -635,6 +637,18 @@ model Quote {
   // Bumped on every status change (not just createdAt) — lets the UI show
   // "stuck in progress for >24h" without a separate history table.
   statusChangedAt DateTime    @default(now())
+  // Soft delete — DELETE /api/manager-quotes/[id] sets this instead of
+  // actually removing the row, so a deleted quote can sit in "Корзина" for
+  // 14 days and be restored (owner-only — see confirm-restore semantics in
+  // app/api/manager-quotes/[id]/restore/route.ts) before
+  // scripts/purge-deleted-quotes.sh permanently removes it. Every "normal"
+  // Quote query in the app must filter deletedAt: null — a soft-deleted
+  // quote must vanish from every list, dashboard total, and profit/premium
+  // calculation immediately, not just the visible quote lists. See PB-V5
+  // chat 2026-08-04.
+  deletedAt           DateTime?
+  deletedByManagerId  String?
+  deletedByManager    Manager?  @relation("QuoteDeletedBy", fields: [deletedByManagerId], references: [id])
   // Set ONCE, the first time this quote ever reaches pending_approval —
   // never overwritten by later status changes (even a rollback or a later
   // needs_replacement/rejected doesn't clear it). Drives the owner's
@@ -924,6 +938,7 @@ model Quote {
   attachedServices QuoteAttachedService[]
   fulfillmentOrders FulfillmentOrder[]
   containerShipmentItems ContainerShipmentItem[]
+  paymentAllocations QuotePaymentAllocation[]
 
   @@index([clientId])
   @@index([managerId])
@@ -1170,9 +1185,69 @@ model CashOrder {
   // Back-relation for Quote.clientPaymentCashOrder — a quote's confirmed
   // client-payment fact auto-creates/updates exactly one CashOrder.
   linkedQuote Quote?
+  // One order created from a quote card (see QuotePaymentAllocation below)
+  // can cover pieces of several quotes at once — a plain CashOrder.clientId
+  // still identifies who paid, but WHICH quotes/line items it covers lives
+  // in these rows instead.
+  paymentAllocations QuotePaymentAllocation[]
 
   @@index([date])
   @@index([categoryId])
+}
+
+// Which line item of a "Счёт на выкуп" a payment covers — same six
+// categories buildBuyoutInvoiceAmounts/buildBuyoutInvoiceRowAmounts already
+// split a quote into (lib/desk-services/buyout-invoice-calc.ts), minus
+// cargo (never billed through this invoice — see that file's own comment).
+enum QuotePaymentCategory {
+  goods              // Стоимость товара
+  china_delivery     // Доставка по Китаю
+  search_service     // Услуга поиска
+  custom_production  // Производство под заказ
+  buyout_commission  // Комиссия за выкуп
+  attached_services  // Доп. услуги (lump sum, not itemized per service row)
+}
+
+// One row per (quote, category) slice a single CashOrder actually paid for
+// — a руководитель/старший менеджер creating a приходный ордер from a
+// quote card can split ONE real payment across several quotes/categories in
+// one dialog (e.g. one bank transfer covering "услуга поиска" on 3
+// different quotes), so the link lives here rather than on CashOrder
+// itself (which only has room for one clientId, not a whole allocation
+// breakdown). "How much of category X has quote Y been paid so far" is
+// always DERIVED by summing these rows — never cached — same "derive, don't
+// cache a running total" convention as CashOpeningBalance's own comment.
+// Two things read this sum:
+//   1. The buyout invoice (buildBuyoutInvoiceAmounts) subtracts it from
+//      each category's full price, so a re-issued счёт only bills the
+//      remaining balance — see PB-V5 chat 2026-08-04.
+//   2. Manager premium (lib/desk-services/quote-profit.ts) — premiumRub
+//      below is frozen at the moment of THIS allocation (self-sourced
+//      status looked up live then, never recomputed later, same "lock in
+//      at the real-money event" rule as buyoutSelfSourcedBoost), and later
+//      confirm-buyout's own premium calculation must subtract what's
+//      already been paid out here so the same profit is never premiumed
+//      twice.
+model QuotePaymentAllocation {
+  id          String    @id @default(cuid())
+  cashOrderId String
+  cashOrder   CashOrder @relation(fields: [cashOrderId], references: [id], onDelete: Cascade)
+  quoteId     String
+  quote       Quote     @relation(fields: [quoteId], references: [id])
+  category    QuotePaymentCategory
+  // How much of this order's ₽ amount went to this quote's this category —
+  // always ≤ that category's own remaining unpaid balance at creation time
+  // (enforced by the creating route, not the schema).
+  amountRub   Decimal
+  // Manager premium this specific slice generated, frozen at creation —
+  // see the model comment above for why this is never recomputed later.
+  premiumRub  Decimal
+  createdByManagerId String
+  createdByManager   Manager @relation(fields: [createdByManagerId], references: [id])
+  createdAt   DateTime  @default(now())
+
+  @@index([quoteId])
+  @@index([cashOrderId])
 }
 
 // Single anchor row: "as of this date, the balance was this many CNY" —

@@ -29,7 +29,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
   const { id } = await params;
   const quote = await prisma.quote.findUnique({ where: { id } });
-  if (!quote) {
+  if (!quote || quote.deletedAt) {
     return Response.json({ error: "Просчёт не найден." }, { status: 404 });
   }
   if (quote.buyoutCommissionPercentOverride === null) {

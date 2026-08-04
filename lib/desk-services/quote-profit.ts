@@ -182,6 +182,77 @@ interface ManagerPremiumRates {
   selfSourcedBuyoutDiscountRatePercent: number;
 }
 
+// Which of the two premium buckets each "Счёт на выкуп" line-item category
+// (see QuotePaymentCategory in prisma/schema.prisma) falls into — search_
+// service/custom_production are exactly what proscetProfitRub() above is
+// made of, so a payment against either one earns the Просчёт rate; every
+// other category (goods/china_delivery/buyout_commission/attached_services)
+// earns the Выкуп/Скидка rate, same split confirm-buyout already applies to
+// the WHOLE quote at once. See QuotePaymentAllocation in
+// prisma/schema.prisma.
+const PROSCET_PAYMENT_CATEGORIES = new Set(["search_service", "custom_production"]);
+
+function isProscetPaymentCategory(category: string): boolean {
+  return PROSCET_PAYMENT_CATEGORIES.has(category);
+}
+
+// Which categories credit ANY premium at all when paid through a "Счёт на
+// выкуп" partial payment, before confirm-buyout — search_service/
+// custom_production/buyout_commission/attached_services are 100% margin
+// with zero cost-of-goods the moment the quote is priced (proscetProfitRub
+// above, and buyoutRub = buyoutCommissionRub + attachedServicesTotalRub
+// pre-confirmation per estimatedSourceProfits — the goods/china_delivery
+// terms cancel out of that residual entirely). goods and china_delivery
+// deliberately credit ZERO premium here: their real profit (quoted price
+// vs. what the factory purchase actually costs) isn't known until
+// confirm-buyout runs with the real actualBuyoutCny — crediting premium on
+// a QUOTED price now would risk paying out on a margin that doesn't
+// materialize (or is smaller) once the real purchase happens. That markup,
+// if any, still reaches the manager normally at confirm-buyout — this
+// function only decides what's payable EARLY, at partial-payment time. See
+// PB-V5 chat 2026-08-04.
+const PREMIUM_ELIGIBLE_PAYMENT_CATEGORIES = new Set(["search_service", "custom_production", "buyout_commission", "attached_services"]);
+
+// Premium for ONE payment allocation, frozen at creation time (see
+// QuotePaymentAllocation.premiumRub's schema comment) — isBoosted is the
+// client's self-sourced status looked up LIVE at that moment, never
+// recomputed later, same "lock in at the real-money event" rule
+// buyoutSelfSourcedBoost already follows.
+function computePaymentAllocationPremiumRub(category: string, amountRub: number, isBoosted: boolean, rates: ManagerPremiumRates): number {
+  if (!PREMIUM_ELIGIBLE_PAYMENT_CATEGORIES.has(category)) return 0;
+  const rate = isProscetPaymentCategory(category)
+    ? isBoosted
+      ? rates.selfSourcedProscetRatePercent
+      : rates.normalRatePercent
+    : isBoosted
+      ? rates.selfSourcedBuyoutDiscountRatePercent
+      : rates.normalRatePercent;
+  return amountRub * (rate / 100);
+}
+
+interface AlreadyPaidPremium {
+  proscetRub: number;
+  buyoutRub: number;
+}
+
+// Sums QuotePaymentAllocation.premiumRub (already frozen per-allocation at
+// creation time — see that model's schema comment) into the same two
+// buckets factualManagerPremiumRub below works in, so a quote that's had
+// partial payments never gets premiumed twice: once when the payment was
+// made, again when confirm-buyout later runs its own full-quote
+// calculation. Zero allocations (the common case, nothing paid this way
+// yet) naturally returns {0,0} — every caller below is then a no-op
+// passthrough to the exact math that existed before this feature.
+function sumAlreadyPaidPremium(allocations: { category: string; premiumRub: unknown }[]): AlreadyPaidPremium {
+  let proscetRub = 0;
+  let buyoutRub = 0;
+  for (const a of allocations) {
+    if (isProscetPaymentCategory(a.category)) proscetRub += Number(a.premiumRub);
+    else buyoutRub += Number(a.premiumRub);
+  }
+  return { proscetRub, buyoutRub };
+}
+
 // The manager's premium on ONE confirmed quote's Просчёт/Выкуп/Скидка —
 // same formula the dashboard's aggregate factualPremiumRub and the profit
 // report's per-row managerPremiumRub each computed independently before
@@ -191,12 +262,27 @@ interface ManagerPremiumRates {
 // buyoutFactConfirmed, so a caller that needs the FULL premium (cargo
 // bonus included) adds flatCargoBonusRub() on top itself, same split every
 // existing caller already used.
-function factualManagerPremiumRub(sourceProfits: SourceProfits, buyoutSelfSourcedBoost: boolean, rates: ManagerPremiumRates): number {
+//
+// alreadyPaidPremium (default {0,0}) — per-bucket premium already credited
+// via QuotePaymentAllocation rows before this quote reached
+// buyoutFactConfirmed (see sumAlreadyPaidPremium above). Takes the MAX of
+// "full premium the standard formula says is owed" and "what's already
+// been paid" per bucket, rather than adding them — a partial payment can
+// never make the manager's total premium on this quote exceed what the
+// full-quote formula would give on its own, it only changes WHEN each
+// slice was actually credited.
+function factualManagerPremiumRub(
+  sourceProfits: SourceProfits,
+  buyoutSelfSourcedBoost: boolean,
+  rates: ManagerPremiumRates,
+  alreadyPaidPremium: AlreadyPaidPremium = { proscetRub: 0, buyoutRub: 0 },
+): number {
   const proscetRate = buyoutSelfSourcedBoost ? rates.selfSourcedProscetRatePercent : rates.normalRatePercent;
   const buyoutDiscountRate = buyoutSelfSourcedBoost ? rates.selfSourcedBuyoutDiscountRatePercent : rates.normalRatePercent;
+  const fullProscetPremiumRub = Math.max(0, sourceProfits.proscetRub) * (proscetRate / 100);
+  const fullBuyoutPremiumRub = (Math.max(0, sourceProfits.buyoutRub) + Math.max(0, sourceProfits.discountRub)) * (buyoutDiscountRate / 100);
   return (
-    Math.max(0, sourceProfits.proscetRub) * (proscetRate / 100) +
-    (Math.max(0, sourceProfits.buyoutRub) + Math.max(0, sourceProfits.discountRub)) * (buyoutDiscountRate / 100)
+    Math.max(fullProscetPremiumRub, alreadyPaidPremium.proscetRub) + Math.max(fullBuyoutPremiumRub, alreadyPaidPremium.buyoutRub)
   );
 }
 
@@ -247,5 +333,17 @@ export {
   estimatedFxProfitRub,
   investorCargoShareRub,
   splitRemainderRub,
+  isProscetPaymentCategory,
+  sumAlreadyPaidPremium,
+  computePaymentAllocationPremiumRub,
 };
-export type { QuoteProfitFields, SourceProfits, CnyProfitTiers, CnyVolumeFields, InvestorShareType, InvestorConfig, ManagerPremiumRates };
+export type {
+  QuoteProfitFields,
+  SourceProfits,
+  CnyProfitTiers,
+  CnyVolumeFields,
+  InvestorShareType,
+  InvestorConfig,
+  ManagerPremiumRates,
+  AlreadyPaidPremium,
+};

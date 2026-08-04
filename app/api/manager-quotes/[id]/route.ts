@@ -37,7 +37,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     where: { id },
     include: { client: true, manager: { select: { name: true } } },
   });
-  if (!quote) {
+  if (!quote || quote.deletedAt) {
     return Response.json({ error: "Просчёт не найден." }, { status: 404 });
   }
   if (!(await canAccessManagerQuote(session, quote.managerId))) {
@@ -73,7 +73,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
   const { id } = await params;
   const existing = await prisma.quote.findUnique({ where: { id } });
-  if (!existing) return Response.json({ error: "Просчёт не найден." }, { status: 404 });
+  if (!existing || existing.deletedAt) return Response.json({ error: "Просчёт не найден." }, { status: 404 });
   if (!(await canAccessManagerQuote(session, existing.managerId))) {
     return Response.json({ error: "Нет доступа к этому просчёту." }, { status: 403 });
   }
@@ -370,6 +370,12 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   return Response.json({ quote: stripCargoCostForNonOwner(quote, session) });
 }
 
+// Soft delete — sets deletedAt/deletedByManagerId instead of actually
+// removing the row (or its photos/attached services), so it can sit in
+// «Корзина» for up to 14 days and be restored (owner-only — see
+// app/api/manager-quotes/[id]/restore/route.ts) before
+// scripts/purge-deleted-quotes.ts permanently removes it. See PB-V5 chat
+// 2026-08-04.
 export async function DELETE(req: NextRequest, { params }: RouteParams) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
@@ -378,21 +384,15 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
 
   const { id } = await params;
   const existing = await prisma.quote.findUnique({ where: { id } });
-  if (!existing) return Response.json({ error: "Просчёт не найден." }, { status: 404 });
+  if (!existing || existing.deletedAt) return Response.json({ error: "Просчёт не найден." }, { status: 404 });
   if (!(await canAccessManagerQuote(session, existing.managerId))) {
     return Response.json({ error: "Нет доступа к этому просчёту." }, { status: 403 });
   }
 
-  const photos = await prisma.deskFile.findMany({ where: { tab: "quotes", relatedId: id } });
-  for (const photo of photos) {
-    try {
-      await storage.delete(photo.storageKey);
-    } catch (error) {
-      console.error("Manager quote delete: photo cleanup failed", error);
-    }
-  }
-  await prisma.deskFile.deleteMany({ where: { tab: "quotes", relatedId: id } });
-  await prisma.quote.delete({ where: { id } });
+  await prisma.quote.update({
+    where: { id },
+    data: { deletedAt: new Date(), deletedByManagerId: session.managerId },
+  });
 
   return Response.json({ ok: true });
 }

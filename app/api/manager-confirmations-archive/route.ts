@@ -66,6 +66,7 @@ export async function GET(req: NextRequest) {
     wantType("buyout")
       ? prisma.quote.findMany({
           where: {
+            deletedAt: null,
             buyoutFactConfirmed: true,
             ...managerScopeFilter,
             ...(managerIdParam ? { managerId: managerIdParam } : {}),
@@ -90,6 +91,7 @@ export async function GET(req: NextRequest) {
     wantType("cargo_rate")
       ? prisma.quote.findMany({
           where: {
+            deletedAt: null,
             cargoRateUsdOverride: { not: null },
             cargoRateOverrideConfirmed: true,
             ...managerScopeFilter,
@@ -115,6 +117,7 @@ export async function GET(req: NextRequest) {
     wantType("cny_rate")
       ? prisma.quote.findMany({
           where: {
+            deletedAt: null,
             cnyRateRubOverride: { not: null },
             cnyRateOverrideConfirmed: true,
             ...managerScopeFilter,
@@ -138,6 +141,7 @@ export async function GET(req: NextRequest) {
     wantType("usd_rate")
       ? prisma.quote.findMany({
           where: {
+            deletedAt: null,
             usdRateRubOverride: { not: null },
             usdRateOverrideConfirmed: true,
             ...managerScopeFilter,
@@ -161,6 +165,7 @@ export async function GET(req: NextRequest) {
     wantType("buyout_commission")
       ? prisma.quote.findMany({
           where: {
+            deletedAt: null,
             buyoutCommissionPercentOverride: { not: null },
             buyoutCommissionOverrideConfirmed: true,
             ...managerScopeFilter,
