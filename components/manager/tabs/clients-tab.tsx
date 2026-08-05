@@ -1838,7 +1838,7 @@ function ClientQuotes({
               >
                 <SelectTrigger
                   className={cn(
-                    "h-8 w-42.5 shrink-0 rounded-full border-0 text-xs font-medium",
+                    "h-8 w-fit min-w-42.5 shrink-0 rounded-full border-0 text-xs font-medium",
                     QUOTE_STATUS_BADGE_CLASSES[quote.status],
                   )}
                 >
