@@ -779,6 +779,24 @@ model Quote {
   // place this is read (cargo profit = cargoDeliveryRub - cargoCostRub).
   cargoCostUsd        Decimal @default(0)
   cargoCostRub        Decimal @default(0)
+  // Real per-unit cargo PURCHASE rate — what the company actually paid the
+  // carrier for THIS shipment, entered once known (from the real carrier
+  // invoice/накладная) in the same "Реальные габариты карго" dialog as
+  // actualTotalWeightKg/actualTotalVolumeM3. When set (together with
+  // actualCargoCostBasis below), replaces the generic DensityTariff/
+  // VolumeTariff-margin-derived cargoCostUsd/cargoCostRub for this quote —
+  // deliberately independent of deliveryPricingMode/cargoRateUsd (the
+  // CLIENT-facing sell side, already frozen and communicated), since a real
+  // carrier invoice can be billed on a totally different basis than what
+  // the client was quoted on. null = no real figure yet, cargoCostUsd/
+  // cargoCostRub keep coming from the estimated tariff margin, same as
+  // before this field existed. Owner-only, same confidentiality boundary as
+  // cargoCostRub itself. See actualize-cargo/route.ts, PB-V5 chat
+  // 2026-08-05.
+  actualCargoCostRateUsd Decimal?
+  // Which basis actualCargoCostRateUsd is quoted on ($/kg vs $/m³) — only
+  // meaningful alongside actualCargoCostRateUsd being set.
+  actualCargoCostBasis   DeliveryPricingMode?
 
   buyoutCommissionPercent Decimal
   buyoutCommissionRub     Decimal

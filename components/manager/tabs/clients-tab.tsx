@@ -164,6 +164,8 @@ interface QuoteRecord {
   packagingCostRub: string;
   insuranceCostRub: string;
   mskExpensesRub: string;
+  actualCargoCostRateUsd: string | null;
+  actualCargoCostBasis: "density" | "volume" | null;
 }
 
 // Below this density, cargo is always priced "по объёму" regardless of the
@@ -531,12 +533,22 @@ function ClientQuotes({
   // (pendingStatus null).
   const [cargoModalQuoteId, setCargoModalQuoteId] = useState<string | null>(null);
   const [cargoModalPendingStatus, setCargoModalPendingStatus] = useState<string | null>(null);
-  const [cargoModalDraft, setCargoModalDraft] = useState<{ weight: string; volume: string; packaging: string; insurance: string; msk: string }>({
+  const [cargoModalDraft, setCargoModalDraft] = useState<{
+    weight: string;
+    volume: string;
+    packaging: string;
+    insurance: string;
+    msk: string;
+    costRate: string;
+    costBasis: "density" | "volume";
+  }>({
     weight: "",
     volume: "",
     packaging: "",
     insurance: "",
     msk: "",
+    costRate: "",
+    costBasis: "density",
   });
   const [cargoModalBusy, setCargoModalBusy] = useState(false);
   const [cargoModalError, setCargoModalError] = useState<string | null>(null);
@@ -655,6 +667,8 @@ function ClientQuotes({
       packaging: quote ? rubToUsdDraft(quote.packagingCostRub, quote.usdRateUsed) : "",
       insurance: quote ? rubToUsdDraft(quote.insuranceCostRub, quote.usdRateUsed) : "",
       msk: quote ? rubToUsdDraft(quote.mskExpensesRub, quote.usdRateUsed) : "",
+      costRate: quote?.actualCargoCostRateUsd ?? "",
+      costBasis: quote?.actualCargoCostBasis ?? "density",
     });
   }
 
@@ -681,6 +695,9 @@ function ClientQuotes({
           packagingCostRub: usdToRub(cargoModalDraft.packaging),
           insuranceCostRub: usdToRub(cargoModalDraft.insurance),
           mskExpensesRub: usdToRub(cargoModalDraft.msk),
+          ...(allManagers !== null && cargoModalDraft.costRate.trim()
+            ? { actualCargoCostRateUsd: Number(cargoModalDraft.costRate), actualCargoCostBasis: cargoModalDraft.costBasis }
+            : {}),
         }),
       });
       if (!res.ok) {
@@ -2247,6 +2264,41 @@ function ClientQuotes({
                       />
                     </div>
                   </div>
+
+                  {allManagers !== null && (
+                    <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-bg p-2.5">
+                      <div>
+                        <Label htmlFor="cargo-actual-cost-rate">Реальная ставка закупки карго, $</Label>
+                        <Input
+                          id="cargo-actual-cost-rate"
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="0"
+                          value={cargoModalDraft.costRate}
+                          onChange={(e) => setCargoModalDraft((current) => ({ ...current, costRate: e.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="cargo-actual-cost-basis">Тип отправки</Label>
+                        <Select
+                          value={cargoModalDraft.costBasis}
+                          onValueChange={(v) => setCargoModalDraft((current) => ({ ...current, costBasis: v as "density" | "volume" }))}
+                        >
+                          <SelectTrigger id="cargo-actual-cost-basis" className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="density">По кг</SelectItem>
+                            <SelectItem value="volume">По объёму</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <p className="col-span-2 text-xs text-text-secondary">
+                        Реальная ставка закупки карго у перевозчика — уточняет маржу по карго для отчётов руководителя;
+                        цену клиента и премию менеджера не меняет.
+                      </p>
+                    </div>
+                  )}
 
                   {draftValid && newCargoDeliveryRub != null && newTotalRub != null && newTotalUsd != null && (
                     <div className="rounded-lg bg-bg p-3 text-sm">

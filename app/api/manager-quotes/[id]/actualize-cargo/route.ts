@@ -32,14 +32,23 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { actualTotalWeightKg, actualTotalVolumeM3, packagingCostRub, insuranceCostRub, mskExpensesRub } =
-    (body as {
-      actualTotalWeightKg?: unknown;
-      actualTotalVolumeM3?: unknown;
-      packagingCostRub?: unknown;
-      insuranceCostRub?: unknown;
-      mskExpensesRub?: unknown;
-    }) ?? {};
+  const {
+    actualTotalWeightKg,
+    actualTotalVolumeM3,
+    packagingCostRub,
+    insuranceCostRub,
+    mskExpensesRub,
+    actualCargoCostRateUsd,
+    actualCargoCostBasis,
+  } = (body as {
+    actualTotalWeightKg?: unknown;
+    actualTotalVolumeM3?: unknown;
+    packagingCostRub?: unknown;
+    insuranceCostRub?: unknown;
+    mskExpensesRub?: unknown;
+    actualCargoCostRateUsd?: unknown;
+    actualCargoCostBasis?: unknown;
+  }) ?? {};
   const weightKg = Number(actualTotalWeightKg);
   const volumeM3 = Number(actualTotalVolumeM3);
   if (!Number.isFinite(weightKg) || weightKg <= 0 || !Number.isFinite(volumeM3) || volumeM3 <= 0) {
@@ -64,6 +73,36 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const newPackagingCostRub = packagingCostResult;
   const newInsuranceCostRub = insuranceCostResult;
   const newMskExpensesRub = mskExpensesResult;
+
+  // Real cargo PURCHASE rate — owner-only, same confidentiality boundary as
+  // cargoCostRub itself (see its schema comment). Optional: blank/omitted
+  // means "keep whatever was there before" (a previously entered real rate
+  // stays in effect across a later re-actualization that only corrects
+  // weight/volume, same "тот же тариф" reapply convention costPerUnit below
+  // already follows) — falling all the way back to the tariff-margin
+  // estimate only if no real rate has EVER been entered for this quote.
+  // Anyone else submitting these two fields is rejected outright rather
+  // than silently ignored, so a manager never gets a false "saved"
+  // impression for a field that didn't actually take effect.
+  let actualCargoCostRateUsdNum: number | null =
+    quote.actualCargoCostRateUsd !== null ? Number(quote.actualCargoCostRateUsd) : null;
+  let actualCargoCostBasisValue: "density" | "volume" | null = quote.actualCargoCostBasis;
+  const hasCostRateInput = actualCargoCostRateUsd !== undefined && actualCargoCostRateUsd !== null && actualCargoCostRateUsd !== "";
+  const hasCostBasisInput = actualCargoCostBasis !== undefined && actualCargoCostBasis !== null && actualCargoCostBasis !== "";
+  if (hasCostRateInput || hasCostBasisInput) {
+    if (session.role !== "owner") {
+      return Response.json({ error: "Реальную ставку закупки карго может внести только руководитель." }, { status: 403 });
+    }
+    const rateNum = Number(actualCargoCostRateUsd);
+    if (!Number.isFinite(rateNum) || rateNum < 0) {
+      return Response.json({ error: "Укажите реальную ставку закупки карго неотрицательным числом." }, { status: 400 });
+    }
+    if (actualCargoCostBasis !== "density" && actualCargoCostBasis !== "volume") {
+      return Response.json({ error: "Укажите тип отправки для реальной ставки закупки (по кг или по объёму)." }, { status: 400 });
+    }
+    actualCargoCostRateUsdNum = rateNum;
+    actualCargoCostBasisValue = actualCargoCostBasis;
+  }
 
   const isFirstActualization = quote.estimatedTotalWeightKg === null;
 
@@ -97,7 +136,12 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const rawCargoDeliveryUsd = cargoRateUsd * newBasisQuantity;
   const cargoDeliveryUsd = Math.max(0, rawCargoDeliveryUsd - cargoDiscountUsd);
   const cargoDeliveryRub = cargoDeliveryUsd * usdRateUsed;
-  const cargoCostUsd = costPerUnit * newBasisQuantity;
+  // Real carrier invoice, once entered, replaces the tariff-margin estimate
+  // entirely — on ITS OWN basis (по кг vs по объёму), independent of
+  // basisIsDensity above (that's the CLIENT-facing sell basis, unrelated).
+  const effectiveCostBasisQuantity =
+    actualCargoCostRateUsdNum !== null ? (actualCargoCostBasisValue === "density" ? weightKg : volumeM3) : newBasisQuantity;
+  const cargoCostUsd = actualCargoCostRateUsdNum !== null ? actualCargoCostRateUsdNum * effectiveCostBasisQuantity : costPerUnit * newBasisQuantity;
   const cargoCostRub = cargoCostUsd * usdRateUsed;
   const densityKgM3 = volumeM3 > 0 ? weightKg / volumeM3 : 0;
   // Old extra-costs values default to 0 on a first actualization (schema
@@ -137,6 +181,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       packagingCostRub: newPackagingCostRub,
       insuranceCostRub: newInsuranceCostRub,
       mskExpensesRub: newMskExpensesRub,
+      actualCargoCostRateUsd: actualCargoCostRateUsdNum,
+      actualCargoCostBasis: actualCargoCostBasisValue,
       totalRub,
     },
     select: {
@@ -149,6 +195,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       packagingCostRub: true,
       insuranceCostRub: true,
       mskExpensesRub: true,
+      actualCargoCostRateUsd: true,
+      actualCargoCostBasis: true,
       totalRub: true,
       estimatedTotalRub: true,
       cargoActualizedAt: true,
