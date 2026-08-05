@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { parseLocaleNumber } from "@/lib/number";
 
 const CATEGORY_LABEL: Record<string, string> = {
-  goods: "Стоимость товара",
+  goods: "Товар",
   china_delivery: "Доставка по Китаю",
   search_service: "Услуга поиска",
   custom_production: "Производство под заказ",
@@ -38,15 +38,20 @@ interface CreatePaymentDialogProps {
 }
 
 // "Приходный ордер" started from a quote card's checkbox selection —
-// owner/senior picks how much the client just paid toward which service on
-// which of the selected quotes, all in one dialog (one real payment can
-// cover several quotes at once). See app/api/manager-quotes/create-payment
-// and PB-V5 chat 2026-08-04.
+// руководитель/старший менеджер picks WHICH SERVICES the client just paid
+// for (a checkbox per "Счёт на выкуп" category, applied uniformly across
+// every selected quote), not a manual amount per quote — each checked
+// category is billed at its FULL remaining balance on every quote that
+// still owes something for it. A category already fully paid on some (or
+// all) of the selected quotes is called out by name instead of silently
+// contributing 0, so the manager knows exactly why the total looks smaller
+// than expected. See app/api/manager-quotes/create-payment and PB-V5 chat
+// 2026-08-05.
 function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePaymentDialogProps) {
   const [loading, setLoading] = useState(true);
   const [client, setClient] = useState<{ name: string; company: string | null } | null>(null);
   const [quotes, setQuotes] = useState<RemainingQuote[]>([]);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [checkedCategories, setCheckedCategories] = useState<Record<string, boolean>>({});
   const [cnyRate, setCnyRate] = useState("");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [comment, setComment] = useState("");
@@ -57,7 +62,7 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
     if (!open) return;
     setLoading(true);
     setError(null);
-    setDrafts({});
+    setCheckedCategories({});
     setComment("");
     Promise.all([
       fetch(`/api/manager-quotes/payment-remaining?quoteIds=${quoteIds.join(",")}`).then((res) => res.json()),
@@ -76,27 +81,31 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
     // eslint-disable-next-line react-hooks/exhaustive-deps -- quoteIds is an array literal from the caller, re-running on open is what matters
   }, [open]);
 
-  const totalRub = useMemo(() => {
-    return Object.values(drafts).reduce((sum, v) => {
-      const n = parseLocaleNumber(v || "0");
-      return sum + (Number.isFinite(n) && n > 0 ? n : 0);
-    }, 0);
-  }, [drafts]);
+  // Per category: total still owed across every selected quote, plus which
+  // quotes have nothing left for it (already covered by an earlier order)
+  // so that gets called out by name instead of just quietly not counting.
+  const categoryInfo = useMemo(() => {
+    return CATEGORIES.map((category) => {
+      const owing = quotes.filter((q) => (q.remaining[category] ?? 0) > 0);
+      const alreadyPaid = quotes.filter((q) => (q.remaining[category] ?? 0) <= 0);
+      const totalRemaining = owing.reduce((sum, q) => sum + q.remaining[category], 0);
+      return { category, owing, alreadyPaid, totalRemaining };
+    });
+  }, [quotes]);
 
+  const allocations = useMemo(() => {
+    return categoryInfo
+      .filter((info) => checkedCategories[info.category])
+      .flatMap((info) => info.owing.map((q) => ({ quoteId: q.quoteId, category: info.category, amountRub: q.remaining[info.category] })));
+  }, [categoryInfo, checkedCategories]);
+
+  const totalRub = allocations.reduce((sum, a) => sum + a.amountRub, 0);
   const cnyRateNum = parseLocaleNumber(cnyRate || "0");
   const totalCny = Number.isFinite(cnyRateNum) && cnyRateNum > 0 ? totalRub / cnyRateNum : 0;
 
   async function handleSave() {
-    const allocations = Object.entries(drafts)
-      .map(([key, value]) => {
-        const [quoteId, category] = key.split(":");
-        const amountRub = parseLocaleNumber(value || "0");
-        return { quoteId, category, amountRub };
-      })
-      .filter((a) => Number.isFinite(a.amountRub) && a.amountRub > 0);
-
     if (allocations.length === 0) {
-      setError("Укажите хотя бы одну сумму по услуге.");
+      setError("Выберите хотя бы одну услугу, по которой есть остаток к оплате.");
       return;
     }
     if (!Number.isFinite(cnyRateNum) || cnyRateNum <= 0) {
@@ -134,7 +143,7 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+      <DialogContent className="max-h-[85vh] max-w-xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             Приходный ордер{client ? ` — ${client.name}${client.company ? ` · ${client.company}` : ""}` : ""}
@@ -146,50 +155,49 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
         ) : (
           <div className="space-y-4">
             <p className="text-xs text-text-secondary">
-              Укажите, сколько клиент оплатил и по каким услугам каких просчётов это распределяется. Уже оплаченные
-              услуги (остаток 0) в списке не показаны.
+              Выберите, по каким услугам клиент оплатил — сумма посчитается сама, как остаток по этой услуге на
+              каждом из {quotes.length} выбранных просчётов ({quotes.map((q) => `№${q.displayId}`).join(", ")}).
             </p>
 
             {error && <p className="text-xs text-error">{error}</p>}
 
-            {quotes.map((q) => {
-              const availableCategories = CATEGORIES.filter((c) => (q.remaining[c] ?? 0) > 0);
-              if (availableCategories.length === 0) {
+            <div className="space-y-2">
+              {categoryInfo.map(({ category, owing, alreadyPaid, totalRemaining }) => {
+                const disabled = owing.length === 0;
                 return (
-                  <div key={q.quoteId} className="rounded-lg border border-border bg-bg p-3 text-xs text-text-secondary">
-                    №{q.displayId} · {q.productName} — уже полностью оплачен.
-                  </div>
+                  <label
+                    key={category}
+                    className={`flex items-start gap-2.5 rounded-lg border p-3 ${
+                      disabled ? "cursor-not-allowed border-border bg-bg opacity-60" : "cursor-pointer border-border hover:border-primary/30"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      disabled={disabled}
+                      checked={Boolean(checkedCategories[category])}
+                      onChange={(e) => setCheckedCategories((c) => ({ ...c, [category]: e.target.checked }))}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-text">{CATEGORY_LABEL[category]}</span>
+                        {!disabled && <span className="text-sm font-bold text-text">{fmt(totalRemaining)} ₽</span>}
+                      </div>
+                      {disabled ? (
+                        <p className="text-xs text-text-secondary">Уже полностью оплачено по всем выбранным просчётам.</p>
+                      ) : (
+                        alreadyPaid.length > 0 && (
+                          <p className="text-xs text-warning">
+                            Уже ранее оплачено по: {alreadyPaid.map((q) => `№${q.displayId}`).join(", ")} — счёт будет только по{" "}
+                            {owing.map((q) => `№${q.displayId}`).join(", ")}.
+                          </p>
+                        )
+                      )}
+                    </div>
+                  </label>
                 );
-              }
-              return (
-                <div key={q.quoteId} className="space-y-2 rounded-lg border border-border p-3">
-                  <p className="text-xs font-semibold text-text">
-                    №{q.displayId} · {q.productName}
-                  </p>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {availableCategories.map((category) => {
-                      const key = `${q.quoteId}:${category}`;
-                      return (
-                        <div key={key} className="space-y-1">
-                          <Label htmlFor={key} className="text-xs font-normal text-text-secondary">
-                            {CATEGORY_LABEL[category]} — остаток {fmt(q.remaining[category])} ₽
-                          </Label>
-                          <Input
-                            id={key}
-                            type="text"
-                            inputMode="decimal"
-                            placeholder="0"
-                            value={drafts[key] ?? ""}
-                            onChange={(e) => setDrafts((d) => ({ ...d, [key]: e.target.value }))}
-                            className="h-8 text-sm"
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+              })}
+            </div>
 
             <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2">
               <div className="space-y-1.5">
