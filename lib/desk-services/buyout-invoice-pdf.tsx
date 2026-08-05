@@ -31,9 +31,11 @@ const styles = StyleSheet.create({
   table: { borderTopWidth: 1, borderTopColor: "#23252b", marginTop: 8 },
   headRow: { flexDirection: "row", borderBottomWidth: 1, borderBottomColor: "#23252b", paddingVertical: 7 },
   headCellLabel: { flex: 1, fontSize: 8.5, fontWeight: 700, color: "#63666f", textTransform: "uppercase" },
+  headCellQty: { width: 60, fontSize: 8.5, fontWeight: 700, color: "#63666f", textTransform: "uppercase", textAlign: "center" },
   headCellAmount: { width: 130, fontSize: 8.5, fontWeight: 700, color: "#63666f", textTransform: "uppercase", textAlign: "right" },
   bodyRow: { flexDirection: "row", alignItems: "center", borderBottomWidth: 0.5, borderBottomColor: "#e1dfd7", paddingVertical: 9 },
   cellLabel: { flex: 1, fontSize: 10 },
+  cellQty: { width: 60, fontSize: 10, textAlign: "center", color: "#63666f" },
   cellAmount: { width: 130, fontSize: 10, textAlign: "right" },
   totalsRow: { flexDirection: "row", marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#23252b", justifyContent: "space-between", alignItems: "center" },
   totalsLabel: { fontSize: 12, fontWeight: 700 },
@@ -59,6 +61,9 @@ function fmt(value: number, currency: BuyoutInvoiceCurrency): string {
 interface BuyoutInvoiceLineItem {
   label: string;
   amount: number;
+  // Только у строки "Стоимость товара" — денежные категории (доставка,
+  // услуга поиска, комиссия, доп. услуги) не поштучные, у них undefined.
+  quantity?: number;
 }
 
 interface BuyoutInvoicePdfProps {
@@ -96,11 +101,13 @@ function BuyoutInvoicePdfDocument({ displayId, client, productName, currency, li
         <View style={styles.table}>
           <View style={styles.headRow}>
             <Text style={styles.headCellLabel}>Статья</Text>
+            <Text style={styles.headCellQty}>Кол-во</Text>
             <Text style={styles.headCellAmount}>Сумма{currencySuffix}</Text>
           </View>
           {lineItems.map((item, index) => (
             <View key={index} style={styles.bodyRow}>
               <Text style={styles.cellLabel}>{item.label}</Text>
+              <Text style={styles.cellQty}>{item.quantity != null ? `${item.quantity} шт.` : "—"}</Text>
               <Text style={styles.cellAmount}>{fmt(item.amount, currency)}{currencySuffix}</Text>
             </View>
           ))}

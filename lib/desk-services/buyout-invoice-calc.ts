@@ -8,6 +8,11 @@ const QUOTE_TYPE_LABEL: Record<string, string> = {
 
 interface BuyoutInvoiceQuoteInput {
   totalPriceRub: number;
+  // Штук товара в этой позиции — единственная сумма счёта, к которой
+  // осмысленно относится количество (доставка/поиск/комиссия/доп. услуги —
+  // денежные категории, не поштучные), поэтому "Кол-во" в PDF показывается
+  // только у строки "Стоимость товара". See PB-V5 chat 2026-08-05.
+  quantity: number;
   chinaDeliveryRub: number;
   searchServiceFeeRub: number;
   quoteType: string;
@@ -117,7 +122,7 @@ function buildBuyoutInvoiceAmounts(
   const remainingAttachedServicesRub = Math.max(0, attachedServicesTotalRub - alreadyPaidRub.attachedServices);
 
   const rubLineItems: BuyoutInvoiceLineItem[] = [];
-  if (remainingGoodsRub > 0) rubLineItems.push({ label: "Стоимость товара", amount: remainingGoodsRub });
+  if (remainingGoodsRub > 0) rubLineItems.push({ label: "Стоимость товара", amount: remainingGoodsRub, quantity: quote.quantity });
   if (remainingChinaDeliveryRub > 0) rubLineItems.push({ label: "Доставка по Китаю", amount: remainingChinaDeliveryRub });
   if (remainingSearchServiceRub > 0) {
     rubLineItems.push({
@@ -151,7 +156,7 @@ function buildBuyoutInvoiceAmounts(
 
   if (currency === "usd") {
     return {
-      lineItems: rubLineItems.map((item) => ({ label: item.label, amount: item.amount / quote.usdRateUsed })),
+      lineItems: rubLineItems.map((item) => ({ label: item.label, amount: item.amount / quote.usdRateUsed, quantity: item.quantity })),
       totalAmount: totalAmountRub / quote.usdRateUsed,
       rateNote: `Курс на момент расчёта: 1$ = ${quote.usdRateUsed.toFixed(2)} ₽.`,
     };
@@ -164,13 +169,20 @@ function buildBuyoutInvoiceAmounts(
   const usdtRate = usdt.usdtRateCny;
   const totalAmountCny = totalAmountRub / quote.cnyRateUsed;
   return {
-    lineItems: rubLineItems.map((item) => ({ label: item.label, amount: item.amount / quote.cnyRateUsed / usdtRate })),
+    lineItems: rubLineItems.map((item) => ({
+      label: item.label,
+      amount: item.amount / quote.cnyRateUsed / usdtRate,
+      quantity: item.quantity,
+    })),
     totalAmount: totalAmountCny / usdtRate,
     rateNote: `Курс на момент выставления счёта: 1¥ = ${quote.cnyRateUsed.toFixed(2)} ₽, 1 USDT = ${usdtRate.toFixed(2)} ¥.`,
   };
 }
 
 interface BuyoutInvoiceRowAmounts {
+  // Штук товара — pass-through, не денежная величина, поэтому не участвует
+  // в divisor-конвертации ниже, в отличие от всех остальных полей.
+  quantity: number;
   totalPriceAmount: number;
   chinaDeliveryAmount: number;
   searchServiceAmount: number;
@@ -220,6 +232,7 @@ function buildBuyoutInvoiceRowAmounts(
   }
 
   return {
+    quantity: quote.quantity,
     totalPriceAmount: rub.totalPriceAmount / divisor,
     chinaDeliveryAmount: rub.chinaDeliveryAmount / divisor,
     searchServiceAmount: rub.searchServiceAmount / divisor,

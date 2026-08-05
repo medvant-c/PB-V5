@@ -82,6 +82,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       const amounts = buildBuyoutInvoiceRowAmounts(
         {
           totalPriceRub: Number(quote.totalPriceRub),
+          quantity: quote.quantity,
           chinaDeliveryRub: Number(quote.chinaDeliveryRub),
           searchServiceFeeRub: Number(quote.searchServiceFeeRub),
           quoteType: quote.quoteType,

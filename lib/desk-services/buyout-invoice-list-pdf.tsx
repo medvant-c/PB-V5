@@ -37,6 +37,7 @@ const styles = StyleSheet.create({
   colNum: { width: 26 },
   colClient: { width: 100, paddingRight: 8 },
   colName: { flex: 1, paddingRight: 8 },
+  colQty: { width: 46, textAlign: "center" },
   colAmount: { width: 72, textAlign: "right" },
   colTotal: { width: 85, textAlign: "right" },
   totalCellValue: { fontWeight: 700, maxLines: 1, textOverflow: "ellipsis" },
@@ -60,6 +61,7 @@ function fmt(value: number, currency: BuyoutInvoiceListCurrency): string {
 interface BuyoutInvoiceListRow {
   displayId: number;
   productName: string;
+  quantity: number;
   clientName: string;
   clientCompany: string | null;
   totalPriceAmount: number;
@@ -101,6 +103,7 @@ function BuyoutInvoiceListPdfDocument({ client, rows, currency }: BuyoutInvoiceL
             <Text style={[styles.headCell, styles.colNum]}>№</Text>
             {!client && <Text style={[styles.headCell, styles.colClient]}>Клиент</Text>}
             <Text style={[styles.headCell, styles.colName]}>Товар</Text>
+            <Text style={[styles.headCell, styles.colQty]}>Кол-во</Text>
             <Text style={[styles.headCell, styles.colAmount]}>Товар{currencySuffix}</Text>
             <Text style={[styles.headCell, styles.colAmount]}>Китай{currencySuffix}</Text>
             <Text style={[styles.headCell, styles.colAmount]}>Поиск{currencySuffix}</Text>
@@ -120,6 +123,7 @@ function BuyoutInvoiceListPdfDocument({ client, rows, currency }: BuyoutInvoiceL
                 </Text>
               )}
               <Text style={[styles.cell, styles.cellText, styles.colName]}>{row.productName}</Text>
+              <Text style={[styles.cell, styles.cellText, styles.colQty]}>{row.quantity}</Text>
               <Text style={[styles.cell, styles.cellText, styles.colAmount]}>{fmt(row.totalPriceAmount, currency)}</Text>
               <Text style={[styles.cell, styles.cellText, styles.colAmount]}>{fmt(row.chinaDeliveryAmount, currency)}</Text>
               <Text style={[styles.cell, styles.cellText, styles.colAmount]}>{fmt(row.searchServiceAmount, currency)}</Text>

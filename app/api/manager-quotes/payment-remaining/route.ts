@@ -51,6 +51,7 @@ export async function GET(req: NextRequest) {
       const remaining = buildBuyoutInvoiceRowAmounts(
         {
           totalPriceRub: Number(quote.totalPriceRub),
+          quantity: quote.quantity,
           chinaDeliveryRub: Number(quote.chinaDeliveryRub),
           searchServiceFeeRub: Number(quote.searchServiceFeeRub),
           quoteType: quote.quoteType,
