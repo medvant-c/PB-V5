@@ -17,6 +17,7 @@ import {
   investorCargoShareRub,
   splitRemainderRub,
   sumAlreadyPaidPremium,
+  sumAlreadyPaidProfitRub,
   type CnyProfitTiers,
 } from "@/lib/desk-services/quote-profit";
 
@@ -118,8 +119,10 @@ interface QuoteForStats {
   // QuotePaymentAllocation in prisma/schema.prisma) — summed per-bucket by
   // sumAlreadyPaidPremium and threaded through factualManagerPremiumRub so
   // confirm-buyout's later full-quote premium never double-pays for the
-  // same profit. See PB-V5 chat 2026-08-04.
-  paymentAllocations: { category: string; premiumRub: unknown }[];
+  // same profit. amountRub feeds sumAlreadyPaidProfitRub the same way, for
+  // the underlying ₽ profit itself (not just the premium on it) — see PB-V5
+  // chat 2026-08-05.
+  paymentAllocations: { category: string; premiumRub: unknown; amountRub: unknown }[];
 }
 
 function summarize(
@@ -216,8 +219,18 @@ function summarize(
       );
     } else {
       const { proscetRub, buyoutRub } = estimatedSourceProfits(q);
-      potentialProscetRub += proscetRub;
-      potentialBuyoutRub += buyoutRub;
+      // Not yet confirmed but already partially paid via "Счёт на выкуп" —
+      // that slice of ₽ profit is real (search_service/custom_production/
+      // buyout_commission/attached_services are 100% margin the moment the
+      // money arrives, see sumAlreadyPaidProfitRub's own comment), so it
+      // counts as FACTUAL profit right now instead of waiting for
+      // confirm-buyout, mirroring how alreadyPaidPremium already works for
+      // premium just below. See PB-V5 chat 2026-08-05.
+      const alreadyPaidProfit = sumAlreadyPaidProfitRub(q.paymentAllocations);
+      factualProscetRub += alreadyPaidProfit.proscetRub;
+      factualBuyoutRub += alreadyPaidProfit.buyoutRub;
+      potentialProscetRub += Math.max(0, proscetRub - alreadyPaidProfit.proscetRub);
+      potentialBuyoutRub += Math.max(0, buyoutRub - alreadyPaidProfit.buyoutRub);
       potentialFxProfitRub += estimatedFxProfitRub(q, attachedServicesByQuoteId.get(q.id) ?? 0, cnyProfitTiers);
       const isBoosted = isSelfSourcedFor(q.client, q.managerId);
       const proscetRate = isBoosted ? premiumRates.selfSourcedProscetRatePercent : premiumRates.normalRatePercent;
@@ -351,7 +364,7 @@ export async function GET(req: NextRequest) {
       displayId: true,
       productName: true,
       client: { select: { selfSourcedConfirmed: true, createdByManagerId: true, vladShareRatePercentOverride: true, name: true } },
-      paymentAllocations: { select: { category: true, premiumRub: true } },
+      paymentAllocations: { select: { category: true, premiumRub: true, amountRub: true } },
     },
   });
 

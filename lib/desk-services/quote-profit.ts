@@ -249,6 +249,28 @@ interface AlreadyPaidPremium {
   buyoutRub: number;
 }
 
+// Same idea as sumAlreadyPaidPremium below, but for the underlying ₽ itself
+// rather than the premium on it — a "Счёт на выкуп" partial payment against
+// search_service/custom_production/buyout_commission/attached_services is
+// already-realized profit (100% margin, no unknown cost-of-goods, per
+// PREMIUM_ELIGIBLE_PAYMENT_CATEGORIES's own comment above) the moment the
+// money arrives, not just once buyoutFactConfirmed later runs. goods/
+// china_delivery are deliberately excluded — same reasoning as premium: their
+// real margin isn't known until the actual purchase cost exists. Lets a
+// not-yet-confirmed quote's dashboard "факт" bucket reflect a real payment
+// (e.g. a client paying for "услуга поиска" up front) instead of showing 0
+// profit until the whole buyout is confirmed. See PB-V5 chat 2026-08-05.
+function sumAlreadyPaidProfitRub(allocations: { category: string; amountRub: unknown }[]): AlreadyPaidPremium {
+  let proscetRub = 0;
+  let buyoutRub = 0;
+  for (const a of allocations) {
+    if (!PREMIUM_ELIGIBLE_PAYMENT_CATEGORIES.has(a.category)) continue;
+    if (isProscetPaymentCategory(a.category)) proscetRub += Number(a.amountRub);
+    else buyoutRub += Number(a.amountRub);
+  }
+  return { proscetRub, buyoutRub };
+}
+
 // Sums QuotePaymentAllocation.premiumRub (already frozen per-allocation at
 // creation time — see that model's schema comment) into the same two
 // buckets factualManagerPremiumRub below works in, so a quote that's had
@@ -349,6 +371,7 @@ export {
   splitRemainderRub,
   isProscetPaymentCategory,
   sumAlreadyPaidPremium,
+  sumAlreadyPaidProfitRub,
   computePaymentAllocationPremiumRub,
 };
 export type {
