@@ -525,6 +525,7 @@ model Investor {
   updatedAt          DateTime @updatedAt
   updatedByManagerId String
   updatedByManager   Manager  @relation(fields: [updatedByManagerId], references: [id])
+  linkedCashCategories CashCategory[]
 }
 
 // One row per density tier per cargo category — e.g. "Одежда, 150-160
@@ -1140,6 +1141,16 @@ enum CashCurrency {
   rub
 }
 
+// Who an expense статья's amount should be auto-suggested for on a new
+// order (see CashCategory.payoutTarget) — "investor" reads linkedInvestorId
+// directly, "assigned_manager" means "whichever manager is attached to the
+// client picked on THIS order" (Client.createdByManagerId), not one fixed
+// manager, since a single "Выплата менеджеру" статья covers every manager.
+enum CashCategoryPayoutTarget {
+  investor
+  assigned_manager
+}
+
 // Статья — separate lists for income vs expense (an income статья like
 // "приход комиссия" never belongs on an expense order and vice versa).
 // Free-form, not an enum, so the owner can add a new статья from the UI
@@ -1153,6 +1164,17 @@ model CashCategory {
   // Tracked by id (this flag), not by name, so the owner can freely rename
   // this статья without breaking the link.
   isBuyoutIncomeDefault Boolean @default(false)
+  // Explicit link from an expense статья (e.g. "Выплата Антон", "Выплата
+  // менеджеру") to whoever it pays out — lets the order dialog auto-suggest
+  // the amount owed for the client picked on that order instead of the
+  // owner hand-computing an investor's share or a manager's premium every
+  // time. null on both = no suggestion (e.g. "Закупка товара", a real cost,
+  // not a profit-share payout). Tracked by id, not by name, so renaming
+  // either the статья or the investor never breaks the link. See PB-V5 chat
+  // 2026-08-05.
+  payoutTarget          CashCategoryPayoutTarget?
+  linkedInvestorId      String?
+  linkedInvestor        Investor?                 @relation(fields: [linkedInvestorId], references: [id])
   createdAt DateTime      @default(now())
   orders    CashOrder[]
 

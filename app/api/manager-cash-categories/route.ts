@@ -18,6 +18,7 @@ export async function GET(req: NextRequest) {
   const categories = await prisma.cashCategory.findMany({
     where: type === "income" || type === "expense" ? { type } : {},
     orderBy: [{ type: "asc" }, { name: "asc" }],
+    include: { linkedInvestor: { select: { id: true, name: true } } },
   });
   return Response.json({ categories });
 }

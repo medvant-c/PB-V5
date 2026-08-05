@@ -13,9 +13,19 @@ import { cn } from "@/lib/utils";
 type CashOrderType = "income" | "expense";
 type CashCurrency = "cny" | "usd" | "rub";
 
+type CashCategoryPayoutTarget = "investor" | "assigned_manager";
+
 interface CashCategoryRecord {
   id: string;
   type: CashOrderType;
+  name: string;
+  payoutTarget: CashCategoryPayoutTarget | null;
+  linkedInvestorId: string | null;
+  linkedInvestor: { id: string; name: string } | null;
+}
+
+interface InvestorOption {
+  id: string;
   name: string;
 }
 
@@ -87,6 +97,7 @@ function ManagerCashTab() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [clients, setClients] = useState<ClientOption[]>([]);
+  const [investors, setInvestors] = useState<InvestorOption[]>([]);
 
   const [filterCategoryId, setFilterCategoryId] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
@@ -105,6 +116,12 @@ function ManagerCashTab() {
     const res = await fetch("/api/manager-clients");
     const data = await res.json();
     if (res.ok) setClients(data.clients);
+  }, []);
+
+  const loadInvestors = useCallback(async () => {
+    const res = await fetch("/api/manager-investors");
+    const data = await res.json();
+    if (res.ok) setInvestors(data.investors);
   }, []);
 
   const loadOrders = useCallback(async () => {
@@ -128,7 +145,8 @@ function ManagerCashTab() {
   useEffect(() => {
     loadCategories();
     loadClients();
-  }, [loadCategories, loadClients]);
+    loadInvestors();
+  }, [loadCategories, loadClients, loadInvestors]);
 
   useEffect(() => {
     loadOrders();
@@ -187,6 +205,44 @@ function ManagerCashTab() {
     if (!Number.isFinite(amount) || !Number.isFinite(rate) || rate <= 0) return null;
     return amount / rate;
   }, [draft.amount, draft.cnyToCurrencyRate, draft.currency]);
+
+  // "Расходный ордер": once both статья (linked to an investor or "менеджер,
+  // закреплённый за клиентом" — see CashCategory.payoutTarget) and клиент
+  // are picked, pull in how much that recipient is actually owed for this
+  // client's confirmed deals instead of making the owner compute an
+  // investor's share or a manager's premium by hand every time. Only on a
+  // NEW order (never overwrites a real historical order being edited), and
+  // re-fires every time either picker changes so switching клиент/статья
+  // always refreshes the suggestion. See PB-V5 chat 2026-08-05.
+  const [suggestionNote, setSuggestionNote] = useState<string | null>(null);
+  const [suggestionLoading, setSuggestionLoading] = useState(false);
+  useEffect(() => {
+    if (editingOrderId || dialogType !== "expense" || !draft.categoryId || !draft.clientId) {
+      setSuggestionNote(null);
+      return;
+    }
+    let cancelled = false;
+    setSuggestionLoading(true);
+    fetch(`/api/manager-cash-orders/expense-suggestion?categoryId=${draft.categoryId}&clientId=${draft.clientId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled || !data.applicable) {
+          if (!cancelled) setSuggestionNote(null);
+          return;
+        }
+        if (data.amountCny !== null) {
+          setDraft((d) => ({ ...d, currency: "cny", cnyToCurrencyRate: "1", amount: String(Math.round(data.amountCny * 100) / 100) }));
+        }
+        setSuggestionNote(data.note ?? null);
+      })
+      .finally(() => {
+        if (!cancelled) setSuggestionLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- editingOrderId/dialogType checked above, re-fetch only on the two pickers changing
+  }, [draft.categoryId, draft.clientId]);
 
   async function handleCreateCategory() {
     if (!dialogType || !newCategoryName.trim()) return;
@@ -355,6 +411,35 @@ function ManagerCashTab() {
       const data = await res.json();
       if (!res.ok) {
         setCategoryPanelError(data.error ?? "Не удалось переименовать статью.");
+        return;
+      }
+      await loadCategories();
+    } finally {
+      setBusyCategoryId(null);
+    }
+  }
+
+  // Selecting "не привязано" clears both fields; "assigned_manager" needs
+  // none; "investor:<id>" carries the chosen investor right in the option
+  // value since a native <select> only gives back one string.
+  async function handleSetPayoutTarget(id: string, value: string) {
+    setBusyCategoryId(id);
+    setCategoryPanelError(null);
+    try {
+      const body =
+        value === ""
+          ? { payoutTarget: null }
+          : value === "assigned_manager"
+            ? { payoutTarget: "assigned_manager" }
+            : { payoutTarget: "investor", linkedInvestorId: value.slice("investor:".length) };
+      const res = await fetch(`/api/manager-cash-categories/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setCategoryPanelError(data.error ?? "Не удалось привязать статью.");
         return;
       }
       await loadCategories();
@@ -559,23 +644,41 @@ function ManagerCashTab() {
                   {categories
                     .filter((c) => c.type === type)
                     .map((c) => (
-                      <div key={c.id} className="flex items-center gap-2 rounded-lg border border-border bg-bg px-2.5 py-1.5">
-                        <Input
-                          value={categoryDrafts[c.id] ?? c.name}
-                          onChange={(e) => setCategoryDrafts((d) => ({ ...d, [c.id]: e.target.value }))}
-                          onBlur={() => handleRenameCategory(c.id, c.name)}
-                          disabled={busyCategoryId === c.id}
-                          className="h-8 min-w-0 flex-1 text-sm"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteCategory(c.id)}
-                          disabled={busyCategoryId === c.id}
-                          className="shrink-0 text-text-secondary hover:text-error disabled:opacity-50"
-                          aria-label="Удалить статью"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                      <div key={c.id} className="space-y-1 rounded-lg border border-border bg-bg px-2.5 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={categoryDrafts[c.id] ?? c.name}
+                            onChange={(e) => setCategoryDrafts((d) => ({ ...d, [c.id]: e.target.value }))}
+                            onBlur={() => handleRenameCategory(c.id, c.name)}
+                            disabled={busyCategoryId === c.id}
+                            className="h-8 min-w-0 flex-1 text-sm"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCategory(c.id)}
+                            disabled={busyCategoryId === c.id}
+                            className="shrink-0 text-text-secondary hover:text-error disabled:opacity-50"
+                            aria-label="Удалить статью"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        {type === "expense" && (
+                          <select
+                            value={c.payoutTarget === "investor" ? `investor:${c.linkedInvestorId}` : (c.payoutTarget ?? "")}
+                            onChange={(e) => handleSetPayoutTarget(c.id, e.target.value)}
+                            disabled={busyCategoryId === c.id}
+                            className="h-7 w-full rounded-md border border-border bg-surface px-2 text-xs text-text disabled:opacity-50"
+                          >
+                            <option value="">Сумма не подставляется автоматически</option>
+                            <option value="assigned_manager">Менеджер, закреплённый за клиентом</option>
+                            {investors.map((inv) => (
+                              <option key={inv.id} value={`investor:${inv.id}`}>
+                                Инвестор: {inv.name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
                       </div>
                     ))}
                 </div>
@@ -728,6 +831,10 @@ function ManagerCashTab() {
             </div>
             {previewAmountCny !== null && (
               <p className="text-xs text-text-secondary">= ¥ {money(previewAmountCny)}</p>
+            )}
+            {suggestionLoading && <p className="text-xs text-text-secondary">Считаем сумму к выплате…</p>}
+            {!suggestionLoading && suggestionNote && (
+              <p className="text-xs text-primary">Сумма подставлена автоматически. {suggestionNote}</p>
             )}
 
             <div className="space-y-1.5">
