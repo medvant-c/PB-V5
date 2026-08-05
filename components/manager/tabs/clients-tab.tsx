@@ -185,6 +185,10 @@ function fmtRub(value: number): string {
   return Math.round(value).toLocaleString("ru-RU");
 }
 
+function fmtUsd(value: number): string {
+  return value.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 // Everything that makes up totalRub, for the hover breakdown — attached
 // services aren't a field on Quote itself (they live in a separate table),
 // so that line is the residual after every other known component is
@@ -628,6 +632,18 @@ function ClientQuotes({
     }
   }
 
+  // Упаковка/страховка/МСК are keyed in by the manager in $ (that's how the
+  // warehouse reports them), but stored on Quote in ₽ (packagingCostRub etc.)
+  // so every other consumer — profit/premium exclusion, PDF, buyout invoice —
+  // keeps working in ₽ unchanged. Convert at the quote's own usdRateUsed,
+  // the same rate already used for the cargo-delivery $→₽ conversion above.
+  function rubToUsdDraft(rub: string | undefined, usdRateUsed: string): string {
+    if (!rub || rub === "0") return "";
+    const rate = Number(usdRateUsed);
+    if (!Number.isFinite(rate) || rate <= 0) return "";
+    return (Number(rub) / rate).toFixed(2);
+  }
+
   function openCargoModal(quoteId: string, pendingStatus: string | null) {
     const quote = quotes.find((q) => q.id === quoteId);
     setCargoModalQuoteId(quoteId);
@@ -636,20 +652,23 @@ function ClientQuotes({
     setCargoModalDraft({
       weight: quote?.actualTotalWeightKg ?? quote?.totalWeightKg ?? "",
       volume: quote?.actualTotalVolumeM3 ?? quote?.totalVolumeM3 ?? "",
-      packaging: quote?.packagingCostRub && quote.packagingCostRub !== "0" ? quote.packagingCostRub : "",
-      insurance: quote?.insuranceCostRub && quote.insuranceCostRub !== "0" ? quote.insuranceCostRub : "",
-      msk: quote?.mskExpensesRub && quote.mskExpensesRub !== "0" ? quote.mskExpensesRub : "",
+      packaging: quote ? rubToUsdDraft(quote.packagingCostRub, quote.usdRateUsed) : "",
+      insurance: quote ? rubToUsdDraft(quote.insuranceCostRub, quote.usdRateUsed) : "",
+      msk: quote ? rubToUsdDraft(quote.mskExpensesRub, quote.usdRateUsed) : "",
     });
   }
 
   async function handleActualizeCargo() {
     if (!cargoModalQuoteId) return;
+    const quote = quotes.find((q) => q.id === cargoModalQuoteId);
     const weight = Number(cargoModalDraft.weight);
     const volume = Number(cargoModalDraft.volume);
     if (!Number.isFinite(weight) || weight <= 0 || !Number.isFinite(volume) || volume <= 0) {
       setCargoModalError("Укажите реальный вес и объём.");
       return;
     }
+    const usdRateUsed = Number(quote?.usdRateUsed ?? 0);
+    const usdToRub = (draft: string) => (draft.trim() ? String(Number(draft) * usdRateUsed) : "");
     setCargoModalBusy(true);
     setCargoModalError(null);
     try {
@@ -659,9 +678,9 @@ function ClientQuotes({
         body: JSON.stringify({
           actualTotalWeightKg: weight,
           actualTotalVolumeM3: volume,
-          packagingCostRub: cargoModalDraft.packaging,
-          insuranceCostRub: cargoModalDraft.insurance,
-          mskExpensesRub: cargoModalDraft.msk,
+          packagingCostRub: usdToRub(cargoModalDraft.packaging),
+          insuranceCostRub: usdToRub(cargoModalDraft.insurance),
+          mskExpensesRub: usdToRub(cargoModalDraft.msk),
         }),
       });
       if (!res.ok) {
@@ -2135,15 +2154,21 @@ function ClientQuotes({
               ? Math.max(0, Number(quote.cargoRateUsd) * newBasisQuantity - Number(quote.cargoDiscountUsd))
               : null;
             const newCargoDeliveryRub = newCargoDeliveryUsd != null ? newCargoDeliveryUsd * Number(quote.usdRateUsed) : null;
-            const packagingCostRub = cargoModalDraft.packaging.trim() ? Number(cargoModalDraft.packaging) : 0;
-            const insuranceCostRub = cargoModalDraft.insurance.trim() ? Number(cargoModalDraft.insurance) : 0;
-            const mskExpensesRub = cargoModalDraft.msk.trim() ? Number(cargoModalDraft.msk) : 0;
-            const newExtraCostsRub = packagingCostRub + insuranceCostRub + mskExpensesRub;
+            const usdRateUsed = Number(quote.usdRateUsed);
+            // Упаковка/страховка/МСК are keyed in by the manager in $ — converted
+            // to ₽ at the quote's own usdRateUsed for storage/totals, same rate
+            // the cargo-delivery $→₽ conversion above already uses.
+            const packagingCostUsd = cargoModalDraft.packaging.trim() ? Number(cargoModalDraft.packaging) : 0;
+            const insuranceCostUsd = cargoModalDraft.insurance.trim() ? Number(cargoModalDraft.insurance) : 0;
+            const mskExpensesUsd = cargoModalDraft.msk.trim() ? Number(cargoModalDraft.msk) : 0;
+            const newExtraCostsUsd = packagingCostUsd + insuranceCostUsd + mskExpensesUsd;
+            const newExtraCostsRub = newExtraCostsUsd * usdRateUsed;
             const oldExtraCostsRub = Number(quote.packagingCostRub) + Number(quote.insuranceCostRub) + Number(quote.mskExpensesRub);
             const newTotalRub =
               newCargoDeliveryRub != null
                 ? Number(quote.totalRub) - Number(quote.cargoDeliveryRub) + newCargoDeliveryRub - oldExtraCostsRub + newExtraCostsRub
                 : null;
+            const newTotalUsd = newTotalRub != null && usdRateUsed > 0 ? newTotalRub / usdRateUsed : null;
 
             return (
               <>
@@ -2189,7 +2214,7 @@ function ClientQuotes({
 
                   <div className="grid grid-cols-3 gap-2">
                     <div>
-                      <Label htmlFor="cargo-actual-packaging">Упаковка, ₽</Label>
+                      <Label htmlFor="cargo-actual-packaging">Упаковка, $</Label>
                       <Input
                         id="cargo-actual-packaging"
                         type="text"
@@ -2200,7 +2225,7 @@ function ClientQuotes({
                       />
                     </div>
                     <div>
-                      <Label htmlFor="cargo-actual-insurance">Страховка, ₽</Label>
+                      <Label htmlFor="cargo-actual-insurance">Страховка, $</Label>
                       <Input
                         id="cargo-actual-insurance"
                         type="text"
@@ -2211,7 +2236,7 @@ function ClientQuotes({
                       />
                     </div>
                     <div>
-                      <Label htmlFor="cargo-actual-msk">Расходы МСК, ₽</Label>
+                      <Label htmlFor="cargo-actual-msk">Расходы МСК, $</Label>
                       <Input
                         id="cargo-actual-msk"
                         type="text"
@@ -2223,7 +2248,7 @@ function ClientQuotes({
                     </div>
                   </div>
 
-                  {draftValid && newCargoDeliveryRub != null && newTotalRub != null && (
+                  {draftValid && newCargoDeliveryRub != null && newTotalRub != null && newTotalUsd != null && (
                     <div className="rounded-lg bg-bg p-3 text-sm">
                       <div className="flex justify-between text-text-secondary">
                         <span>Было (карго)</span>
@@ -2233,15 +2258,17 @@ function ClientQuotes({
                         <span>Станет (карго)</span>
                         <span>{fmtRub(newCargoDeliveryRub)} ₽</span>
                       </div>
-                      {newExtraCostsRub > 0 && (
+                      {newExtraCostsUsd > 0 && (
                         <div className="flex justify-between text-text-secondary">
                           <span>Упаковка + страховка + МСК</span>
-                          <span>{fmtRub(newExtraCostsRub)} ₽</span>
+                          <span>${fmtUsd(newExtraCostsUsd)} ({fmtRub(newExtraCostsRub)} ₽)</span>
                         </div>
                       )}
                       <div className="mt-1.5 flex justify-between border-t border-border pt-1.5 font-bold text-primary">
                         <span>Новый итог просчёта</span>
-                        <span>{fmtRub(newTotalRub)} ₽</span>
+                        <span>
+                          ${fmtUsd(newTotalUsd)} ({fmtRub(newTotalRub)} ₽ · курс {usdRateUsed.toFixed(2)})
+                        </span>
                       </div>
                     </div>
                   )}
