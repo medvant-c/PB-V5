@@ -32,12 +32,38 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { actualTotalWeightKg, actualTotalVolumeM3 } = (body as { actualTotalWeightKg?: unknown; actualTotalVolumeM3?: unknown }) ?? {};
+  const { actualTotalWeightKg, actualTotalVolumeM3, packagingCostRub, insuranceCostRub, mskExpensesRub } =
+    (body as {
+      actualTotalWeightKg?: unknown;
+      actualTotalVolumeM3?: unknown;
+      packagingCostRub?: unknown;
+      insuranceCostRub?: unknown;
+      mskExpensesRub?: unknown;
+    }) ?? {};
   const weightKg = Number(actualTotalWeightKg);
   const volumeM3 = Number(actualTotalVolumeM3);
   if (!Number.isFinite(weightKg) || weightKg <= 0 || !Number.isFinite(volumeM3) || volumeM3 <= 0) {
     return Response.json({ error: "Укажите реальный вес и объём." }, { status: 400 });
   }
+  // Optional — a shipment doesn't always have all three. Blank/omitted
+  // means "unchanged" would be surprising here (unlike a partial edit
+  // elsewhere) since this whole route only ever fires once per real
+  // shipment event; missing means 0, not "leave whatever was there."
+  function parseNonNegativeOrZero(value: unknown, label: string): number | { error: string } {
+    if (value === undefined || value === null || value === "") return 0;
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return { error: `«${label}» должно быть неотрицательным числом.` };
+    return n;
+  }
+  const packagingCostResult = parseNonNegativeOrZero(packagingCostRub, "Стоимость упаковки");
+  if (typeof packagingCostResult === "object") return Response.json(packagingCostResult, { status: 400 });
+  const insuranceCostResult = parseNonNegativeOrZero(insuranceCostRub, "Страховка");
+  if (typeof insuranceCostResult === "object") return Response.json(insuranceCostResult, { status: 400 });
+  const mskExpensesResult = parseNonNegativeOrZero(mskExpensesRub, "Расходы МСК");
+  if (typeof mskExpensesResult === "object") return Response.json(mskExpensesResult, { status: 400 });
+  const newPackagingCostRub = packagingCostResult;
+  const newInsuranceCostRub = insuranceCostResult;
+  const newMskExpensesRub = mskExpensesResult;
 
   const isFirstActualization = quote.estimatedTotalWeightKg === null;
 
@@ -74,7 +100,13 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const cargoCostUsd = costPerUnit * newBasisQuantity;
   const cargoCostRub = cargoCostUsd * usdRateUsed;
   const densityKgM3 = volumeM3 > 0 ? weightKg / volumeM3 : 0;
-  const totalRub = Number(quote.totalRub) - Number(quote.cargoDeliveryRub) + cargoDeliveryRub;
+  // Old extra-costs values default to 0 on a first actualization (schema
+  // default) — this delta swap is a no-op then, same as re-actualizing
+  // with the same numbers twice.
+  const oldExtraCostsRub = Number(quote.packagingCostRub) + Number(quote.insuranceCostRub) + Number(quote.mskExpensesRub);
+  const newExtraCostsRub = newPackagingCostRub + newInsuranceCostRub + newMskExpensesRub;
+  const totalRub =
+    Number(quote.totalRub) - Number(quote.cargoDeliveryRub) + cargoDeliveryRub - oldExtraCostsRub + newExtraCostsRub;
 
   const updated = await prisma.quote.update({
     where: { id },
@@ -102,6 +134,9 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       cargoDeliveryRub,
       cargoCostUsd,
       cargoCostRub,
+      packagingCostRub: newPackagingCostRub,
+      insuranceCostRub: newInsuranceCostRub,
+      mskExpensesRub: newMskExpensesRub,
       totalRub,
     },
     select: {
@@ -111,6 +146,9 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       densityKgM3: true,
       cargoDeliveryUsd: true,
       cargoDeliveryRub: true,
+      packagingCostRub: true,
+      insuranceCostRub: true,
+      mskExpensesRub: true,
       totalRub: true,
       estimatedTotalRub: true,
       cargoActualizedAt: true,

@@ -99,6 +99,12 @@ interface QuoteForStats {
   actualSupplierDiscountCny: unknown;
   buyoutSelfSourcedBoost: boolean | null;
   cargoBonusRatePercent: unknown;
+  // Pure pass-through extra shipment costs billed to the client — excluded
+  // from profit/premium in quote-profit.ts. See Quote.packagingCostRub in
+  // prisma/schema.prisma.
+  packagingCostRub: unknown;
+  insuranceCostRub: unknown;
+  mskExpensesRub: unknown;
   completedAt: Date | null;
   displayId: number;
   productName: string;
@@ -338,6 +344,9 @@ export async function GET(req: NextRequest) {
       actualSupplierDiscountCny: true,
       buyoutSelfSourcedBoost: true,
       cargoBonusRatePercent: true,
+      packagingCostRub: true,
+      insuranceCostRub: true,
+      mskExpensesRub: true,
       completedAt: true,
       displayId: true,
       productName: true,

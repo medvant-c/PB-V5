@@ -126,6 +126,13 @@ interface QuotePdfProps {
     customProductionFeeRub: number;
     buyoutCommissionPercent: number;
     buyoutCommissionRub: number;
+    // Real extra costs at actual shipment — see Quote.packagingCostRub in
+    // prisma/schema.prisma. 0 (the common case, before shipment or when
+    // none applied) simply renders no line, same as customProductionFeeRub
+    // when isCustomProduction is false.
+    packagingCostRub: number;
+    insuranceCostRub: number;
+    mskExpensesRub: number;
     totalRub: number;
     createdAt: Date | string;
   };
@@ -238,6 +245,24 @@ function QuotePdfPage({ quote, client, photoBuffers, attachedServices }: QuotePd
               {quote.cargoDeliveryUsd.toFixed(1)}$ / {fmt(quote.cargoDeliveryRub)}₽
             </Text>
           </View>
+          {quote.packagingCostRub > 0 && (
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>Упаковка</Text>
+              <Text style={styles.rowValue}>{fmt(quote.packagingCostRub)}₽</Text>
+            </View>
+          )}
+          {quote.insuranceCostRub > 0 && (
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>Страховка</Text>
+              <Text style={styles.rowValue}>{fmt(quote.insuranceCostRub)}₽</Text>
+            </View>
+          )}
+          {quote.mskExpensesRub > 0 && (
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>Расходы МСК</Text>
+              <Text style={styles.rowValue}>{fmt(quote.mskExpensesRub)}₽</Text>
+            </View>
+          )}
           {attachedServices.map((service, index) => (
             <View key={index} style={styles.row}>
               <Text style={styles.rowLabel}>{service.name}</Text>

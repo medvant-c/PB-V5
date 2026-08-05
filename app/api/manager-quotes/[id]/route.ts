@@ -292,7 +292,11 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       buyoutCommissionOverrideConfirmed,
       buyoutCommissionOverrideConfirmedByManagerId,
       buyoutCommissionOverrideConfirmedAt,
-      totalRub: computed.totalRub,
+      // computed.totalRub knows nothing about packaging/insurance/МСК costs
+      // (those are entered separately, at actual shipment — see
+      // actualize-cargo/route.ts) — carried forward here so an unrelated
+      // edit later never silently drops them from what the client owes.
+      totalRub: computed.totalRub + Number(existing.packagingCostRub) + Number(existing.insuranceCostRub) + Number(existing.mskExpensesRub),
       cnyRateUsed: engineInputs.cnyRateRub,
       cnyRateRubOverride: fields.cnyRateRubOverride ?? null,
       cnyRateOverrideConfirmed,

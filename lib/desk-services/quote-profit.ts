@@ -22,6 +22,18 @@ interface QuoteProfitFields {
   actualBuyoutCny: unknown;
   actualBuyoutRateUsed: unknown;
   actualSupplierDiscountCny: unknown;
+  // Real extra costs billed to the client at actual shipment (see
+  // actualize-cargo/route.ts) — pure pass-through, excluded from both
+  // residual formulas below for the same reason chinaDeliveryRub/
+  // cargoDeliveryRub already are. See Quote.packagingCostRub in
+  // prisma/schema.prisma.
+  packagingCostRub: unknown;
+  insuranceCostRub: unknown;
+  mskExpensesRub: unknown;
+}
+
+function extraShipmentCostsRub(q: QuoteProfitFields): number {
+  return Number(q.packagingCostRub) + Number(q.insuranceCostRub) + Number(q.mskExpensesRub);
 }
 
 interface SourceProfits {
@@ -43,7 +55,8 @@ function proscetProfitRub(q: QuoteProfitFields): number {
 // commission plus whatever markup the estimate implies — after Просчёт is
 // carved out.
 function estimatedSourceProfits(q: QuoteProfitFields): SourceProfits {
-  const residual = Number(q.totalRub) - Number(q.totalPriceRub) - Number(q.chinaDeliveryRub) - Number(q.cargoDeliveryRub);
+  const residual =
+    Number(q.totalRub) - Number(q.totalPriceRub) - Number(q.chinaDeliveryRub) - Number(q.cargoDeliveryRub) - extraShipmentCostsRub(q);
   const proscetRub = proscetProfitRub(q);
   return { proscetRub, buyoutRub: residual - proscetRub, discountRub: 0 };
 }
@@ -56,7 +69,8 @@ function estimatedSourceProfits(q: QuoteProfitFields): SourceProfits {
 // out of the residual into its own line.
 function factualSourceProfits(q: QuoteProfitFields): SourceProfits {
   const realBuyoutRub = Number(q.actualBuyoutCny) * Number(q.actualBuyoutRateUsed);
-  const residual = Number(q.totalRub) - Number(q.chinaDeliveryRub) - Number(q.cargoDeliveryRub) - realBuyoutRub;
+  const residual =
+    Number(q.totalRub) - Number(q.chinaDeliveryRub) - Number(q.cargoDeliveryRub) - realBuyoutRub - extraShipmentCostsRub(q);
   const proscetRub = proscetProfitRub(q);
   const discountRub = Number(q.actualSupplierDiscountCny ?? 0) * Number(q.actualBuyoutRateUsed);
   return { proscetRub, buyoutRub: residual - proscetRub - discountRub, discountRub };

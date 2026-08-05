@@ -932,6 +932,19 @@ model Quote {
   // buyoutPremiumRatePercent's snapshot-at-transition-time reasoning.
   cargoBonusRatePercent Decimal?
 
+  // Real extra costs at actual shipment, reported by the кладовщик
+  // alongside real weight/volume (see actualize-cargo/route.ts) —
+  // packaging materials, cargo insurance, and Moscow consolidation
+  // handling. Added to totalRub (what the client owes) but deliberately
+  // EXCLUDED from every profit/premium formula in lib/desk-services/
+  // quote-profit.ts — pure pass-through, same reasoning chinaDeliveryRub/
+  // cargoDeliveryRub are already excluded from the "Выкуп" profit bucket
+  // (the company has a real matching cost for each, so counting 100% of
+  // it as profit/premium base would be wrong). See PB-V5 chat 2026-08-05.
+  packagingCostRub Decimal @default(0)
+  insuranceCostRub Decimal @default(0)
+  mskExpensesRub   Decimal @default(0)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

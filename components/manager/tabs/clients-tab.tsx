@@ -161,6 +161,9 @@ interface QuoteRecord {
   estimatedTotalRub: string | null;
   cargoActualizedAt: string | null;
   cargoBonusRatePercent: string | null;
+  packagingCostRub: string;
+  insuranceCostRub: string;
+  mskExpensesRub: string;
 }
 
 // Below this density, cargo is always priced "по объёму" regardless of the
@@ -194,12 +197,23 @@ function quoteBreakdown(quote: QuoteRecord) {
   const buyoutCommissionRub = Number(quote.buyoutCommissionRub);
   const cargoDeliveryRub = Number(quote.cargoDeliveryRub);
   const totalRub = Number(quote.totalRub);
+  // Real extra shipment costs (see actualize-cargo/route.ts) — carved out
+  // by name, same as every other known line, so they don't silently get
+  // mistaken for "Доп. услуги" below (that's a derived residual, not a
+  // real field).
+  const extraShipmentCostsRub = Number(quote.packagingCostRub) + Number(quote.insuranceCostRub) + Number(quote.mskExpensesRub);
   const cargoBasis =
     quote.deliveryPricingMode === "density" && Number(quote.densityKgM3) >= LOW_DENSITY_VOLUME_THRESHOLD_KG_M3
       ? "по плотности"
       : "по объёму";
   const knownSum =
-    totalPriceRub + chinaDeliveryRub + searchServiceFeeRub + customProductionFeeRub + buyoutCommissionRub + cargoDeliveryRub;
+    totalPriceRub +
+    chinaDeliveryRub +
+    searchServiceFeeRub +
+    customProductionFeeRub +
+    buyoutCommissionRub +
+    cargoDeliveryRub +
+    extraShipmentCostsRub;
   const attachedServicesRub = Math.max(0, totalRub - knownSum);
 
   return {
@@ -211,6 +225,7 @@ function quoteBreakdown(quote: QuoteRecord) {
     cargoDeliveryRub,
     cargoBasis,
     cargoDiscountUsd: Number(quote.cargoDiscountUsd),
+    extraShipmentCostsRub,
     attachedServicesRub,
   };
 }
@@ -512,7 +527,13 @@ function ClientQuotes({
   // (pendingStatus null).
   const [cargoModalQuoteId, setCargoModalQuoteId] = useState<string | null>(null);
   const [cargoModalPendingStatus, setCargoModalPendingStatus] = useState<string | null>(null);
-  const [cargoModalDraft, setCargoModalDraft] = useState<{ weight: string; volume: string }>({ weight: "", volume: "" });
+  const [cargoModalDraft, setCargoModalDraft] = useState<{ weight: string; volume: string; packaging: string; insurance: string; msk: string }>({
+    weight: "",
+    volume: "",
+    packaging: "",
+    insurance: "",
+    msk: "",
+  });
   const [cargoModalBusy, setCargoModalBusy] = useState(false);
   const [cargoModalError, setCargoModalError] = useState<string | null>(null);
   const [recalculatingId, setRecalculatingId] = useState<string | null>(null);
@@ -615,6 +636,9 @@ function ClientQuotes({
     setCargoModalDraft({
       weight: quote?.actualTotalWeightKg ?? quote?.totalWeightKg ?? "",
       volume: quote?.actualTotalVolumeM3 ?? quote?.totalVolumeM3 ?? "",
+      packaging: quote?.packagingCostRub && quote.packagingCostRub !== "0" ? quote.packagingCostRub : "",
+      insurance: quote?.insuranceCostRub && quote.insuranceCostRub !== "0" ? quote.insuranceCostRub : "",
+      msk: quote?.mskExpensesRub && quote.mskExpensesRub !== "0" ? quote.mskExpensesRub : "",
     });
   }
 
@@ -632,7 +656,13 @@ function ClientQuotes({
       const res = await fetch(`/api/manager-quotes/${cargoModalQuoteId}/actualize-cargo`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actualTotalWeightKg: weight, actualTotalVolumeM3: volume }),
+        body: JSON.stringify({
+          actualTotalWeightKg: weight,
+          actualTotalVolumeM3: volume,
+          packagingCostRub: cargoModalDraft.packaging,
+          insuranceCostRub: cargoModalDraft.insurance,
+          mskExpensesRub: cargoModalDraft.msk,
+        }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -1668,6 +1698,12 @@ function ClientQuotes({
                                   <span>-${b.cargoDiscountUsd.toFixed(1)}</span>
                                 </div>
                               )}
+                              {b.extraShipmentCostsRub > 0 && (
+                                <div className="flex justify-between gap-4">
+                                  <span>Упаковка, страховка, МСК</span>
+                                  <span>{fmtRub(b.extraShipmentCostsRub)} ₽</span>
+                                </div>
+                              )}
                               {b.attachedServicesRub > 1 && (
                                 <div className="flex justify-between gap-4">
                                   <span>Доп. услуги</span>
@@ -2099,7 +2135,15 @@ function ClientQuotes({
               ? Math.max(0, Number(quote.cargoRateUsd) * newBasisQuantity - Number(quote.cargoDiscountUsd))
               : null;
             const newCargoDeliveryRub = newCargoDeliveryUsd != null ? newCargoDeliveryUsd * Number(quote.usdRateUsed) : null;
-            const newTotalRub = newCargoDeliveryRub != null ? Number(quote.totalRub) - Number(quote.cargoDeliveryRub) + newCargoDeliveryRub : null;
+            const packagingCostRub = cargoModalDraft.packaging.trim() ? Number(cargoModalDraft.packaging) : 0;
+            const insuranceCostRub = cargoModalDraft.insurance.trim() ? Number(cargoModalDraft.insurance) : 0;
+            const mskExpensesRub = cargoModalDraft.msk.trim() ? Number(cargoModalDraft.msk) : 0;
+            const newExtraCostsRub = packagingCostRub + insuranceCostRub + mskExpensesRub;
+            const oldExtraCostsRub = Number(quote.packagingCostRub) + Number(quote.insuranceCostRub) + Number(quote.mskExpensesRub);
+            const newTotalRub =
+              newCargoDeliveryRub != null
+                ? Number(quote.totalRub) - Number(quote.cargoDeliveryRub) + newCargoDeliveryRub - oldExtraCostsRub + newExtraCostsRub
+                : null;
 
             return (
               <>
@@ -2143,6 +2187,42 @@ function ClientQuotes({
                     </div>
                   </div>
 
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <Label htmlFor="cargo-actual-packaging">Упаковка, ₽</Label>
+                      <Input
+                        id="cargo-actual-packaging"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={cargoModalDraft.packaging}
+                        onChange={(e) => setCargoModalDraft((current) => ({ ...current, packaging: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="cargo-actual-insurance">Страховка, ₽</Label>
+                      <Input
+                        id="cargo-actual-insurance"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={cargoModalDraft.insurance}
+                        onChange={(e) => setCargoModalDraft((current) => ({ ...current, insurance: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="cargo-actual-msk">Расходы МСК, ₽</Label>
+                      <Input
+                        id="cargo-actual-msk"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={cargoModalDraft.msk}
+                        onChange={(e) => setCargoModalDraft((current) => ({ ...current, msk: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
                   {draftValid && newCargoDeliveryRub != null && newTotalRub != null && (
                     <div className="rounded-lg bg-bg p-3 text-sm">
                       <div className="flex justify-between text-text-secondary">
@@ -2153,6 +2233,12 @@ function ClientQuotes({
                         <span>Станет (карго)</span>
                         <span>{fmtRub(newCargoDeliveryRub)} ₽</span>
                       </div>
+                      {newExtraCostsRub > 0 && (
+                        <div className="flex justify-between text-text-secondary">
+                          <span>Упаковка + страховка + МСК</span>
+                          <span>{fmtRub(newExtraCostsRub)} ₽</span>
+                        </div>
+                      )}
                       <div className="mt-1.5 flex justify-between border-t border-border pt-1.5 font-bold text-primary">
                         <span>Новый итог просчёта</span>
                         <span>{fmtRub(newTotalRub)} ₽</span>
