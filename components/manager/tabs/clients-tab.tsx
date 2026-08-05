@@ -147,6 +147,8 @@ interface QuoteRecord {
   cnyRateUsed: string;
   actualBuyoutCny: string | null;
   actualBuyoutRateUsed: string | null;
+  actualClientPaymentRub: string | null;
+  actualClientPaymentRateUsed: string | null;
   buyoutFactConfirmed: boolean;
   buyoutConfirmedAt: string | null;
   buyoutPremiumRatePercent: string | null;
@@ -166,6 +168,7 @@ interface QuoteRecord {
   mskExpensesRub: string;
   actualCargoCostRateUsd: string | null;
   actualCargoCostBasis: "density" | "volume" | null;
+  paymentAllocations: { amountRub: string }[];
 }
 
 // Below this density, cargo is always priced "по объёму" regardless of the
@@ -517,7 +520,9 @@ function ClientQuotes({
   // app/api/manager-quotes/[id]/buyout-invoice/route.ts.
   const [invoiceMenuQuoteId, setInvoiceMenuQuoteId] = useState<string | null>(null);
   const [expandedBuyoutId, setExpandedBuyoutId] = useState<string | null>(null);
-  const [buyoutDrafts, setBuyoutDrafts] = useState<Record<string, { cny: string; rate: string }>>({});
+  const [buyoutDrafts, setBuyoutDrafts] = useState<
+    Record<string, { cny: string; rate: string; paymentRub: string; paymentRate: string }>
+  >({});
   const [savingBuyoutId, setSavingBuyoutId] = useState<string | null>(null);
 
   // Owner-only manual override of one quote's cargo bonus % — see
@@ -1139,11 +1144,13 @@ function ClientQuotes({
     }
   }
 
-  function getBuyoutDraft(quote: QuoteRecord): { cny: string; rate: string } {
+  function getBuyoutDraft(quote: QuoteRecord): { cny: string; rate: string; paymentRub: string; paymentRate: string } {
     return (
       buyoutDrafts[quote.id] ?? {
         cny: quote.actualBuyoutCny ?? "",
         rate: quote.actualBuyoutRateUsed ?? quote.cnyRateUsed,
+        paymentRub: quote.actualClientPaymentRub ?? "",
+        paymentRate: quote.actualClientPaymentRateUsed ?? quote.cnyRateUsed,
       }
     );
   }
@@ -1154,13 +1161,21 @@ function ClientQuotes({
     const draft = getBuyoutDraft(quote);
     const cny = Number(draft.cny);
     const rate = Number(draft.rate);
+    const paymentRub = Number(draft.paymentRub);
+    const paymentRate = Number(draft.paymentRate);
     if (!Number.isFinite(cny) || cny <= 0 || !Number.isFinite(rate) || rate <= 0) return;
+    if (!Number.isFinite(paymentRub) || paymentRub <= 0 || !Number.isFinite(paymentRate) || paymentRate <= 0) return;
     setSavingBuyoutId(quoteId);
     try {
       const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-buyout`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actualBuyoutCny: cny, actualBuyoutRateUsed: rate }),
+        body: JSON.stringify({
+          actualBuyoutCny: cny,
+          actualBuyoutRateUsed: rate,
+          actualClientPaymentRub: paymentRub,
+          actualClientPaymentRateUsed: paymentRate,
+        }),
       });
       if (res.ok) await load();
     } finally {
@@ -2041,12 +2056,29 @@ function ClientQuotes({
                 const draft = getBuyoutDraft(quote);
                 const draftCny = Number(draft.cny);
                 const draftRate = Number(draft.rate);
-                const draftValid = Number.isFinite(draftCny) && draftCny > 0 && Number.isFinite(draftRate) && draftRate > 0;
+                const draftPaymentRub = Number(draft.paymentRub);
+                const draftPaymentRate = Number(draft.paymentRate);
+                const draftValid =
+                  Number.isFinite(draftCny) &&
+                  draftCny > 0 &&
+                  Number.isFinite(draftRate) &&
+                  draftRate > 0 &&
+                  Number.isFinite(draftPaymentRub) &&
+                  draftPaymentRub > 0 &&
+                  Number.isFinite(draftPaymentRate) &&
+                  draftPaymentRate > 0;
                 const draftSpentRub = draftValid ? draftCny * draftRate : null;
                 const draftProfitRub = draftSpentRub != null ? Number(quote.totalPriceRub) - draftSpentRub : null;
                 const confirmedSpentRub = quote.buyoutFactConfirmed
                   ? Number(quote.actualBuyoutCny) * Number(quote.actualBuyoutRateUsed)
                   : null;
+                // Уже получено отдельными "Приходными ордерами" с карточки
+                // клиента до подтверждения факта — "Оплата от клиента" ниже
+                // должна быть суммой ЗА ВЕСЬ просчёт (нужна целиком для
+                // расчёта скидки поставщика на сервере), но кассовый ордер
+                // сервер заведёт только на остаток сверх уже учтённого —
+                // подсказка здесь просто объясняет, откуда берётся разница.
+                const alreadyReceivedRub = quote.paymentAllocations.reduce((sum, a) => sum + Number(a.amountRub), 0);
                 return (
                   <div className="mt-2 space-y-2 rounded-lg border border-border bg-bg p-2.5">
                     <p className="text-xs text-text-secondary">
@@ -2091,6 +2123,34 @@ function ClientQuotes({
                             className="w-28 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
                           />
                         </div>
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="₽ оплата от клиента"
+                            value={draft.paymentRub}
+                            onChange={(e) =>
+                              setBuyoutDrafts((current) => ({ ...current, [quote.id]: { ...draft, paymentRub: e.target.value } }))
+                            }
+                            className="w-40 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="курс ₽→¥"
+                            value={draft.paymentRate}
+                            onChange={(e) =>
+                              setBuyoutDrafts((current) => ({ ...current, [quote.id]: { ...draft, paymentRate: e.target.value } }))
+                            }
+                            className="w-28 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                        {alreadyReceivedRub > 0 && (
+                          <p className="text-xs text-text-secondary">
+                            Уже получено {fmtRub(alreadyReceivedRub)}₽ отдельными приходными ордерами — в «оплата от
+                            клиента» укажите ОБЩУЮ сумму за весь просчёт, остаток в кассу заведётся сам.
+                          </p>
+                        )}
                         {draftValid && (
                           <p className={cn("text-xs font-medium", draftProfitRub! >= 0 ? "text-success" : "text-error")}>
                             Потрачено: {fmtRub(draftSpentRub!)}₽ → Доход с выкупа: {fmtRub(draftProfitRub!)}₽

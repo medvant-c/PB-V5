@@ -87,40 +87,69 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
   const category = await getOrCreateBuyoutIncomeCategory();
   const paymentAmountCny = paymentRub / paymentRate;
-  // Реконсиляционный остаток — см. комментарий над PATCH выше.
+  // Реконсиляционный остаток — см. комментарий над PATCH выше. Считается от
+  // ПОЛНОЙ суммы оплаты клиента (paymentRub), не от остатка ниже — скидка
+  // поставщика зависит от того, сколько клиент заплатил за весь просчёт,
+  // независимо от того, каким количеством ордеров это было оформлено.
   const servicesAndCommissionCny =
     (Number(quote.searchServiceFeeRub) + Number(quote.buyoutCommissionRub) + Number(quote.customProductionFeeRub)) /
     Number(quote.cnyRateUsed);
   const discountCny = paymentAmountCny - servicesAndCommissionCny - cny;
   const comment = `Просчёт №${quote.displayId} — ${quote.productName}`;
 
-  const cashOrder = quote.clientPaymentCashOrderId
-    ? await prisma.cashOrder.update({
-        where: { id: quote.clientPaymentCashOrderId },
-        data: {
-          categoryId: category.id,
-          clientId: quote.client.id,
-          currency: "rub",
-          amount: paymentRub,
-          cnyToCurrencyRate: paymentRate,
-          amountCny: paymentAmountCny,
-          comment,
-        },
-      })
-    : await prisma.cashOrder.create({
-        data: {
-          type: "income",
-          date: new Date(),
-          categoryId: category.id,
-          clientId: quote.client.id,
-          currency: "rub",
-          amount: paymentRub,
-          cnyToCurrencyRate: paymentRate,
-          amountCny: paymentAmountCny,
-          comment,
-          createdByManagerId: session.managerId,
-        },
-      });
+  // paymentRub — это ПОЛНАЯ сумма, которую клиент заплатил за просчёт (нужна
+  // целиком для реконсиляции скидки выше). Но часть этой суммы могла уже
+  // прийти в кассу РАНЬШЕ отдельными "Приходными ордерами" с карточки
+  // клиента (см. QuotePaymentAllocation, create-payment/route.ts) — если
+  // здесь завести кассовый ордер на всю paymentRub без вычета уже
+  // учтённого, касса задвоит доход на сумму уже оплаченных allocations. См.
+  // PB-V5 chat 2026-08-05.
+  const priorAllocations = await prisma.quotePaymentAllocation.findMany({
+    where: { quoteId: id },
+    select: { amountRub: true },
+  });
+  const alreadyReceivedRub = priorAllocations.reduce((sum, a) => sum + Number(a.amountRub), 0);
+  const remainingCashRub = Math.max(0, paymentRub - alreadyReceivedRub);
+  const remainingCashAmountCny = remainingCashRub / paymentRate;
+
+  let cashOrderId: string | null = quote.clientPaymentCashOrderId;
+  if (remainingCashRub > 0) {
+    const cashOrder = quote.clientPaymentCashOrderId
+      ? await prisma.cashOrder.update({
+          where: { id: quote.clientPaymentCashOrderId },
+          data: {
+            categoryId: category.id,
+            clientId: quote.client.id,
+            currency: "rub",
+            amount: remainingCashRub,
+            cnyToCurrencyRate: paymentRate,
+            amountCny: remainingCashAmountCny,
+            comment,
+          },
+        })
+      : await prisma.cashOrder.create({
+          data: {
+            type: "income",
+            date: new Date(),
+            categoryId: category.id,
+            clientId: quote.client.id,
+            currency: "rub",
+            amount: remainingCashRub,
+            cnyToCurrencyRate: paymentRate,
+            amountCny: remainingCashAmountCny,
+            comment,
+            createdByManagerId: session.managerId,
+          },
+        });
+    cashOrderId = cashOrder.id;
+  } else if (quote.clientPaymentCashOrderId) {
+    // Полная сумма теперь целиком покрыта более ранними приходными
+    // ордерами (например, факт скорректировали в меньшую сторону) — старый
+    // кассовый ордер на остаток больше не нужен, а не должен просто
+    // остаться висеть с устаревшей суммой.
+    await prisma.cashOrder.delete({ where: { id: quote.clientPaymentCashOrderId } });
+    cashOrderId = null;
+  }
 
   const updated = await prisma.quote.update({
     where: { id },
@@ -135,7 +164,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       buyoutSelfSourcedBoost: selfSourcedBoost,
       actualClientPaymentRub: paymentRub,
       actualClientPaymentRateUsed: paymentRate,
-      clientPaymentCashOrderId: cashOrder.id,
+      clientPaymentCashOrderId: cashOrderId,
     },
     select: {
       id: true,

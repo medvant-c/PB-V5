@@ -44,7 +44,18 @@ export async function GET(req: NextRequest) {
       ...(visibleManagerIds === "all" ? {} : { managerId: { in: visibleManagerIds } }),
     },
     orderBy: { createdAt: "desc" },
-    include: { manager: { select: { id: true, name: true } }, client: { select: { id: true, name: true, company: true } } },
+    include: {
+      manager: { select: { id: true, name: true } },
+      client: { select: { id: true, name: true, company: true } },
+      // Sum of prior "Приходный ордер" partial payments already sitting in
+      // the cash ledger for this quote — the client card's "Подтвердить
+      // факт" mini-form shows this so the amount typed for "оплата от
+      // клиента" isn't accidentally double-counted against those already-
+      // recorded orders (confirm-buyout/route.ts itself now nets this out
+      // server-side either way, this is just visibility). See PB-V5 chat
+      // 2026-08-05.
+      paymentAllocations: { select: { amountRub: true } },
+    },
   });
 
   // First photo per quote, for a small thumbnail in the list — one batch
