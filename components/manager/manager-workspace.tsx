@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, CheckSquare, Database, FileBarChart, FileText, Home, LogOut, Package, Settings, Tag, Trash2, UserCog, Users, UsersRound, Wallet } from "lucide-react";
+import { Briefcase, CheckSquare, Database, FileBarChart, FileText, Home, LogOut, Menu, Package, Settings, Tag, Trash2, UserCog, Users, UsersRound, Wallet, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ManagerClientsTab } from "@/components/manager/tabs/clients-tab";
@@ -81,6 +81,12 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
   const [exitingImpersonation, setExitingImpersonation] = useState(false);
   const [activeSection, setActiveSection] = useState<(typeof ALL_SECTIONS)[number]["id"]>("home");
   const contentRef = useRef<HTMLDivElement>(null);
+  // Below lg, the horizontal flex-wrap nav (up to 11 tabs) wraps to 5-6
+  // rows and eats the whole first screen before any real content — see
+  // PB-V5 UX audit 2026-08-05. Mirrors the public site's own hamburger +
+  // drawer pattern (components/layout/app-shell.tsx) instead of inventing a
+  // new one; the desktop nav is untouched.
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Badge on the "Подтверждения" nav tab — sum of every pending queue
   // ManagerConfirmationsTab itself lists (buyout facts, self-sourced
@@ -117,6 +123,7 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
   // not something to scroll past every time you switch tabs.
   function selectSection(id: (typeof ALL_SECTIONS)[number]["id"]) {
     setActiveSection(id);
+    setMobileMenuOpen(false);
     contentRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -186,6 +193,19 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
         <div className="rounded-2xl border border-primary/15 bg-gradient-to-r from-primary/8 via-secondary/6 to-primary/8 p-3 shadow-sm backdrop-blur-md">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Открыть меню разделов"
+              className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-text-secondary transition-colors hover:bg-white/60 hover:text-text lg:hidden"
+            >
+              <Menu className="h-5 w-5" />
+              {pendingConfirmationsCount > 0 && (
+                <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-error px-1 text-[9px] font-bold text-white">
+                  {pendingConfirmationsCount}
+                </span>
+              )}
+            </button>
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-secondary text-white">
               <Briefcase className="h-4.5 w-4.5" />
             </span>
@@ -202,11 +222,11 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
             className="flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-error/10 hover:text-error disabled:opacity-50"
           >
             <LogOut className="h-4 w-4 shrink-0" />
-            Выйти
+            <span className="hidden sm:inline">Выйти</span>
           </button>
         </div>
 
-        <nav className="mt-3 flex flex-wrap items-center gap-1 border-t border-primary/10 pt-3">
+        <nav className="mt-3 hidden flex-wrap items-center gap-1 border-t border-primary/10 pt-3 lg:flex">
           {SECTIONS.map((section) => (
             <button
               key={section.id}
@@ -231,6 +251,65 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
         </nav>
       </div>
       </div>
+
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button
+            type="button"
+            aria-label="Закрыть меню"
+            className="absolute inset-0 bg-black/30"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <div className="absolute inset-y-0 left-0 flex w-72 flex-col bg-surface shadow-xl">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div>
+                <h2 className="text-sm font-bold text-text">{name}</h2>
+                <p className="text-xs text-text-secondary">{ROLE_LABEL[role]} · Panda Bridge</p>
+              </div>
+              <button
+                type="button"
+                aria-label="Закрыть меню"
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-text-secondary hover:bg-black/5"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-3">
+              {SECTIONS.map((section) => (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={() => selectSection(section.id)}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors",
+                    activeSection === section.id ? "bg-primary/10 text-primary" : "text-text-secondary hover:bg-black/5 hover:text-text",
+                  )}
+                >
+                  <section.icon className="h-4.5 w-4.5 shrink-0" />
+                  {section.label}
+                  {section.id === "confirmations" && pendingConfirmationsCount > 0 && (
+                    <span className="ml-auto flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-error px-1 text-[10px] font-bold text-white">
+                      {pendingConfirmationsCount}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </nav>
+            <div className="border-t border-border px-3 py-3">
+              <button
+                type="button"
+                onClick={handleLogout}
+                disabled={loggingOut}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-text-secondary transition-colors hover:bg-error/10 hover:text-error disabled:opacity-50"
+              >
+                <LogOut className="h-4.5 w-4.5 shrink-0" />
+                Выйти
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Card doesn't forward refs (plain function component, not
           forwardRef) — wrapping div carries the scroll target instead. */}
