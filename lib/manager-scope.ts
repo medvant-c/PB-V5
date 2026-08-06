@@ -8,7 +8,13 @@ import type { ManagerSession } from "@/lib/manager-auth";
 // `managerId: { in: ... }` in Prisma queries.
 async function getVisibleManagerIds(session: ManagerSession): Promise<"all" | string[]> {
   if (session.role === "owner") return "all";
-  if (session.role === "manager") return [session.managerId];
+  // outsource_manager has the exact same scope as a plain "manager" — only
+  // their own clients, never a subordinate's — see ManagerRole.
+  // outsource_manager's schema comment. Deliberately NOT folded into the
+  // "manager" check above via an array/includes, so a future new role
+  // added here can't silently fall through into the senior branch below
+  // the way this one almost did.
+  if (session.role === "manager" || session.role === "outsource_manager") return [session.managerId];
 
   // senior — self plus every manager attached to them via supervisorId.
   const subordinates = await prisma.manager.findMany({

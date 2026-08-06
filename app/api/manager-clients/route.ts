@@ -59,7 +59,8 @@ export async function GET(req: NextRequest) {
   // manager-dashboard.tsx, never sent to senior/plain-manager sessions
   // regardless of contactsHiddenFromManager.
   const responseClients = clients.map((client) => {
-    const shouldMask = session.role === "manager" && client.contactsHiddenFromManager;
+    const shouldMask =
+      (session.role === "manager" || session.role === "outsource_manager") && client.contactsHiddenFromManager;
     const { phone, email, messenger, vladShareRatePercentOverride, ...rest } = client;
     return {
       ...rest,

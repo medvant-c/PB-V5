@@ -25,7 +25,7 @@ import { DeploymentWatcher } from "@/components/manager/deployment-watcher";
 
 interface ManagerWorkspaceProps {
   name: string;
-  role: "manager" | "senior" | "owner";
+  role: "manager" | "senior" | "owner" | "outsource_manager";
   // Set only when the owner is viewing via "Войти как сотрудник" — carries
   // their own name for the banner, not just a boolean, so the banner can
   // say who's actually looking without another round trip.
@@ -36,37 +36,45 @@ const ROLE_LABEL: Record<ManagerWorkspaceProps["role"], string> = {
   manager: "Менеджер",
   senior: "Старший менеджер",
   owner: "Руководитель",
+  outsource_manager: "Менеджер (аутсорсинг)",
 };
 
 // Клиенты/Тарифы are visible to everyone; Сотрудники (staff admin — create
 // accounts, block, reset passwords, assign старший менеджер hierarchy) is
 // owner-only — same array-of-{id,label,icon,Component} pattern as
 // components/desk/desk-workspace.tsx, filtered by role below.
+// hiddenFromOutsource — same scope/rights as a plain "manager" otherwise,
+// see ManagerRole.outsource_manager's own schema comment for why "База
+// данных" specifically is hidden from this one role (everything else here
+// is already gated tighter than "manager" by ownerOnly/seniorOrOwnerOnly,
+// so it doesn't need this extra flag).
 const ALL_SECTIONS = [
   // Own tab now, not a permanent fixture above every other tab (see PB-V5
   // chat 2026-07-30) — it was pushing every tab's actual content down the
   // page regardless of whether the manager wanted to see it right then.
-  { id: "home", label: "Главная", icon: Home, Component: ManagerDashboard, ownerOnly: false, seniorOrOwnerOnly: false },
-  { id: "clients", label: "Клиенты", icon: Users, Component: ManagerClientsTab, ownerOnly: false, seniorOrOwnerOnly: false },
+  { id: "home", label: "Главная", icon: Home, Component: ManagerDashboard, ownerOnly: false, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "clients", label: "Клиенты", icon: Users, Component: ManagerClientsTab, ownerOnly: false, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
   // Same quotes, same actions as inside a client's own card (see
   // components/manager/tabs/clients-tab.tsx's ClientQuotes, reused here
   // with no clientId) — just flattened into one sortable/filterable list
   // instead of grouped by client. See PB-V5 chat 2026-08-01.
-  { id: "all-quotes", label: "Все просчёты", icon: FileText, Component: ManagerAllQuotesTab, ownerOnly: false, seniorOrOwnerOnly: false },
-  { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentTab, ownerOnly: false, seniorOrOwnerOnly: false },
-  { id: "confirmations", label: "Подтверждения", icon: CheckSquare, Component: ManagerConfirmationsTab, ownerOnly: false, seniorOrOwnerOnly: true },
-  { id: "trash", label: "Корзина", icon: Trash2, Component: ManagerTrashTab, ownerOnly: true, seniorOrOwnerOnly: false },
-  { id: "price-list", label: "Прайс-лист", icon: Tag, Component: ManagerPriceListTab, ownerOnly: true, seniorOrOwnerOnly: false },
-  { id: "cash", label: "Отчёты по дням", icon: Wallet, Component: ManagerCashTab, ownerOnly: true, seniorOrOwnerOnly: false },
-  { id: "profit-report", label: "Отчёт о прибыли", icon: FileBarChart, Component: ManagerProfitReportTab, ownerOnly: true, seniorOrOwnerOnly: false },
-  { id: "database", label: "База данных", icon: Database, Component: ManagerDatabaseTab, ownerOnly: false, seniorOrOwnerOnly: false },
-  { id: "staff", label: "Сотрудники", icon: UsersRound, Component: ManagerStaffTab, ownerOnly: true, seniorOrOwnerOnly: false },
+  { id: "all-quotes", label: "Все просчёты", icon: FileText, Component: ManagerAllQuotesTab, ownerOnly: false, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentTab, ownerOnly: false, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "confirmations", label: "Подтверждения", icon: CheckSquare, Component: ManagerConfirmationsTab, ownerOnly: false, seniorOrOwnerOnly: true, hiddenFromOutsource: false },
+  { id: "trash", label: "Корзина", icon: Trash2, Component: ManagerTrashTab, ownerOnly: true, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "price-list", label: "Прайс-лист", icon: Tag, Component: ManagerPriceListTab, ownerOnly: true, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "cash", label: "Отчёты по дням", icon: Wallet, Component: ManagerCashTab, ownerOnly: true, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "profit-report", label: "Отчёт о прибыли", icon: FileBarChart, Component: ManagerProfitReportTab, ownerOnly: true, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "database", label: "База данных", icon: Database, Component: ManagerDatabaseTab, ownerOnly: false, seniorOrOwnerOnly: false, hiddenFromOutsource: true },
+  { id: "staff", label: "Сотрудники", icon: UsersRound, Component: ManagerStaffTab, ownerOnly: true, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
   // Was owner-only — now visible to everyone since it also hosts Тарифы/
   // Карго (which every manager needs to price a quote); the genuinely
   // owner-only content (Руководящий состав, Тексты) is gated inside
   // ManagerSettingsTab itself, not at this nav level. See PB-V5 chat
-  // 2026-07-31.
-  { id: "settings", label: "Настройки", icon: Settings, Component: ManagerSettingsTab, ownerOnly: false, seniorOrOwnerOnly: false },
+  // 2026-07-31. Тарифы sub-tab specifically is further hidden from
+  // outsource_manager inside ManagerSettingsTab (see that file) — the
+  // "Настройки" tab itself stays visible since it also hosts Карго.
+  { id: "settings", label: "Настройки", icon: Settings, Component: ManagerSettingsTab, ownerOnly: false, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
 ] as const;
 
 const LAST_SECTION_STORAGE_KEY = "manager-last-section";
@@ -128,7 +136,10 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
   }
 
   const SECTIONS = ALL_SECTIONS.filter(
-    (section) => (!section.ownerOnly || role === "owner") && (!section.seniorOrOwnerOnly || role === "owner" || role === "senior"),
+    (section) =>
+      (!section.ownerOnly || role === "owner") &&
+      (!section.seniorOrOwnerOnly || role === "owner" || role === "senior") &&
+      (!section.hiddenFromOutsource || role !== "outsource_manager"),
   );
 
   useEffect(() => {

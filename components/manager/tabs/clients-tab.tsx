@@ -526,6 +526,18 @@ function ClientQuotes({
   // 2026-08-05. The always-frequent ones (PDF/счёт/статус/комментарии/
   // факт/карго/редактировать) stay as direct icon buttons.
   const [rowActionsMenuId, setRowActionsMenuId] = useState<string | null>(null);
+  // Менеджер-аутсорсинг sees "№1_1" style local labels instead of the real
+  // displayId here — null (not fetched, or applicable:false for every
+  // other role) means "show the real displayId", the original behaviour.
+  // See app/api/manager-outsource-numbering and ManagerRole.outsource_manager
+  // in prisma/schema.prisma.
+  const [outsourceQuoteLabels, setOutsourceQuoteLabels] = useState<Record<string, string> | null>(null);
+  useEffect(() => {
+    fetch("/api/manager-outsource-numbering")
+      .then((res) => res.json())
+      .then((data) => setOutsourceQuoteLabels(data.applicable ? data.quoteLabels : null))
+      .catch(() => setOutsourceQuoteLabels(null));
+  }, []);
   const [expandedBuyoutId, setExpandedBuyoutId] = useState<string | null>(null);
   const [buyoutDrafts, setBuyoutDrafts] = useState<
     Record<string, { cny: string; rate: string; paymentRub: string; paymentRate: string }>
@@ -1657,7 +1669,7 @@ function ClientQuotes({
                 checked={selectedIds.includes(quote.id)}
                 onChange={() => toggleSelected(quote.id)}
                 className="shrink-0"
-                aria-label={`Выбрать просчёт №${quote.displayId}`}
+                aria-label={`Выбрать просчёт №${outsourceQuoteLabels?.[quote.id] ?? quote.displayId}`}
               />
               <div className="group relative shrink-0">
                 {quote.firstPhotoId ? (
@@ -1695,7 +1707,7 @@ function ClientQuotes({
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
                     <span className="min-w-0 truncate font-medium text-text">
-                      №{quote.displayId} · {quote.productName}
+                      №{outsourceQuoteLabels?.[quote.id] ?? quote.displayId} · {quote.productName}
                     </span>
                     {quote.destinationCountry !== "russia" && (
                       <span
@@ -2021,7 +2033,7 @@ function ClientQuotes({
                       <AlertDialogHeader>
                         <AlertDialogTitle>Удалить просчёт?</AlertDialogTitle>
                         <AlertDialogDescription>
-                          Просчёт №{quote.displayId} «{quote.productName}» и приложенные к нему фото будут удалены без
+                          Просчёт №{outsourceQuoteLabels?.[quote.id] ?? quote.displayId} «{quote.productName}» и приложенные к нему фото будут удалены без
                           возможности восстановления.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
@@ -2282,7 +2294,7 @@ function ClientQuotes({
                 <DialogHeader>
                   <DialogTitle>Реальные габариты карго</DialogTitle>
                   <DialogDescription>
-                    №{quote.displayId} · {quote.productName} — внесите вес и объём с накладной кладовщика. Раньше
+                    №{outsourceQuoteLabels?.[quote.id] ?? quote.displayId} · {quote.productName} — внесите вес и объём с накладной кладовщика. Раньше
                     оценка была {baselineWeightKg.toFixed(1)} кг, {baselineVolumeM3.toFixed(3)} м³.
                   </DialogDescription>
                 </DialogHeader>
@@ -2490,6 +2502,18 @@ function ManagerClientsTab() {
     fetch("/api/managers")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => setAllManagers(data?.managers ?? null));
+  }, []);
+
+  // Менеджер-аутсорсинг sees "№1"/"№2"… local client numbers here instead
+  // of the real displayId — see app/api/manager-outsource-numbering and
+  // ManagerRole.outsource_manager in prisma/schema.prisma. null for every
+  // other role, falling back to the real displayId unchanged.
+  const [outsourceClientNumbers, setOutsourceClientNumbers] = useState<Record<string, number> | null>(null);
+  useEffect(() => {
+    fetch("/api/manager-outsource-numbering")
+      .then((res) => res.json())
+      .then((data) => setOutsourceClientNumbers(data.applicable ? data.clientNumbers : null))
+      .catch(() => setOutsourceClientNumbers(null));
   }, []);
 
   // /api/manager-confirmations is owner/senior-only — its success doubles
@@ -2972,7 +2996,7 @@ function ManagerClientsTab() {
                       </span>
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-xs font-medium text-text">
-                          <span className="text-text-secondary">№{client.displayId}</span> {client.name}
+                          <span className="text-text-secondary">№{outsourceClientNumbers?.[client.id] ?? client.displayId}</span> {client.name}
                         </div>
                         {client.company && (
                           <div className="truncate text-[11px] text-text-secondary">{client.company}</div>
@@ -3040,7 +3064,7 @@ function ManagerClientsTab() {
               </button>
               <div>
                 <h3 className="text-sm font-bold text-text">
-                  <span className="text-text-secondary">№{selectedClient.displayId}</span> {selectedClient.name}
+                  <span className="text-text-secondary">№{outsourceClientNumbers?.[selectedClient.id] ?? selectedClient.displayId}</span> {selectedClient.name}
                   {selectedClient.company && <span className="text-text-secondary"> · {selectedClient.company}</span>}
                   {selectedClient.archivedAt && <span className="ml-1.5 text-xs font-normal text-error">архив</span>}
                 </h3>

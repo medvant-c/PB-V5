@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { nextManagerDisplayId } from "@/lib/display-ids";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const VALID_ROLES = ["manager", "senior", "owner"];
+const VALID_ROLES = ["manager", "senior", "owner", "outsource_manager"];
 
 // Everything under /api/managers is owner-only — this is staff
 // administration (create accounts, see everyone's role/status), not
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
       displayId: await nextManagerDisplayId(),
       name: name.trim(),
       email: normalizedEmail,
-      role: role as "manager" | "senior" | "owner",
+      role: role as "manager" | "senior" | "owner" | "outsource_manager",
       supervisorId: normalizedSupervisorId,
     },
   });

@@ -6,7 +6,7 @@ interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-const VALID_ROLES = ["manager", "senior", "owner"];
+const VALID_ROLES = ["manager", "senior", "owner", "outsource_manager"];
 
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const session = await getManagerSessionFromRequest(req);

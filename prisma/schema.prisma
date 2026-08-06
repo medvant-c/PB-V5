@@ -229,6 +229,18 @@ enum ManagerRole {
   // not automatically granted by this role).
   senior
   owner
+  // Менеджер-аутсорсинг — same scope/rights as a plain "manager" (only
+  // their own clients, same actions), except: (1) "Тарифы" and "База
+  // данных" tabs are hidden in manager-workspace.tsx (see ALL_SECTIONS),
+  // and (2) every client/quote number shown in THIS role's own UI is a
+  // small per-manager sequence (№1, №2… for clients; №1_1, №1_2, №2_1…
+  // for quotes — client's local number underscore that client's own
+  // quote count) instead of the real company-wide displayId, so this
+  // person can never estimate total company volume from the numbers they
+  // see. The real displayId is completely unchanged in the database and
+  // in every other role's view, PDF, export, or cross-reference — see
+  // lib/desk-services/outsource-numbering.ts. See PB-V5 chat 2026-08-06.
+  outsource_manager
 }
 
 model Manager {

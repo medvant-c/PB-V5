@@ -27,13 +27,16 @@ import { ManagerUpdatesTab } from "@/components/manager/tabs/settings/updates-se
 // Editing rights within a visible sub-tab are still gated by its own
 // canEdit/isOwner logic, same as before this reorganization.
 const SUB_TABS = [
-  { id: "tariffs", label: "Тарифы", icon: Calculator, Component: ManagerTariffsTab, ownerOnly: false },
-  { id: "leadership", label: "Руководящий состав", icon: Crown, Component: ManagerLeadershipTab, ownerOnly: true },
-  { id: "quotes-buyout", label: "Просчёты и выкуп", icon: Percent, Component: ManagerQuotesBuyoutSettingsTab, ownerOnly: false },
-  { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentSettingsTab, ownerOnly: false },
-  { id: "cargo", label: "Карго", icon: Truck, Component: ManagerCargoSettingsTab, ownerOnly: false },
-  { id: "texts", label: "Тексты", icon: FileText, Component: ManagerTextsSettingsTab, ownerOnly: true },
-  { id: "updates", label: "Обновления", icon: History, Component: ManagerUpdatesTab, ownerOnly: true },
+  // hiddenFromOutsource — see ManagerRole.outsource_manager's own schema
+  // comment in prisma/schema.prisma for why. Every other sub-tab here
+  // stays visible to that role exactly like a plain "manager".
+  { id: "tariffs", label: "Тарифы", icon: Calculator, Component: ManagerTariffsTab, ownerOnly: false, hiddenFromOutsource: true },
+  { id: "leadership", label: "Руководящий состав", icon: Crown, Component: ManagerLeadershipTab, ownerOnly: true, hiddenFromOutsource: false },
+  { id: "quotes-buyout", label: "Просчёты и выкуп", icon: Percent, Component: ManagerQuotesBuyoutSettingsTab, ownerOnly: false, hiddenFromOutsource: false },
+  { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentSettingsTab, ownerOnly: false, hiddenFromOutsource: false },
+  { id: "cargo", label: "Карго", icon: Truck, Component: ManagerCargoSettingsTab, ownerOnly: false, hiddenFromOutsource: false },
+  { id: "texts", label: "Тексты", icon: FileText, Component: ManagerTextsSettingsTab, ownerOnly: true, hiddenFromOutsource: false },
+  { id: "updates", label: "Обновления", icon: History, Component: ManagerUpdatesTab, ownerOnly: true, hiddenFromOutsource: false },
 ] as const;
 
 function ManagerSettingsTab() {
@@ -43,13 +46,18 @@ function ManagerSettingsTab() {
   // isOwner = settings.cargoDensityMarginUsdPerKg !== undefined in
   // tariffs-tab.tsx).
   const [isOwner, setIsOwner] = useState(false);
+  const [isOutsourceManager, setIsOutsourceManager] = useState(false);
   useEffect(() => {
     fetch("/api/manager-investors")
       .then((res) => setIsOwner(res.ok))
       .catch(() => setIsOwner(false));
+    fetch("/api/manager-me")
+      .then((res) => res.json())
+      .then((data) => setIsOutsourceManager(data.role === "outsource_manager"))
+      .catch(() => setIsOutsourceManager(false));
   }, []);
 
-  const visibleTabs = SUB_TABS.filter((tab) => !tab.ownerOnly || isOwner);
+  const visibleTabs = SUB_TABS.filter((tab) => (!tab.ownerOnly || isOwner) && (!tab.hiddenFromOutsource || !isOutsourceManager));
   const [activeSubTab, setActiveSubTab] = useState<(typeof SUB_TABS)[number]["id"]>("tariffs");
   const active = visibleTabs.find((t) => t.id === activeSubTab) ?? visibleTabs[0];
   const ActiveComponent = active.Component;

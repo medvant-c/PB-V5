@@ -46,7 +46,13 @@ async function verifyManagerSessionToken(token: string): Promise<ManagerSession 
   try {
     const { payload } = await jwtVerify(token, getSecretKey());
     if (payload.scope !== "manager" || typeof payload.managerId !== "string") return null;
-    if (payload.role !== "manager" && payload.role !== "owner" && payload.role !== "senior") return null;
+    if (
+      payload.role !== "manager" &&
+      payload.role !== "owner" &&
+      payload.role !== "senior" &&
+      payload.role !== "outsource_manager"
+    )
+      return null;
     const impersonatedBy = typeof payload.impersonatedBy === "string" ? payload.impersonatedBy : undefined;
     return { managerId: payload.managerId, role: payload.role, ...(impersonatedBy ? { impersonatedBy } : {}) };
   } catch {

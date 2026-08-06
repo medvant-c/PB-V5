@@ -24,7 +24,7 @@ interface ManagerRecord {
   displayId: number;
   name: string;
   email: string;
-  role: "manager" | "senior" | "owner";
+  role: "manager" | "senior" | "owner" | "outsource_manager";
   active: boolean;
   canEditTariffs: boolean;
   supervisorId: string | null;
@@ -36,6 +36,13 @@ const ROLE_LABEL: Record<ManagerRecord["role"], string> = {
   manager: "Менеджер",
   senior: "Старший менеджер",
   owner: "Руководитель",
+  // Same scope/rights as "Менеджер" — только свои клиенты, никаких
+  // owner/senior-only действий — только скрыты "Тарифы" и "База данных", и
+  // клиентские/просчётные номера в его собственном интерфейсе заменены на
+  // локальную нумерацию (№1, №1_1…) вместо сквозного displayId, чтобы он
+  // не мог прикинуть общий объём компании. См. ManagerRole.outsource_manager
+  // в prisma/schema.prisma.
+  outsource_manager: "Менеджер (аутсорсинг)",
 };
 
 function ManagerStaffTab() {
