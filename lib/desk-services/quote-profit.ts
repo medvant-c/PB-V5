@@ -227,6 +227,10 @@ function isProscetPaymentCategory(category: string): boolean {
 // PB-V5 chat 2026-08-04.
 const PREMIUM_ELIGIBLE_PAYMENT_CATEGORIES = new Set(["search_service", "custom_production", "buyout_commission", "attached_services"]);
 
+function isPremiumEligiblePaymentCategory(category: string): boolean {
+  return PREMIUM_ELIGIBLE_PAYMENT_CATEGORIES.has(category);
+}
+
 // Premium for ONE payment allocation, frozen at creation time (see
 // QuotePaymentAllocation.premiumRub's schema comment) — isBoosted is the
 // client's self-sourced status looked up LIVE at that moment, never
@@ -370,6 +374,7 @@ export {
   investorCargoShareRub,
   splitRemainderRub,
   isProscetPaymentCategory,
+  isPremiumEligiblePaymentCategory,
   sumAlreadyPaidPremium,
   sumAlreadyPaidProfitRub,
   computePaymentAllocationPremiumRub,
