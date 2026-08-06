@@ -79,7 +79,7 @@ const ALL_SECTIONS = [
   // instead of the role directly. See PB-V5 chat 2026-08-06.
   { id: "trash", label: "Корзина", icon: Trash2, Component: ManagerTrashTab, ownerOnly: true, permissionKey: "canViewTrash", seniorOrOwnerOnly: false, hiddenFromOutsource: false },
   { id: "price-list", label: "Прайс-лист", icon: Tag, Component: ManagerPriceListTab, ownerOnly: true, permissionKey: "canViewPriceList", seniorOrOwnerOnly: false, hiddenFromOutsource: false },
-  { id: "cash", label: "Отчёты по дням", icon: Wallet, Component: ManagerCashTab, ownerOnly: true, permissionKey: "canViewCash", seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "cash", label: "Касса", icon: Wallet, Component: ManagerCashTab, ownerOnly: true, permissionKey: "canViewCash", seniorOrOwnerOnly: false, hiddenFromOutsource: false },
   { id: "profit-report", label: "Отчёт о прибыли", icon: FileBarChart, Component: ManagerProfitReportTab, ownerOnly: true, permissionKey: "canViewProfitReport", seniorOrOwnerOnly: false, hiddenFromOutsource: false },
   { id: "database", label: "База данных", icon: Database, Component: ManagerDatabaseTab, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: true },
   // Deliberately NOT individually grantable, unlike the tabs above —

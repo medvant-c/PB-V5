@@ -737,7 +737,7 @@ function ManagerConfirmationsTab() {
                 <Wallet className="h-3.5 w-3.5" /> Факт по выкупу ({pendingBuyouts.length})
               </h3>
               <p className="mt-1 text-xs text-text-secondary">
-                Поступление от клиента автоматически добавится приходным ордером в «Отчёты по дням».
+                Поступление от клиента автоматически добавится приходным ордером в «Кассу».
               </p>
               <ul className="mt-2 space-y-2">
                 {pendingBuyouts.map((quote) => {

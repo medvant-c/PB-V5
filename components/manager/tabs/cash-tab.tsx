@@ -535,7 +535,7 @@ function ManagerCashTab() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-bold text-text">Отчёты по дням</h2>
+          <h2 className="text-sm font-bold text-text">Касса</h2>
           <p className="mt-1 text-sm text-text-secondary">Кассовая книга — приход и расход по статьям, баланс в юанях.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

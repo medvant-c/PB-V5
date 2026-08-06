@@ -47,7 +47,7 @@ interface ManagerRecord {
 const PERMISSION_FIELDS: { key: keyof ManagerRecord; label: string; hint: string }[] = [
   { key: "canEditTariffs", label: "Тарифы", hint: "Менять курсы, тарифы карго и комиссию за выкуп" },
   { key: "canViewPriceList", label: "Прайс-лист", hint: "Создавать/менять услуги в прайс-листе" },
-  { key: "canViewCash", label: "Отчёты по дням (касса)", hint: "Весь кассовый журнал компании, не только свои сделки" },
+  { key: "canViewCash", label: "Касса", hint: "Весь кассовый журнал компании, не только свои сделки" },
   { key: "canViewProfitReport", label: "Отчёт о прибыли", hint: "Видит премии других менеджеров и доли инвесторов" },
   { key: "canViewTrash", label: "Корзина", hint: "Смотреть и восстанавливать удалённые просчёты" },
   { key: "canViewCargoCost", label: "Себестоимость карго", hint: "Реальная закупочная цена и маржа по карго" },
