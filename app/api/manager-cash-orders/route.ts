@@ -49,7 +49,12 @@ export async function GET(req: NextRequest) {
 
   const monthOrders = await prisma.cashOrder.findMany({
     where: { date: { gte: monthStart, lt: monthEnd } },
-    include: { category: true, client: { select: { id: true, name: true } }, createdByManager: { select: { name: true } } },
+    include: {
+      category: true,
+      client: { select: { id: true, name: true } },
+      quote: { select: { id: true, displayId: true, productName: true } },
+      createdByManager: { select: { name: true } },
+    },
     orderBy: { date: "desc" },
   });
 
@@ -92,12 +97,13 @@ export async function POST(req: NextRequest) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { type, date, categoryId, clientId, currency, amount, cnyToCurrencyRate, comment } =
+  const { type, date, categoryId, clientId, quoteId, currency, amount, cnyToCurrencyRate, comment } =
     (body as {
       type?: unknown;
       date?: unknown;
       categoryId?: unknown;
       clientId?: unknown;
+      quoteId?: unknown;
       currency?: unknown;
       amount?: unknown;
       cnyToCurrencyRate?: unknown;
@@ -141,12 +147,27 @@ export async function POST(req: NextRequest) {
     resolvedClientId = clientId;
   }
 
+  // Optional — a specific deal this ledger entry is for. Must belong to the
+  // selected client (a quote without a client attached makes no sense, same
+  // reasoning as the buyout invoice/create-payment routes never accepting a
+  // quote/client mismatch).
+  let resolvedQuoteId: string | null = null;
+  if (typeof quoteId === "string" && quoteId) {
+    const quote = await prisma.quote.findUnique({ where: { id: quoteId }, select: { id: true, deletedAt: true, clientId: true } });
+    if (!quote || quote.deletedAt) return Response.json({ error: "Просчёт не найден." }, { status: 400 });
+    if (!resolvedClientId || quote.clientId !== resolvedClientId) {
+      return Response.json({ error: "Просчёт должен принадлежать выбранному клиенту." }, { status: 400 });
+    }
+    resolvedQuoteId = quoteId;
+  }
+
   const order = await prisma.cashOrder.create({
     data: {
       type,
       date: parsedDate,
       categoryId,
       clientId: resolvedClientId,
+      quoteId: resolvedQuoteId,
       currency,
       amount: amountNum,
       cnyToCurrencyRate: rateNum,
@@ -157,7 +178,12 @@ export async function POST(req: NextRequest) {
       comment: typeof comment === "string" ? comment.trim() : "",
       createdByManagerId: session.managerId,
     },
-    include: { category: true, client: { select: { id: true, name: true } }, createdByManager: { select: { name: true } } },
+    include: {
+      category: true,
+      client: { select: { id: true, name: true } },
+      quote: { select: { id: true, displayId: true, productName: true } },
+      createdByManager: { select: { name: true } },
+    },
   });
 
   return Response.json({ order }, { status: 201 });

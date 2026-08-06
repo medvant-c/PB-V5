@@ -37,6 +37,8 @@ interface CashOrderRecord {
   category: { id: string; name: string };
   clientId: string | null;
   client: { id: string; name: string } | null;
+  quoteId: string | null;
+  quote: { id: string; displayId: number; productName: string } | null;
   currency: CashCurrency;
   amount: string;
   cnyToCurrencyRate: string;
@@ -49,6 +51,13 @@ interface ClientOption {
   id: string;
   name: string;
   company: string | null;
+}
+
+interface ClientQuoteOption {
+  id: string;
+  displayId: number;
+  productName: string;
+  buyoutFactConfirmed: boolean;
 }
 
 interface Summary {
@@ -84,6 +93,7 @@ const EMPTY_DRAFT = {
   date: todayIso(),
   categoryId: "",
   clientId: "",
+  quoteId: "",
   currency: "cny" as CashCurrency,
   amount: "",
   cnyToCurrencyRate: "1",
@@ -165,6 +175,42 @@ function ManagerCashTab() {
   const [newClientPhone, setNewClientPhone] = useState("");
   const [creatingClient, setCreatingClient] = useState(false);
 
+  // Quotes of the currently-selected client, for the optional "Просчёт"
+  // picker — lets the amount auto-suggestion (below) scope to ONE deal
+  // instead of the client's whole history. Refetched whenever the client
+  // picker changes; cleared (not just left stale) while loading so a quote
+  // from the PREVIOUS client can never stay selectable. See PB-V5 chat
+  // 2026-08-06.
+  const [clientQuotes, setClientQuotes] = useState<ClientQuoteOption[]>([]);
+  useEffect(() => {
+    if (!dialogType || !draft.clientId) {
+      setClientQuotes([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/manager-quotes?clientId=${draft.clientId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return;
+        setClientQuotes(
+          (data.quotes ?? []).map(
+            (q: { id: string; displayId: number; productName: string; buyoutFactConfirmed: boolean }) => ({
+              id: q.id,
+              displayId: q.displayId,
+              productName: q.productName,
+              buyoutFactConfirmed: q.buyoutFactConfirmed,
+            }),
+          ),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setClientQuotes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dialogType, draft.clientId]);
+
   function openCreateDialog(type: CashOrderType) {
     setDialogType(type);
     setEditingOrderId(null);
@@ -181,6 +227,7 @@ function ManagerCashTab() {
       date: order.date.slice(0, 10),
       categoryId: order.categoryId,
       clientId: order.clientId ?? "",
+      quoteId: order.quoteId ?? "",
       currency: order.currency,
       amount: order.amount,
       cnyToCurrencyRate: order.cnyToCurrencyRate,
@@ -210,20 +257,36 @@ function ManagerCashTab() {
   // закреплённый за клиентом" — see CashCategory.payoutTarget) and клиент
   // are picked, pull in how much that recipient is actually owed for this
   // client's confirmed deals instead of making the owner compute an
-  // investor's share or a manager's premium by hand every time. Only on a
-  // NEW order (never overwrites a real historical order being edited), and
-  // re-fires every time either picker changes so switching клиент/статья
-  // always refreshes the suggestion. See PB-V5 chat 2026-08-05.
+  // investor's share or a manager's premium by hand every time — narrowed
+  // to ONE deal if a конкретный просчёт is also picked (see the "Просчёт"
+  // selector above). "Приходный ордер" mirrors this once a просчёт is
+  // picked: how much of THAT quote's total the client still hasn't paid
+  // (see income-suggestion/route.ts) — no suggestion at all for income
+  // without a quote, since "how much does the client owe overall" isn't a
+  // single well-defined number the way a per-deal payout is. Only on a NEW
+  // order (never overwrites a real historical order being edited), and
+  // re-fires every time any of the three pickers changes. See PB-V5 chat
+  // 2026-08-05, 2026-08-06.
   const [suggestionNote, setSuggestionNote] = useState<string | null>(null);
   const [suggestionLoading, setSuggestionLoading] = useState(false);
   useEffect(() => {
-    if (editingOrderId || dialogType !== "expense" || !draft.categoryId || !draft.clientId) {
+    if (editingOrderId || !dialogType || !draft.clientId) {
+      setSuggestionNote(null);
+      return;
+    }
+    let url: string | null = null;
+    if (dialogType === "expense" && draft.categoryId) {
+      url = `/api/manager-cash-orders/expense-suggestion?categoryId=${draft.categoryId}&clientId=${draft.clientId}${draft.quoteId ? `&quoteId=${draft.quoteId}` : ""}`;
+    } else if (dialogType === "income" && draft.quoteId) {
+      url = `/api/manager-cash-orders/income-suggestion?clientId=${draft.clientId}&quoteId=${draft.quoteId}`;
+    }
+    if (!url) {
       setSuggestionNote(null);
       return;
     }
     let cancelled = false;
     setSuggestionLoading(true);
-    fetch(`/api/manager-cash-orders/expense-suggestion?categoryId=${draft.categoryId}&clientId=${draft.clientId}`)
+    fetch(url)
       .then((res) => res.json())
       .then((data) => {
         if (cancelled || !data.applicable) {
@@ -241,8 +304,8 @@ function ManagerCashTab() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- editingOrderId/dialogType checked above, re-fetch only on the two pickers changing
-  }, [draft.categoryId, draft.clientId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- editingOrderId/dialogType checked above, re-fetch only on the three pickers changing
+  }, [draft.categoryId, draft.clientId, draft.quoteId]);
 
   async function handleCreateCategory() {
     if (!dialogType || !newCategoryName.trim()) return;
@@ -304,6 +367,7 @@ function ManagerCashTab() {
         date: draft.date,
         categoryId: draft.categoryId,
         clientId: draft.clientId || null,
+        quoteId: draft.quoteId || null,
         currency: draft.currency,
         amount: Number(draft.amount),
         cnyToCurrencyRate: draft.currency === "cny" ? 1 : Number(draft.cnyToCurrencyRate),
@@ -597,7 +661,10 @@ function ManagerCashTab() {
                     </span>
                   </td>
                   <td className="px-3 py-1.5 text-text">{order.category.name}</td>
-                  <td className="px-3 py-1.5 text-text-secondary">{order.client?.name ?? "—"}</td>
+                  <td className="px-3 py-1.5 text-text-secondary">
+                    {order.client?.name ?? "—"}
+                    {order.quote && <span className="block text-xs text-text-secondary/70">№{order.quote.displayId} — {order.quote.productName}</span>}
+                  </td>
                   <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">
                     {money(Number(order.amount))} {CURRENCY_LABEL[order.currency]}
                   </td>
@@ -770,7 +837,7 @@ function ManagerCashTab() {
                     </div>
                   </div>
                 ) : (
-                  <Select value={draft.clientId} onValueChange={(v) => setDraft((d) => ({ ...d, clientId: v }))}>
+                  <Select value={draft.clientId} onValueChange={(v) => setDraft((d) => ({ ...d, clientId: v, quoteId: "" }))}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Без привязки к клиенту" />
                     </SelectTrigger>
@@ -784,6 +851,28 @@ function ManagerCashTab() {
                     </SelectContent>
                   </Select>
                 )}
+              </div>
+            )}
+
+            {dialogType && draft.clientId && clientQuotes.length > 0 && (
+              <div className="space-y-1.5">
+                <Label>
+                  Просчёт{dialogType === "expense" ? " (необязательно — сузить выплату до одной сделки)" : " (необязательно — за какой просчёт вносятся деньги)"}
+                </Label>
+                <Select value={draft.quoteId} onValueChange={(v) => setDraft((d) => ({ ...d, quoteId: v === "none" ? "" : v }))}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Без привязки к просчёту" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Без привязки к просчёту</SelectItem>
+                    {clientQuotes.map((q) => (
+                      <SelectItem key={q.id} value={q.id}>
+                        №{q.displayId} — {q.productName}
+                        {!q.buyoutFactConfirmed ? " (факт не подтверждён)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
 

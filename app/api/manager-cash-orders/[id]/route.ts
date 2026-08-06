@@ -26,11 +26,12 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { date, categoryId, clientId, currency, amount, cnyToCurrencyRate, comment } =
+  const { date, categoryId, clientId, quoteId, currency, amount, cnyToCurrencyRate, comment } =
     (body as {
       date?: unknown;
       categoryId?: unknown;
       clientId?: unknown;
+      quoteId?: unknown;
       currency?: unknown;
       amount?: unknown;
       cnyToCurrencyRate?: unknown;
@@ -67,19 +68,35 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     resolvedClientId = clientId;
   }
 
+  let resolvedQuoteId: string | null = null;
+  if (typeof quoteId === "string" && quoteId) {
+    const quote = await prisma.quote.findUnique({ where: { id: quoteId }, select: { id: true, deletedAt: true, clientId: true } });
+    if (!quote || quote.deletedAt) return Response.json({ error: "Просчёт не найден." }, { status: 400 });
+    if (!resolvedClientId || quote.clientId !== resolvedClientId) {
+      return Response.json({ error: "Просчёт должен принадлежать выбранному клиенту." }, { status: 400 });
+    }
+    resolvedQuoteId = quoteId;
+  }
+
   const order = await prisma.cashOrder.update({
     where: { id },
     data: {
       date: parsedDate,
       categoryId,
       clientId: resolvedClientId,
+      quoteId: resolvedQuoteId,
       currency,
       amount: amountNum,
       cnyToCurrencyRate: rateNum,
       amountCny: amountNum / rateNum,
       comment: typeof comment === "string" ? comment.trim() : "",
     },
-    include: { category: true, client: { select: { id: true, name: true } }, createdByManager: { select: { name: true } } },
+    include: {
+      category: true,
+      client: { select: { id: true, name: true } },
+      quote: { select: { id: true, displayId: true, productName: true } },
+      createdByManager: { select: { name: true } },
+    },
   });
 
   return Response.json({ order });

@@ -977,7 +977,12 @@ model Quote {
   actualClientPaymentRub       Decimal?
   actualClientPaymentRateUsed  Decimal?
   clientPaymentCashOrderId     String?    @unique
-  clientPaymentCashOrder       CashOrder? @relation(fields: [clientPaymentCashOrderId], references: [id], onDelete: SetNull)
+  clientPaymentCashOrder       CashOrder? @relation("QuoteClientPaymentCashOrder", fields: [clientPaymentCashOrderId], references: [id], onDelete: SetNull)
+  // Every ledger entry (see CashOrder.quoteId) manually linked to this
+  // quote from the generic "Приходный/Расходный ордер" dialog — distinct
+  // from clientPaymentCashOrder above, which is the ONE auto-managed order
+  // confirm-buyout itself creates/updates.
+  cashOrders                   CashOrder[] @relation("QuoteLedgerCashOrders")
 
   // Real cargo weight/volume from the warehouse's shipping note, entered
   // (by anyone — no self-report/conflict-of-interest risk here, the price
@@ -1276,6 +1281,19 @@ model CashOrder {
   // quick-create option right from the order dialog.
   clientId   String?
   client     Client?       @relation(fields: [clientId], references: [id])
+  // Optional link to a specific quote of `client` — lets the "Приходный/
+  // Расходный ордер" dialog auto-suggest an amount scoped to ONE deal
+  // (investor share/manager premium owed, or balance still owed by the
+  // client) instead of the client's whole history, and shows which quote a
+  // ledger entry was actually for. Deliberately separate from
+  // QuotePaymentAllocation (the category-by-category "Приходный ордер"
+  // created from a quote card, which credits manager premium immediately —
+  // see create-payment/route.ts) — this is a lighter-weight reference for
+  // the general ledger, not a replacement for that per-category mechanism.
+  // Must belong to `client` when both are set — enforced at the API layer,
+  // not the schema. See PB-V5 chat 2026-08-06.
+  quoteId    String?
+  quote      Quote?        @relation("QuoteLedgerCashOrders", fields: [quoteId], references: [id])
   currency   CashCurrency
   // Always positive — type (income/expense) determines the sign when
   // summing into a running balance, so the entry form never asks for a
@@ -1302,7 +1320,7 @@ model CashOrder {
 
   // Back-relation for Quote.clientPaymentCashOrder — a quote's confirmed
   // client-payment fact auto-creates/updates exactly one CashOrder.
-  linkedQuote Quote?
+  linkedQuote Quote? @relation("QuoteClientPaymentCashOrder")
   // One order created from a quote card (see QuotePaymentAllocation below)
   // can cover pieces of several quotes at once — a plain CashOrder.clientId
   // still identifies who paid, but WHICH quotes/line items it covers lives
@@ -1311,6 +1329,7 @@ model CashOrder {
 
   @@index([date])
   @@index([categoryId])
+  @@index([quoteId])
 }
 
 // Which line item of a "Счёт на выкуп" a payment covers — same six

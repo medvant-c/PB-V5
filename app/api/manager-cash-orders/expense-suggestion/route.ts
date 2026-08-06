@@ -9,12 +9,14 @@ import { buildProfitReport } from "@/lib/desk-services/profit-report";
 // клиентом" (see CashCategory.payoutTarget in prisma/schema.prisma), how
 // much that recipient is currently owed for the selected client's
 // CONFIRMED deals (buyoutFactConfirmed — the same gate the dashboard's
-// "факт" numbers use, real realized profit only). Reuses buildProfitReport
-// so this can never drift from what the profit report itself would show
-// for the same quotes. Returns applicable:false for a статья with no
-// payout target (e.g. "Закупка товара" — a real cost, not a profit-share
-// payout) so the dialog knows not to touch the amount field at all. See
-// PB-V5 chat 2026-08-05.
+// "факт" numbers use, real realized profit only) — or, when a specific
+// quoteId is also given (the dialog's optional "Просчёт" picker — see
+// PB-V5 chat 2026-08-06), scoped to just that ONE deal instead of the
+// client's whole history. Reuses buildProfitReport so this can never drift
+// from what the profit report itself would show for the same quotes.
+// Returns applicable:false for a статья with no payout target (e.g.
+// "Закупка товара" — a real cost, not a profit-share payout) so the dialog
+// knows not to touch the amount field at all. See PB-V5 chat 2026-08-05.
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
   if (!session || !(await canViewCash(session))) {
@@ -23,6 +25,7 @@ export async function GET(req: NextRequest) {
 
   const categoryId = req.nextUrl.searchParams.get("categoryId");
   const clientId = req.nextUrl.searchParams.get("clientId");
+  const quoteId = req.nextUrl.searchParams.get("quoteId");
   if (!categoryId || !clientId) {
     return Response.json({ error: "Укажите статью и клиента." }, { status: 400 });
   }
@@ -37,20 +40,34 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: "Клиент не найден." }, { status: 404 });
   }
 
-  const confirmedQuotes = await prisma.quote.findMany({
-    where: { clientId, deletedAt: null, buyoutFactConfirmed: true },
-    select: { id: true },
-  });
-
   const tariffSettings = await prisma.tariffSettings.findFirst({ orderBy: { createdAt: "desc" } });
   const cnyRateRub = tariffSettings ? Number(tariffSettings.cnyRateRub) : null;
+
+  let confirmedQuotes: { id: string }[];
+  if (quoteId) {
+    const quote = await prisma.quote.findUnique({
+      where: { id: quoteId },
+      select: { id: true, clientId: true, deletedAt: true, buyoutFactConfirmed: true },
+    });
+    if (!quote || quote.deletedAt || quote.clientId !== clientId) {
+      return Response.json({ error: "Просчёт не найден у этого клиента." }, { status: 404 });
+    }
+    confirmedQuotes = quote.buyoutFactConfirmed ? [{ id: quote.id }] : [];
+  } else {
+    confirmedQuotes = await prisma.quote.findMany({
+      where: { clientId, deletedAt: null, buyoutFactConfirmed: true },
+      select: { id: true },
+    });
+  }
 
   if (confirmedQuotes.length === 0) {
     return Response.json({
       applicable: true,
       amountRub: 0,
       amountCny: null,
-      note: "У клиента пока нет ни одной сделки с подтверждённым фактом выкупа.",
+      note: quoteId
+        ? "У этого просчёта ещё нет подтверждённого факта выкупа."
+        : "У клиента пока нет ни одной сделки с подтверждённым фактом выкупа.",
     });
   }
 
@@ -68,6 +85,8 @@ export async function GET(req: NextRequest) {
     applicable: true,
     amountRub,
     amountCny: cnyRateRub && cnyRateRub > 0 ? amountRub / cnyRateRub : null,
-    note: `Рассчитано по ${confirmedQuotes.length} подтверждённой сделке (сделкам) клиента.`,
+    note: quoteId
+      ? "Рассчитано по этому просчёту."
+      : `Рассчитано по ${confirmedQuotes.length} подтверждённой сделке (сделкам) клиента.`,
   });
 }
