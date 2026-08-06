@@ -18,18 +18,27 @@ import { buildProfitReport } from "@/lib/desk-services/profit-report";
 // "Закупка товара" — a real cost, not a profit-share payout) so the dialog
 // knows not to touch the amount field at all.
 //
-// buildProfitReport's own numbers assume the deal's FULL totalRub gets
-// collected — correct for "Отчёт о прибыли" (a forward-looking "how much
-// WILL we earn" projection), but wrong to hand straight to a real cash
+// buildProfitReport's cargo margin only counts once cargoBonusRatePercent
+// has locked in (handed_to_client — see computeQuoteShares in quote-
+// profit.ts), so that part of the suggestion is already safe. The SERVICES
+// portion (proscet+buyout+discount+fx) is still computed assuming the
+// deal's full "services total" (totalRub minus cargoDeliveryRub) eventually
+// gets collected — correct for "Отчёт о прибыли" (a forward-looking "how
+// much WILL we earn" projection), but wrong to hand straight to a real cash
 // payout: a quote can be buyoutFactConfirmed (the real goods purchase is
-// known) while the client has only paid PART of totalRub so far, and
-// suggesting 100% of the expected share before that money has actually
-// arrived is what silently pushed the kassa negative (see PB-V5 chat
-// 2026-08-06). Scaled down here by receivedFraction = actualClientPaymentRub
-// / totalRub (blended across every quote in scope for the whole-client
-// mode) — conservative, not exact per-quote cash-flow accounting, but
-// guarantees this suggestion never asks for more than what's proportionally
-// already in hand.
+// known) while the client has only paid PART of that services total so
+// far, and suggesting 100% of the expected share before that money has
+// actually arrived is what silently pushed the kassa negative (see PB-V5
+// chat 2026-08-06). Scaled down here by receivedFraction =
+// actualClientPaymentRub / (totalRub - cargoDeliveryRub), blended across
+// every quote in scope for the whole-client mode — conservative, not exact
+// per-quote cash-flow accounting, but guarantees this suggestion never asks
+// for more than what's proportionally already in hand. Skipped entirely
+// (falls back to the unscaled amount) the moment ANY quote in scope has
+// cargo already realized, since the combined manager/investor totals can't
+// be split back into "from services" vs "from cargo" after the fact — safe
+// because the common case this exists for (partially paid, cargo not yet
+// delivered) never hits that branch.
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
   if (!session || !(await canViewCash(session))) {
@@ -56,11 +65,26 @@ export async function GET(req: NextRequest) {
   const tariffSettings = await prisma.tariffSettings.findFirst({ orderBy: { createdAt: "desc" } });
   const cnyRateRub = tariffSettings ? Number(tariffSettings.cnyRateRub) : null;
 
-  let confirmedQuotes: { id: string; totalRub: unknown; actualClientPaymentRub: unknown }[];
+  type ScopedQuote = {
+    id: string;
+    totalRub: unknown;
+    cargoDeliveryRub: unknown;
+    actualClientPaymentRub: unknown;
+    cargoBonusRatePercent: unknown;
+  };
+  const scopedQuoteSelect = {
+    id: true,
+    totalRub: true,
+    cargoDeliveryRub: true,
+    actualClientPaymentRub: true,
+    cargoBonusRatePercent: true,
+  } as const;
+
+  let confirmedQuotes: ScopedQuote[];
   if (quoteId) {
     const quote = await prisma.quote.findUnique({
       where: { id: quoteId },
-      select: { id: true, clientId: true, deletedAt: true, buyoutFactConfirmed: true, totalRub: true, actualClientPaymentRub: true },
+      select: { ...scopedQuoteSelect, clientId: true, deletedAt: true, buyoutFactConfirmed: true },
     });
     if (!quote || quote.deletedAt || quote.clientId !== clientId) {
       return Response.json({ error: "Просчёт не найден у этого клиента." }, { status: 404 });
@@ -69,7 +93,7 @@ export async function GET(req: NextRequest) {
   } else {
     confirmedQuotes = await prisma.quote.findMany({
       where: { clientId, deletedAt: null, buyoutFactConfirmed: true },
-      select: { id: true, totalRub: true, actualClientPaymentRub: true },
+      select: scopedQuoteSelect,
     });
   }
 
@@ -94,19 +118,27 @@ export async function GET(req: NextRequest) {
   }
   amountRub = Math.max(0, amountRub);
 
-  // Blended across every quote in scope: total actually received / total
-  // owed, clamped to [0, 1] — see the route-level comment above for why
-  // this scaling exists.
-  const totalOwedRub = confirmedQuotes.reduce((sum, q) => sum + Number(q.totalRub), 0);
-  const totalReceivedRub = confirmedQuotes.reduce((sum, q) => sum + Number(q.actualClientPaymentRub ?? 0), 0);
-  const receivedFraction = totalOwedRub > 0 ? Math.min(1, Math.max(0, totalReceivedRub / totalOwedRub)) : 0;
-  amountRub *= receivedFraction;
-
   const scopeNote = quoteId ? "по этому просчёту" : `по ${confirmedQuotes.length} подтверждённой сделке (сделкам) клиента`;
-  const partialNote =
-    receivedFraction < 1
-      ? ` Клиент пока оплатил ${Math.round(receivedFraction * 100)}% от суммы — выплата уменьшена пропорционально.`
-      : "";
+
+  // Skip the receivedFraction scaling entirely if any quote in scope has
+  // cargo already realized — see the route-level comment above.
+  const anyCargoRealized = confirmedQuotes.some((q) => q.cargoBonusRatePercent !== null);
+  let partialNote = "";
+  if (!anyCargoRealized) {
+    // Blended across every quote in scope: services actually received /
+    // services owed (totalRub minus cargoDeliveryRub, since cargo is billed
+    // and paid on its own separate timeline), clamped to [0, 1].
+    const servicesOwedRub = confirmedQuotes.reduce((sum, q) => sum + Math.max(0, Number(q.totalRub) - Number(q.cargoDeliveryRub)), 0);
+    const servicesReceivedRub = confirmedQuotes.reduce((sum, q) => {
+      const owed = Math.max(0, Number(q.totalRub) - Number(q.cargoDeliveryRub));
+      return sum + Math.min(owed, Number(q.actualClientPaymentRub ?? 0));
+    }, 0);
+    const receivedFraction = servicesOwedRub > 0 ? Math.min(1, Math.max(0, servicesReceivedRub / servicesOwedRub)) : 0;
+    amountRub *= receivedFraction;
+    if (receivedFraction < 1) {
+      partialNote = ` Клиент пока оплатил ${Math.round(receivedFraction * 100)}% от суммы — выплата уменьшена пропорционально.`;
+    }
+  }
 
   return Response.json({
     applicable: true,

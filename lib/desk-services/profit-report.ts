@@ -3,16 +3,14 @@ import { prisma } from "@/lib/prisma";
 import { getSystemSettings } from "@/lib/system-settings";
 import {
   cargoProfitRub,
-  effectiveInvestorRatePercent,
+  computeQuoteShares,
   estimatedFxProfitRub,
   estimatedSourceProfits,
   factualManagerPremiumRub,
   factualSourceProfits,
   flatCargoBonusRub,
   fxProfitRub,
-  investorCargoShareRub,
   isSelfSourcedFor,
-  splitRemainderRub,
   sumAlreadyPaidPremium,
   type CnyProfitTiers,
   type InvestorConfig,
@@ -117,16 +115,22 @@ function computeQuoteBreakdown(
   // lib/desk-services/quote-profit.ts) instead of silently showing 0.
   const fx = q.buyoutFactConfirmed ? fxProfitRub(fields) : estimatedFxProfitRub(q, attachedServicesTotalRub, cnyProfitTiers);
   const cargo = cargoProfitRub(fields);
+  // Company-facing total still shows both pools combined (services + cargo,
+  // whether or not cargo has shipped yet) — "сколько мы заработаем на этой
+  // сделке" is a forward projection, that hasn't changed. What HAS changed
+  // (see computeQuoteShares in quote-profit.ts) is that managerPremiumRub/
+  // investorShares below only draw from cargo once it's actually realized —
+  // a real cash payout suggestion must never assume money that hasn't
+  // shipped yet. See PB-V5 chat 2026-08-06.
   const rawTotalRub = proscetRub + buyoutRub + discountRub + fx + cargo;
-  const clampedTotalRub = Math.max(0, rawTotalRub);
 
   // See sumAlreadyPaidPremium in quote-profit.ts — premium already credited
   // via "Счёт на выкуп" partial payments before this quote reached
   // buyoutFactConfirmed (or, if it's still open, before now).
   const alreadyPaidPremium = sumAlreadyPaidPremium(q.paymentAllocations);
-  let managerPremiumRub: number;
+  let managerServicesPremiumRub: number;
   if (q.buyoutFactConfirmed) {
-    managerPremiumRub = factualManagerPremiumRub(
+    managerServicesPremiumRub = factualManagerPremiumRub(
       { proscetRub, buyoutRub, discountRub },
       Boolean(q.buyoutSelfSourcedBoost),
       premiumRates,
@@ -138,40 +142,47 @@ function computeQuoteBreakdown(
     const buyoutRate = isBoosted ? premiumRates.selfSourcedBuyoutDiscountRatePercent : premiumRates.normalRatePercent;
     const fullProscetPotentialRub = Math.max(0, proscetRub) * (proscetRate / 100);
     const fullBuyoutPotentialRub = Math.max(0, buyoutRub) * (buyoutRate / 100);
-    managerPremiumRub =
+    managerServicesPremiumRub =
       alreadyPaidPremium.proscetRub +
       alreadyPaidPremium.buyoutRub +
       Math.max(0, fullProscetPotentialRub - alreadyPaidPremium.proscetRub) +
       Math.max(0, fullBuyoutPotentialRub - alreadyPaidPremium.buyoutRub);
   }
-  // Cargo bonus locks in only at handed_to_client (cargoBonusRatePercent
-  // set) — before that it's a live "if this quote were self-sourced today"
-  // estimate, same as the dashboard.
-  const cargoBonusRub =
-    q.cargoBonusRatePercent !== null
-      ? Number(q.cargoBonusRatePercent) > 0
-        ? flatCargoBonusRub(q, cargoRates)
-        : 0
-      : isSelfSourcedFor(q.client, q.managerId)
-        ? flatCargoBonusRub(q, cargoRates)
-        : 0;
-  managerPremiumRub += cargoBonusRub;
+  // Cargo bonus/shares only count once cargoBonusRatePercent has locked in
+  // (handed_to_client) — before that, cargo margin doesn't participate in
+  // ANY payout suggestion yet, per explicit instruction (a quote can be
+  // buyoutFactConfirmed while cargo hasn't shipped, and that margin isn't
+  // real income until it does). See PB-V5 chat 2026-08-06.
+  // cargoBonusRatePercent is set (to 0 OR a real rate) the moment cargo
+  // hands off to the client — the VALUE only decides whether the manager
+  // personally gets a self-sourced bonus, it isn't what gates whether cargo
+  // counts as realized at all (a company-lead client's cargo margin is
+  // still very much realized income for Юра/Влад/remainder, just not for
+  // the manager). See status/route.ts for where this gets set.
+  const cargoRealized = q.cargoBonusRatePercent !== null;
+  const managerCargoBonusRub =
+    cargoRealized && Number(q.cargoBonusRatePercent) > 0 && isSelfSourcedFor(q.client, q.managerId) ? flatCargoBonusRub(q, cargoRates) : 0;
 
-  // percent_of_profit investors take their cut from profit AFTER this same
-  // deal's own manager premium (rate-based premium + cargo bonus, both
-  // above) — the manager's bonus comes off the top first, for every client
-  // (company-lead or self-sourced) alike. flat_per_cargo_kg is unaffected
-  // (weight-based, not profit-based). See PB-V5 chat 2026-08-01.
-  const profitAfterManagerPremiumRub = Math.max(0, clampedTotalRub - managerPremiumRub);
-  const investorShares = investors
-    .filter((inv) => inv.shareType === "percent_of_profit" || inv.shareType === "flat_per_cargo_kg")
-    .map((inv) => {
-      const shareRub =
-        inv.shareType === "percent_of_profit"
-          ? profitAfterManagerPremiumRub * (effectiveInvestorRatePercent(q.client, Number(inv.ratePercent ?? 0)) / 100)
-          : investorCargoShareRub(q.totalWeightKg, Number(inv.rateUsdPerKg ?? 0), q.usdRateUsed);
-      return { id: inv.id, name: inv.name, shareType: inv.shareType, shareRub };
-    });
+  const { managerPremiumRub, investorSharesById } = computeQuoteShares(
+    proscetRub + buyoutRub + discountRub + fx,
+    managerServicesPremiumRub,
+    cargoRealized,
+    cargo,
+    managerCargoBonusRub,
+    q,
+    investors,
+    q.client,
+  );
+  // remainder_share is now included here too — computeQuoteShares splits it
+  // PER QUOTE (per pool, actually — services and cargo each get their own
+  // split, summed), not once on an aggregate pool the way buildProfitReport
+  // used to. See PB-V5 chat 2026-08-06.
+  const investorShares = investors.map((inv) => ({
+    id: inv.id,
+    name: inv.name,
+    shareType: inv.shareType,
+    shareRub: investorSharesById.get(inv.id) ?? 0,
+  }));
 
   // Raw inputs behind every figure above, for the on-screen "детали"
   // expansion — so an owner can check a suspicious number (e.g. an
@@ -282,24 +293,21 @@ async function buildProfitReport(quoteIds: string[]) {
   const profitPoolRub = rows.reduce((sum, r) => sum + Math.max(0, r.rawTotalRub), 0);
   const managerPremiumRub = rows.reduce((sum, r) => sum + r.managerPremiumRub, 0);
 
-  // percent_of_profit + flat_per_cargo_kg — sum each investor's per-row
-  // contribution across the whole selection.
-  const investorShares: { id: string; name: string; shareType: string; shareRub: number }[] = [];
-  let percentAndFlatSharesRub = 0;
-  for (const inv of investors) {
-    if (inv.shareType !== "percent_of_profit" && inv.shareType !== "flat_per_cargo_kg") continue;
-    const shareRub = rows.reduce((sum, r) => sum + (r.investorShares.find((s) => s.id === inv.id)?.shareRub ?? 0), 0);
-    percentAndFlatSharesRub += shareRub;
-    investorShares.push({ id: inv.id, name: inv.name, shareType: inv.shareType, shareRub });
-  }
-  // remainder_share — splits whatever's left evenly, N-way (was a
-  // hardcoded "/2" for Александр+Антон, now works for any count).
-  const remainderInvestors = investors.filter((inv) => inv.shareType === "remainder_share");
-  const remainderPoolRub = profitPoolRub - percentAndFlatSharesRub - managerPremiumRub;
-  const perRemainderShareRub = splitRemainderRub(remainderPoolRub, remainderInvestors.length);
-  for (const inv of remainderInvestors) {
-    investorShares.push({ id: inv.id, name: inv.name, shareType: inv.shareType, shareRub: perRemainderShareRub });
-  }
+  // Every investor's cut — percent_of_profit, flat_per_cargo_kg, AND
+  // remainder_share alike — is now computed PER ROW by computeQuoteShares
+  // (see quote-profit.ts), one deal at a time, so summing across rows here
+  // is a straight linear sum with no aggregate remainder math left to do.
+  // This is deliberately per-row rather than "split one aggregate pool" —
+  // per-row is what lets a partly-realized deal's services pool distribute
+  // now while its cargo pool waits for delivery, exactly the split that
+  // reworking this away from an aggregate pool was for. See PB-V5 chat
+  // 2026-08-06.
+  const investorShares = investors.map((inv) => ({
+    id: inv.id,
+    name: inv.name,
+    shareType: inv.shareType,
+    shareRub: rows.reduce((sum, r) => sum + (r.investorShares.find((s) => s.id === inv.id)?.shareRub ?? 0), 0),
+  }));
 
   // Per-source breakdown of totalProfitRub above — so "Прибыль компании"
   // doesn't stay one opaque number, same "show what it's made of" instinct

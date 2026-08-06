@@ -14,11 +14,12 @@ import {
   factualManagerPremiumRub,
   flatCargoBonusRub,
   estimatedFxProfitRub,
-  investorCargoShareRub,
-  splitRemainderRub,
+  distributePoolRub,
+  computeQuoteShares,
   sumAlreadyPaidPremium,
   sumAlreadyPaidProfitRub,
   type CnyProfitTiers,
+  type InvestorConfig,
 } from "@/lib/desk-services/quote-profit";
 
 // Statuses that imply the buyout has actually happened — client's money
@@ -430,10 +431,8 @@ export async function GET(req: NextRequest) {
     },
   });
   const fulfillmentPremiumRubByManager = new Map<string, number>();
-  let fulfillmentTotalRub = 0;
   for (const o of fulfillmentOrders) {
     const rub = Number(o.totalRub);
-    fulfillmentTotalRub += rub;
     const isSelfSourced = o.client.selfSourcedConfirmed && o.client.createdByManagerId === o.managerId;
     if (!isSelfSourced) continue;
     const premium = rub * (fulfillmentPremiumRatePercent / 100);
@@ -585,86 +584,87 @@ export async function GET(req: NextRequest) {
     searchFeeRub = overall.pipelineSearchFeeRub;
     buyoutCommissionRub = overall.pipelineBuyoutCommissionRub;
 
-    const totalConfirmedQuoteProfitRub = quotes
-      .filter((q) => q.buyoutFactConfirmed)
-      .reduce((sum, q) => {
-        const { proscetRub, buyoutRub, discountRub } = factualSourceProfits(q);
-        const perQuoteTotal = proscetRub + buyoutRub + discountRub + fxProfitRub(q) + cargoProfitRub(q);
-        return sum + Math.max(0, perQuoteTotal);
-      }, 0);
-    // Фулфилмент has no tracked cost — its full billed amount counts as
-    // profit for this pool, same treatment as Просчёт.
-    const totalProfitPoolRub = totalConfirmedQuoteProfitRub + fulfillmentTotalRub;
+    const investorRows = await prisma.investor.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } });
+    const investors: InvestorConfig[] = investorRows.map((inv) => ({
+      id: inv.id,
+      name: inv.name,
+      shareType: inv.shareType as InvestorConfig["shareType"],
+      ratePercent: inv.ratePercent !== null ? Number(inv.ratePercent) : null,
+      rateUsdPerKg: inv.rateUsdPerKg !== null ? Number(inv.rateUsdPerKg) : null,
+    }));
+    const remainderInvestorIds = investors.filter((inv) => inv.shareType === "remainder_share").map((inv) => inv.id);
+    const investorSharesById = new Map<string, number>();
+    const addInvestorShare = (id: string, amountRub: number) => investorSharesById.set(id, (investorSharesById.get(id) ?? 0) + amountRub);
 
-    const investors = await prisma.investor.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } });
-
-    // percent_of_profit — computed PER DEAL, not once on the aggregate pool
-    // above, since that's the only way a per-client override
-    // (Client.vladShareRatePercentOverride) can actually change anything.
-    // Takes its cut from profit AFTER that same deal's own manager premium
-    // (rate-based premium + self-sourced cargo bonus/fulfillment premium),
-    // not the gross figure — the manager's bonus comes off the top first,
-    // for every client (company-lead or self-sourced) alike. See PB-V5
-    // chat 2026-08-01. Same Math.max(0, ...)-per-item clamping the old
-    // aggregate version used, just applied before each deal's own rate
-    // multiply instead of after one company-wide multiply.
-    let percentAndFlatSharesRub = 0;
-    const shares: { id: string; name: string; shareType: string; shareRub: number }[] = [];
-    for (const inv of investors) {
-      if (inv.shareType !== "percent_of_profit") continue;
-      const ratePercent = Number(inv.ratePercent ?? 0);
-      const fromQuotesRub = quotes
-        .filter((q) => q.buyoutFactConfirmed)
-        .reduce((sum, q) => {
-          const sourceProfits = factualSourceProfits(q);
-          const grossTotal = sourceProfits.proscetRub + sourceProfits.buyoutRub + sourceProfits.discountRub + fxProfitRub(q) + cargoProfitRub(q);
-          const cargoBonus =
-            q.cargoBonusRatePercent !== null && q.cargoBonusRatePercent !== undefined && Number(q.cargoBonusRatePercent) > 0
-              ? flatCargoBonusRub(q, cargoRates)
-              : 0;
-          const managerPremium =
-            factualManagerPremiumRub(sourceProfits, Boolean(q.buyoutSelfSourcedBoost), premiumRates, sumAlreadyPaidPremium(q.paymentAllocations)) +
-            cargoBonus;
-          const netTotal = Math.max(0, grossTotal - managerPremium);
-          const rate = effectiveInvestorRatePercent(q.client, ratePercent);
-          return sum + netTotal * (rate / 100);
-        }, 0);
-      const fromFulfillmentRub = fulfillmentOrders.reduce((sum, o) => {
-        const isSelfSourced = o.client.selfSourcedConfirmed && o.client.createdByManagerId === o.managerId;
-        const fulfillmentPremium = isSelfSourced ? Number(o.totalRub) * (fulfillmentPremiumRatePercent / 100) : 0;
-        const netTotal = Math.max(0, Number(o.totalRub) - fulfillmentPremium);
-        const rate = effectiveInvestorRatePercent(o.client, ratePercent);
-        return sum + netTotal * (rate / 100);
-      }, 0);
-      const shareRub = fromQuotesRub + fromFulfillmentRub;
-      percentAndFlatSharesRub += shareRub;
-      shares.push({ id: inv.id, name: inv.name, shareType: inv.shareType, shareRub });
+    // Every confirmed quote's cut — percent_of_profit, flat_per_cargo_kg,
+    // AND remainder_share alike — computed PER DEAL by computeQuoteShares
+    // (see quote-profit.ts), not once on an aggregate pool: that's the only
+    // way a per-client override (Client.vladShareRatePercentOverride) can
+    // actually change anything, and the only way a deal's cargo margin can
+    // correctly wait for delivery (cargoBonusRatePercent locked in) while
+    // its services profit still distributes now. See PB-V5 chat 2026-08-01,
+    // 2026-08-06.
+    for (const q of quotes.filter((quote) => quote.buyoutFactConfirmed)) {
+      const sourceProfits = factualSourceProfits(q);
+      const fx = fxProfitRub(q);
+      const cargo = cargoProfitRub(q);
+      const managerServicesPremiumRub = factualManagerPremiumRub(
+        sourceProfits,
+        Boolean(q.buyoutSelfSourcedBoost),
+        premiumRates,
+        sumAlreadyPaidPremium(q.paymentAllocations),
+      );
+      // cargoBonusRatePercent is set (to 0 OR a real rate) the moment cargo
+      // hands off to the client — the VALUE only decides whether the
+      // manager personally gets a self-sourced bonus, not whether cargo
+      // counts as realized for Юра/Влад/remainder_share investors.
+      const cargoRealized = q.cargoBonusRatePercent !== null;
+      const managerCargoBonusRub =
+        cargoRealized && Number(q.cargoBonusRatePercent) > 0 && isSelfSourcedFor(q.client, q.managerId) ? flatCargoBonusRub(q, cargoRates) : 0;
+      const { investorSharesById: perQuoteShares } = computeQuoteShares(
+        sourceProfits.proscetRub + sourceProfits.buyoutRub + sourceProfits.discountRub + fx,
+        managerServicesPremiumRub,
+        cargoRealized,
+        cargo,
+        managerCargoBonusRub,
+        q,
+        investors,
+        q.client,
+      );
+      for (const [id, amountRub] of perQuoteShares) addInvestorShare(id, amountRub);
     }
 
-    // flat_per_cargo_kg — gated the same way as factualCargoBonusRub above
-    // (cargoBonusRatePercent locked in at handed_to_client), not on
-    // buyoutFactConfirmed — cargo delivery and buyout confirmation are
-    // independent events. Comes off the top same as a percent_of_profit
-    // cut, before remainder_share investors split what's left.
-    const deliveredCargoQuotes = quotes.filter((q) => q.cargoBonusRatePercent !== null && q.cargoBonusRatePercent !== undefined);
-    for (const inv of investors) {
-      if (inv.shareType !== "flat_per_cargo_kg") continue;
-      const rateUsdPerKg = Number(inv.rateUsdPerKg ?? 0);
-      const shareRub = deliveredCargoQuotes.reduce((sum, q) => sum + investorCargoShareRub(q.totalWeightKg, rateUsdPerKg, q.usdRateUsed), 0);
-      percentAndFlatSharesRub += shareRub;
-      shares.push({ id: inv.id, name: inv.name, shareType: inv.shareType, shareRub });
+    // Фулфилмент — a separate profit source with no cargo concept of its
+    // own, so it uses distributePoolRub directly rather than the full
+    // computeQuoteShares wrapper: one flat-% cut per percent_of_profit
+    // investor (off the order's own totalRub, never chained through the
+    // manager's self-sourced premium), then whatever's left folds into the
+    // SAME remainder_share investors quotes above already contribute to —
+    // summing each item's own remainder split is mathematically the same as
+    // splitting one combined aggregate pool once, just computed per item.
+    for (const o of fulfillmentOrders) {
+      const isSelfSourced = o.client.selfSourcedConfirmed && o.client.createdByManagerId === o.managerId;
+      const fulfillmentPremiumRub = isSelfSourced ? Number(o.totalRub) * (fulfillmentPremiumRatePercent / 100) : 0;
+      const percentInvestors = investors
+        .filter((inv) => inv.shareType === "percent_of_profit")
+        .map((inv) => ({ id: inv.id, ratePercent: effectiveInvestorRatePercent(o.client, Number(inv.ratePercent ?? 0)) }));
+      const { percentSharesById, remainderById } = distributePoolRub(
+        Number(o.totalRub),
+        0,
+        fulfillmentPremiumRub,
+        percentInvestors,
+        remainderInvestorIds,
+      );
+      for (const [id, amountRub] of percentSharesById) addInvestorShare(id, amountRub);
+      for (const [id, amountRub] of remainderById) addInvestorShare(id, amountRub);
     }
 
-    // remainder_share — splits whatever's left evenly, N-way (was a
-    // hardcoded "/2" for Александр+Антон, now works for any count).
-    const remainderInvestors = investors.filter((inv) => inv.shareType === "remainder_share");
-    const remainderPoolRub = totalProfitPoolRub - percentAndFlatSharesRub - totalManagerFactualPremiumsRub;
-    const perRemainderShareRub = splitRemainderRub(remainderPoolRub, remainderInvestors.length);
-    for (const inv of remainderInvestors) {
-      shares.push({ id: inv.id, name: inv.name, shareType: inv.shareType, shareRub: perRemainderShareRub });
-    }
-
-    investorShares = shares;
+    investorShares = investors.map((inv) => ({
+      id: inv.id,
+      name: inv.name,
+      shareType: inv.shareType,
+      shareRub: investorSharesById.get(inv.id) ?? 0,
+    }));
   }
 
   // Owner-confidential cargo-margin signal — never leaves the server for

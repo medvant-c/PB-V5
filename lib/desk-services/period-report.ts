@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSystemSettings } from "@/lib/system-settings";
 import {
   cargoProfitRub,
+  distributePoolRub,
   effectiveInvestorRatePercent,
   factualManagerPremiumRub,
   factualSourceProfits,
@@ -10,7 +11,6 @@ import {
   fxProfitRub,
   investorCargoShareRub,
   isPremiumEligiblePaymentCategory,
-  splitRemainderRub,
   sumAlreadyPaidPremium,
   sumAlreadyPaidProfitRub,
   type InvestorConfig,
@@ -258,14 +258,29 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
   }
 
   // --- Fold events into per-manager premium + a shared investor pool ---
+  // Each event's own pool is distributed via distributePoolRub (see
+  // quote-profit.ts) — every percent_of_profit investor gets their rate
+  // FLAT off the event's own profitRub, never chained through the manager's
+  // cut first, so several %-based cuts of the same event sum to exactly
+  // what they're configured to (e.g. 10% manager + 10% Влад + 80% remainder
+  // = 100%, not 10% + 9% + 81% from compounding). A cargo event's
+  // managerPremiumRub is itself a FIXED $/kg cut (flatCargoBonusRub, not a
+  // %), so it's passed as a fixed-dollar cut alongside Юра's flat_per_
+  // cargo_kg share — both come off the top before Влад/remainder split
+  // what's left, matching how a real cargo delivery actually gets divided.
+  // See PB-V5 chat 2026-08-06.
   const managerPremiumByManagerId = new Map<string, number>();
   let companyProfitRub = 0;
   let totalManagerPremiumRub = 0;
-  let percentOfProfitAndFlatSharesRub = 0;
   const investorShareById = new Map<string, number>();
+  const addInvestorShare = (id: string, amountRub: number) => investorShareById.set(id, (investorShareById.get(id) ?? 0) + amountRub);
 
+  const percentInvestorsBase = investors.filter((inv) => inv.shareType === "percent_of_profit");
+  const remainderInvestorIds = investors.filter((inv) => inv.shareType === "remainder_share").map((inv) => inv.id);
   for (const inv of investors) {
-    if (inv.shareType === "percent_of_profit" || inv.shareType === "flat_per_cargo_kg") investorShareById.set(inv.id, 0);
+    if (inv.shareType === "percent_of_profit" || inv.shareType === "flat_per_cargo_kg" || inv.shareType === "remainder_share") {
+      investorShareById.set(inv.id, 0);
+    }
   }
 
   for (const ev of events) {
@@ -273,24 +288,32 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
     totalManagerPremiumRub += ev.managerPremiumRub;
     managerPremiumByManagerId.set(ev.managerId, (managerPremiumByManagerId.get(ev.managerId) ?? 0) + ev.managerPremiumRub);
 
-    const poolAfterPremiumRub = Math.max(0, ev.profitRub - ev.managerPremiumRub);
-    for (const inv of investors) {
-      if (inv.shareType === "percent_of_profit") {
-        const rate = effectiveInvestorRatePercent(ev.client, Number(inv.ratePercent ?? 0));
-        const shareRub = poolAfterPremiumRub * (rate / 100);
-        percentOfProfitAndFlatSharesRub += shareRub;
-        investorShareById.set(inv.id, (investorShareById.get(inv.id) ?? 0) + shareRub);
-      } else if (inv.shareType === "flat_per_cargo_kg" && ev.cargo) {
+    const percentInvestors = percentInvestorsBase.map((inv) => ({
+      id: inv.id,
+      ratePercent: effectiveInvestorRatePercent(ev.client, Number(inv.ratePercent ?? 0)),
+    }));
+
+    if (ev.cargo) {
+      // Юра's cut is a fixed $/kg amount, same shape as the manager's own
+      // cargo bonus already in ev.managerPremiumRub — both must come off
+      // the top before any %-based split, since neither is expressible as
+      // "% of pool".
+      let cargoFixedCutsRub = ev.managerPremiumRub;
+      for (const inv of investors) {
+        if (inv.shareType !== "flat_per_cargo_kg") continue;
         const shareRub = investorCargoShareRub(ev.cargo.totalWeightKg, Number(inv.rateUsdPerKg ?? 0), ev.cargo.usdRateUsed);
-        percentOfProfitAndFlatSharesRub += shareRub;
-        investorShareById.set(inv.id, (investorShareById.get(inv.id) ?? 0) + shareRub);
+        addInvestorShare(inv.id, shareRub);
+        cargoFixedCutsRub += shareRub;
       }
+      const { percentSharesById, remainderById } = distributePoolRub(ev.profitRub, cargoFixedCutsRub, 0, percentInvestors, remainderInvestorIds);
+      for (const [id, amountRub] of percentSharesById) addInvestorShare(id, amountRub);
+      for (const [id, amountRub] of remainderById) addInvestorShare(id, amountRub);
+    } else {
+      const { percentSharesById, remainderById } = distributePoolRub(ev.profitRub, 0, ev.managerPremiumRub, percentInvestors, remainderInvestorIds);
+      for (const [id, amountRub] of percentSharesById) addInvestorShare(id, amountRub);
+      for (const [id, amountRub] of remainderById) addInvestorShare(id, amountRub);
     }
   }
-
-  const remainderInvestors = investors.filter((inv) => inv.shareType === "remainder_share");
-  const remainderPoolRub = companyProfitRub - totalManagerPremiumRub - percentOfProfitAndFlatSharesRub;
-  const perRemainderShareRub = splitRemainderRub(remainderPoolRub, remainderInvestors.length);
 
   // --- "Уже выплачено за период" — expense ордера в кассе с явно
   // привязанной статьёй (см. CashCategory.payoutTarget, PB-V5 chat
@@ -334,17 +357,17 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
     .filter((row) => row.owedRub > 0 || row.paidRub > 0);
 
   const investorPayouts = investors.map((inv) => {
-    const owedRub =
-      inv.shareType === "remainder_share" ? perRemainderShareRub : (investorShareById.get(inv.id) ?? 0);
+    const owedRub = investorShareById.get(inv.id) ?? 0;
     const paidRub = alreadyPaidRubByInvestorId.get(inv.id) ?? 0;
     return { investorId: inv.id, investorName: inv.name, shareType: inv.shareType, owedRub, paidRub, remainingRub: owedRub - paidRub };
   });
+  const investorPoolRub = investorPayouts.reduce((sum, row) => sum + Math.max(0, row.owedRub), 0);
 
   return {
     period: { from: from.toISOString(), to: to.toISOString() },
     companyProfitRub,
     totalManagerPremiumRub,
-    investorPoolRub: percentOfProfitAndFlatSharesRub + Math.max(0, remainderPoolRub),
+    investorPoolRub,
     managerPayouts,
     investorPayouts,
     cnyRateRub,

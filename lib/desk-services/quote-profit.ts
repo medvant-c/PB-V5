@@ -374,6 +374,109 @@ interface InvestorConfig {
   rateUsdPerKg: number | null;
 }
 
+// Splits ONE profit pool (services OR cargo — see computeQuoteShares below,
+// the only caller) among percent_of_profit + remainder_share investors,
+// after any fixed-$ cuts (flat_per_cargo_kg, or a self-sourced manager's
+// flat cargo bonus — cargoDollarCutsRub, 0 for the services pool) have
+// already come off the top. Every percent_of_profit investor gets their
+// configured rate FLAT off (pool - fixed cuts) — never chained through each
+// other or through managerPercentPremiumRub — so several percentage cuts of
+// the same pool sum to exactly what they're configured to sum to (e.g.
+// manager 10% + investor 10% + remainder 80% = 100% of the pool, not
+// 10% + 9% + 81% from each cut compounding into the leftover of the
+// previous one). See PB-V5 chat 2026-08-06 — this replaces a real bug
+// where every %-based cut chained through the last, silently shorting
+// every remainder_share investor.
+function distributePoolRub(
+  rawPoolRub: number,
+  fixedDollarCutsRub: number,
+  managerPercentPremiumRub: number,
+  percentInvestors: { id: string; ratePercent: number }[],
+  remainderInvestorIds: string[],
+): { percentSharesById: Map<string, number>; remainderById: Map<string, number> } {
+  const poolAfterFixedCuts = Math.max(0, rawPoolRub - fixedDollarCutsRub);
+  const percentSharesById = new Map<string, number>();
+  let percentSharesSumRub = 0;
+  for (const inv of percentInvestors) {
+    const shareRub = poolAfterFixedCuts * (inv.ratePercent / 100);
+    percentSharesById.set(inv.id, shareRub);
+    percentSharesSumRub += shareRub;
+  }
+  const remainderPoolRub = poolAfterFixedCuts - percentSharesSumRub - managerPercentPremiumRub;
+  const perInvestorRub = splitRemainderRub(remainderPoolRub, remainderInvestorIds.length);
+  const remainderById = new Map(remainderInvestorIds.map((id) => [id, perInvestorRub]));
+  return { percentSharesById, remainderById };
+}
+
+interface QuoteShareResult {
+  // managerServicesPremiumRub + managerCargoBonusRub — same combined shape
+  // every existing caller already expected from factualManagerPremiumRub +
+  // a separately-added flatCargoBonusRub.
+  managerPremiumRub: number;
+  investorSharesById: Map<string, number>;
+}
+
+// The one place "who gets how much of this quote" is decided — services
+// profit (proscet+buyout+discount+fx) and cargo profit are two completely
+// separate pools, each distributed independently via distributePoolRub
+// above, then summed per investor:
+//
+//   Services pool — always active the moment there's any realized (or, pre-
+//   confirmation, estimated) services profit. No fixed-$ cuts here; the
+//   manager's own premium is itself percent-based (managerServicesPremiumRub,
+//   from factualManagerPremiumRub/its estimated equivalent), so it's passed
+//   in as managerPercentPremiumRub — treated exactly like another
+//   percent_of_profit cut of the SAME base, not chained ahead of one.
+//
+//   Cargo pool — deliberately NOT distributed at all until cargoRealized
+//   (cargoBonusRatePercent locked in at handed_to_client) — a quote can be
+//   buyoutFactConfirmed (real goods cost known) while cargo hasn't shipped
+//   yet, and that margin isn't real income until it does. Once realized,
+//   flat_per_cargo_kg investors (Юра) and a self-sourced manager's flat
+//   cargo bonus come off the top FIRST (both are fixed $/kg amounts, not
+//   expressible as "% of pool"), and only what's left after those splits
+//   among percent_of_profit/remainder_share investors — see PB-V5 chat
+//   2026-08-06 for the exact wording this mirrors.
+function computeQuoteShares(
+  servicesProfitRub: number,
+  managerServicesPremiumRub: number,
+  cargoRealized: boolean,
+  cargoProfitRub: number,
+  managerCargoBonusRub: number,
+  cargoWeightBasis: { totalWeightKg: unknown; usdRateUsed: unknown },
+  investors: InvestorConfig[],
+  client: { vladShareRatePercentOverride: unknown },
+): QuoteShareResult {
+  const percentInvestors = investors
+    .filter((inv) => inv.shareType === "percent_of_profit")
+    .map((inv) => ({ id: inv.id, ratePercent: effectiveInvestorRatePercent(client, Number(inv.ratePercent ?? 0)) }));
+  const remainderInvestorIds = investors.filter((inv) => inv.shareType === "remainder_share").map((inv) => inv.id);
+
+  const investorSharesById = new Map<string, number>();
+  const addShare = (id: string, amountRub: number) => investorSharesById.set(id, (investorSharesById.get(id) ?? 0) + amountRub);
+
+  const services = distributePoolRub(servicesProfitRub, 0, managerServicesPremiumRub, percentInvestors, remainderInvestorIds);
+  for (const [id, amountRub] of services.percentSharesById) addShare(id, amountRub);
+  for (const [id, amountRub] of services.remainderById) addShare(id, amountRub);
+
+  let managerPremiumRub = managerServicesPremiumRub;
+  if (cargoRealized) {
+    let cargoFixedCutsRub = managerCargoBonusRub;
+    for (const inv of investors) {
+      if (inv.shareType !== "flat_per_cargo_kg") continue;
+      const shareRub = investorCargoShareRub(cargoWeightBasis.totalWeightKg, Number(inv.rateUsdPerKg ?? 0), cargoWeightBasis.usdRateUsed);
+      addShare(inv.id, shareRub);
+      cargoFixedCutsRub += shareRub;
+    }
+    const cargo = distributePoolRub(cargoProfitRub, cargoFixedCutsRub, 0, percentInvestors, remainderInvestorIds);
+    for (const [id, amountRub] of cargo.percentSharesById) addShare(id, amountRub);
+    for (const [id, amountRub] of cargo.remainderById) addShare(id, amountRub);
+  }
+  managerPremiumRub += managerCargoBonusRub;
+
+  return { managerPremiumRub, investorSharesById };
+}
+
 export {
   proscetProfitRub,
   estimatedSourceProfits,
@@ -395,11 +498,14 @@ export {
   sumAlreadyPaidPremium,
   sumAlreadyPaidProfitRub,
   computePaymentAllocationPremiumRub,
+  distributePoolRub,
+  computeQuoteShares,
 };
 export type {
   QuoteProfitFields,
   SourceProfits,
   CnyProfitTiers,
+  QuoteShareResult,
   CnyVolumeFields,
   InvestorShareType,
   InvestorConfig,
