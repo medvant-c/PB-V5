@@ -71,7 +71,14 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       quoteType: quoteType as (typeof QUOTE_TYPES)[number],
       searchServiceFeeRub: newSearchServiceFeeRub,
       customProductionFeeRub: newCustomProductionFeeRub,
-      totalRub: Number(existing.totalRub) + searchFeeDeltaRub + customProductionFeeDeltaRub,
+      // "Только карго" quotes never had the search fee/production fee in
+      // totalRub to begin with (see Quote.isCargoOnly) — the fields above
+      // still move for record-keeping, but the delta below must not, or a
+      // tier switch would silently inflate a cargo-only total with a fee
+      // the client was never actually charged.
+      totalRub: existing.isCargoOnly
+        ? Number(existing.totalRub)
+        : Number(existing.totalRub) + searchFeeDeltaRub + customProductionFeeDeltaRub,
     },
   });
 

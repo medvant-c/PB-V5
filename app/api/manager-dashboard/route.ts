@@ -107,6 +107,7 @@ interface QuoteForStats {
   packagingCostRub: unknown;
   insuranceCostRub: unknown;
   mskExpensesRub: unknown;
+  isCargoOnly: boolean;
   completedAt: Date | null;
   displayId: number;
   productName: string;
@@ -184,13 +185,20 @@ function summarize(
     if (q.status === "handed_to_client") handedRub += Number(q.totalRub);
     if (OPEN_STATUSES.includes(q.status)) {
       pipelineRub += Number(q.totalRub);
-      pipelineGoodsRub += Number(q.totalPriceRub);
-      pipelineChinaDeliveryRub += Number(q.chinaDeliveryRub);
+      // Cargo-only quotes never bill goods/China-delivery/search-fee/
+      // buyout-commission (see Quote.isCargoOnly) — those fields still hold
+      // record-keeping numbers, not real pipeline value, so they're
+      // excluded from this gross breakdown the same way they're excluded
+      // from totalRub itself. Cargo + volume/weight still count normally.
+      if (!q.isCargoOnly) {
+        pipelineGoodsRub += Number(q.totalPriceRub);
+        pipelineChinaDeliveryRub += Number(q.chinaDeliveryRub);
+        pipelineSearchFeeRub += Number(q.searchServiceFeeRub);
+        pipelineBuyoutCommissionRub += Number(q.buyoutCommissionRub);
+      }
       pipelineCargoRub += Number(q.cargoDeliveryRub);
       pipelineVolumeM3 += Number(q.totalVolumeM3);
       pipelineWeightKg += Number(q.totalWeightKg);
-      pipelineSearchFeeRub += Number(q.searchServiceFeeRub);
-      pipelineBuyoutCommissionRub += Number(q.buyoutCommissionRub);
     }
 
     if (q.status === "rejected") continue; // dead deal — counts toward neither bucket, either side
@@ -362,6 +370,7 @@ export async function GET(req: NextRequest) {
       packagingCostRub: true,
       insuranceCostRub: true,
       mskExpensesRub: true,
+      isCargoOnly: true,
       completedAt: true,
       displayId: true,
       productName: true,

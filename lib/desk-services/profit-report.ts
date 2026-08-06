@@ -60,6 +60,7 @@ const PROFIT_SELECT = {
   packagingCostRub: true,
   insuranceCostRub: true,
   mskExpensesRub: true,
+  isCargoOnly: true,
   totalWeightKg: true,
   totalVolumeM3: true,
   densityKgM3: true,

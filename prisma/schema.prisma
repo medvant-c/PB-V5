@@ -691,6 +691,23 @@ model Quote {
   isCustomProduction     Boolean @default(false)
   customProductionFeeRub Decimal @default(0)
 
+  // "Только карго" — product data (name/price/weight/dims/photos) is still
+  // entered and stored exactly like a normal quote, but totalRub (see
+  // computeQuote in lib/quote-engine.ts) collapses to cargoDeliveryRub
+  // alone — no goods price, China delivery, search-service fee, buyout
+  // commission, "производство под заказ", or attached services. Packaging/
+  // insurance/MSK expenses (added later at actualize-cargo time) still
+  // apply on top, same as any other quote. Client already sources the
+  // goods themselves; Panda Bridge only prices and delivers the cargo leg.
+  // Manual cargoRateUsdOverride/usdRateRubOverride stay fully functional —
+  // this flag only changes which lines feed totalRub and the PDF, not how
+  // any of them are computed. Profit/premium math (see
+  // lib/desk-services/quote-profit.ts) also gates on this: a cargo-only
+  // quote's company profit is cargo margin alone, never the goods/search/
+  // buyout-commission fields that were entered for record-keeping but
+  // never actually billed to the client. See PB-V5 chat 2026-08-06.
+  isCargoOnly Boolean @default(false)
+
   productName        String
   // Never shown on the client-facing PDF export — internal only.
   productLink        String?

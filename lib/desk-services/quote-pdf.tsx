@@ -126,6 +126,13 @@ interface QuotePdfProps {
     customProductionFeeRub: number;
     buyoutCommissionPercent: number;
     buyoutCommissionRub: number;
+    // "Только карго" (see Quote.isCargoOnly in prisma/schema.prisma) — the
+    // goods/China-delivery/search-fee/buyout-commission/attached-services
+    // rows below are still computed and stored, but hidden here since the
+    // client was never actually billed for them; only cargo delivery (+
+    // packaging/insurance/МСК, already individually gated on > 0) and the
+    // total are shown.
+    isCargoOnly: boolean;
     // Real extra costs at actual shipment — see Quote.packagingCostRub in
     // prisma/schema.prisma. 0 (the common case, before shipment or when
     // none applied) simply renders no line, same as customProductionFeeRub
@@ -203,36 +210,40 @@ function QuotePdfPage({ quote, client, photoBuffers, attachedServices }: QuotePd
 
         <View>
           <Text style={styles.sectionTitle}>Расчёт стоимости</Text>
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>
-              Товар ({quote.priceCnyPerUnit}¥ × {quote.quantity})
-            </Text>
-            <Text style={styles.rowValue}>
-              {fmt(quote.totalPriceCny)}¥ / {fmt(quote.totalPriceRub)}₽
-            </Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Доставка по Китаю</Text>
-            <Text style={styles.rowValue}>{fmt(quote.chinaDeliveryRub)}₽</Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Услуга поиска товара ({QUOTE_TYPE_LABEL[quote.quoteType]})</Text>
-            {quote.searchFeeWaived ? (
-              <Text style={styles.freeValue}>БЕСПЛАТНО</Text>
-            ) : (
-              <Text style={styles.rowValue}>{fmt(quote.searchServiceFeeRub)}₽</Text>
-            )}
-          </View>
-          {quote.isCustomProduction && (
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>Производство под заказ</Text>
-              <Text style={styles.rowValue}>{fmt(quote.customProductionFeeRub)}₽</Text>
-            </View>
+          {!quote.isCargoOnly && (
+            <>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>
+                  Товар ({quote.priceCnyPerUnit}¥ × {quote.quantity})
+                </Text>
+                <Text style={styles.rowValue}>
+                  {fmt(quote.totalPriceCny)}¥ / {fmt(quote.totalPriceRub)}₽
+                </Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Доставка по Китаю</Text>
+                <Text style={styles.rowValue}>{fmt(quote.chinaDeliveryRub)}₽</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Услуга поиска товара ({QUOTE_TYPE_LABEL[quote.quoteType]})</Text>
+                {quote.searchFeeWaived ? (
+                  <Text style={styles.freeValue}>БЕСПЛАТНО</Text>
+                ) : (
+                  <Text style={styles.rowValue}>{fmt(quote.searchServiceFeeRub)}₽</Text>
+                )}
+              </View>
+              {quote.isCustomProduction && (
+                <View style={styles.row}>
+                  <Text style={styles.rowLabel}>Производство под заказ</Text>
+                  <Text style={styles.rowValue}>{fmt(quote.customProductionFeeRub)}₽</Text>
+                </View>
+              )}
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Организация выкупа ({quote.buyoutCommissionPercent}%)</Text>
+                <Text style={styles.rowValue}>{fmt(quote.buyoutCommissionRub)}₽</Text>
+              </View>
+            </>
           )}
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Организация выкупа ({quote.buyoutCommissionPercent}%)</Text>
-            <Text style={styles.rowValue}>{fmt(quote.buyoutCommissionRub)}₽</Text>
-          </View>
           <View style={styles.row}>
             <Text style={styles.rowLabel}>
               Доставка карго ({quote.totalWeightKg.toFixed(1)} кг, {quote.totalVolumeM3.toFixed(3)} м³, плотность{" "}
@@ -263,12 +274,13 @@ function QuotePdfPage({ quote, client, photoBuffers, attachedServices }: QuotePd
               <Text style={styles.rowValue}>{fmt(quote.mskExpensesRub)}₽</Text>
             </View>
           )}
-          {attachedServices.map((service, index) => (
-            <View key={index} style={styles.row}>
-              <Text style={styles.rowLabel}>{service.name}</Text>
-              <Text style={styles.rowValue}>{fmt(service.priceRub)}₽</Text>
-            </View>
-          ))}
+          {!quote.isCargoOnly &&
+            attachedServices.map((service, index) => (
+              <View key={index} style={styles.row}>
+                <Text style={styles.rowLabel}>{service.name}</Text>
+                <Text style={styles.rowValue}>{fmt(service.priceRub)}₽</Text>
+              </View>
+            ))}
 
           <View style={styles.totalBox}>
             <Text style={styles.totalLabel}>ИТОГО К ОПЛАТЕ</Text>
@@ -279,15 +291,17 @@ function QuotePdfPage({ quote, client, photoBuffers, attachedServices }: QuotePd
           </Text>
         </View>
 
-        <View style={styles.tierInfoBox} wrap={false}>
-          <Text style={styles.tierInfoTitle}>Что входит в услугу поиска товара «{tierInfo.label}»</Text>
-          {tierInfo.intro && <Text style={styles.tierInfoIntro}>{tierInfo.intro}</Text>}
-          {tierInfo.bullets.map((bullet, index) => (
-            <Text key={index} style={styles.tierInfoBullet}>
-              •  {bullet}
-            </Text>
-          ))}
-        </View>
+        {!quote.isCargoOnly && (
+          <View style={styles.tierInfoBox} wrap={false}>
+            <Text style={styles.tierInfoTitle}>Что входит в услугу поиска товара «{tierInfo.label}»</Text>
+            {tierInfo.intro && <Text style={styles.tierInfoIntro}>{tierInfo.intro}</Text>}
+            {tierInfo.bullets.map((bullet, index) => (
+              <Text key={index} style={styles.tierInfoBullet}>
+                •  {bullet}
+              </Text>
+            ))}
+          </View>
+        )}
 
         <View style={styles.disclaimerBox} wrap={false}>
           <Text style={styles.disclaimerTitle}>{stripEmojiForPdf(QUOTE_DISCLAIMER_TITLE)}</Text>

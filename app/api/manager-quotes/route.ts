@@ -228,6 +228,7 @@ export async function POST(req: NextRequest) {
       searchFeeWaived,
       isCustomProduction: fields.isCustomProduction,
       customProductionFeeRub,
+      isCargoOnly: fields.isCargoOnly,
       productName: fields.productName,
       productLink: fields.productLink,
       productDescription: fields.productDescription,

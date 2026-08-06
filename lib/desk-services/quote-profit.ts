@@ -30,6 +30,14 @@ interface QuoteProfitFields {
   packagingCostRub: unknown;
   insuranceCostRub: unknown;
   mskExpensesRub: unknown;
+  // "Только карго" (see Quote.isCargoOnly in prisma/schema.prisma) —
+  // totalRub for this quote is cargoDeliveryRub alone, so totalPriceRub/
+  // searchServiceFeeRub/buyoutCommissionRub etc. were entered for
+  // record-keeping but never actually billed to the client. Both residual
+  // formulas below gate on this and return zero proscet/buyout/discount —
+  // the ONLY profit a cargo-only quote contributes is cargoProfitRub,
+  // computed separately and unaffected by this flag.
+  isCargoOnly: boolean;
 }
 
 function extraShipmentCostsRub(q: QuoteProfitFields): number {
@@ -55,6 +63,7 @@ function proscetProfitRub(q: QuoteProfitFields): number {
 // commission plus whatever markup the estimate implies — after Просчёт is
 // carved out.
 function estimatedSourceProfits(q: QuoteProfitFields): SourceProfits {
+  if (q.isCargoOnly) return { proscetRub: 0, buyoutRub: 0, discountRub: 0 };
   const residual =
     Number(q.totalRub) - Number(q.totalPriceRub) - Number(q.chinaDeliveryRub) - Number(q.cargoDeliveryRub) - extraShipmentCostsRub(q);
   const proscetRub = proscetProfitRub(q);
@@ -68,6 +77,7 @@ function estimatedSourceProfits(q: QuoteProfitFields): SourceProfits {
 // SEPARATE, additional discount reported alongside actualBuyoutCny, carved
 // out of the residual into its own line.
 function factualSourceProfits(q: QuoteProfitFields): SourceProfits {
+  if (q.isCargoOnly) return { proscetRub: 0, buyoutRub: 0, discountRub: 0 };
   const realBuyoutRub = Number(q.actualBuyoutCny) * Number(q.actualBuyoutRateUsed);
   const residual =
     Number(q.totalRub) - Number(q.chinaDeliveryRub) - Number(q.cargoDeliveryRub) - realBuyoutRub - extraShipmentCostsRub(q);
@@ -81,6 +91,7 @@ function factualSourceProfits(q: QuoteProfitFields): SourceProfits {
 // (actualBuyoutRateUsed), applied to the real ¥ amount spent. Never goes to
 // a manager's premium — only feeds Влад's cut and the founders' split.
 function fxProfitRub(q: QuoteProfitFields): number {
+  if (q.isCargoOnly) return 0;
   return Number(q.actualBuyoutCny) * (Number(q.cnyRateUsed) - Number(q.actualBuyoutRateUsed));
 }
 
@@ -158,6 +169,7 @@ interface CnyVolumeFields {
   buyoutCommissionRub: unknown;
   customProductionFeeRub: unknown;
   cnyRateUsed: unknown;
+  isCargoOnly: boolean;
 }
 
 // Reconstructs the same ¥ "volume" figure computeQuoteWithAutoCnyTier used
@@ -186,6 +198,11 @@ function estimateCnyVolume(q: CnyVolumeFields, attachedServicesTotalRub: number)
 // with fact later" spirit as estimatedSourceProfits() vs
 // factualSourceProfits(). See PB-V5 chat 2026-07-31.
 function estimatedFxProfitRub(q: CnyVolumeFields, attachedServicesTotalRub: number, tiers: CnyProfitTiers): number {
+  // Cargo-only quotes (see Quote.isCargoOnly) never actually convert ¥ for
+  // a real purchase — totalPriceCny/searchServiceFeeRub/buyoutCommissionRub
+  // are stored for record-keeping only, so estimating a курсовая разница
+  // off them would invent profit that doesn't exist.
+  if (q.isCargoOnly) return 0;
   const cnyVolume = estimateCnyVolume(q, attachedServicesTotalRub);
   return cnyVolume * pickCnyProfitForVolume(cnyVolume, tiers);
 }

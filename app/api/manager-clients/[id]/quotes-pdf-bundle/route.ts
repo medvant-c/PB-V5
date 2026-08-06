@@ -84,6 +84,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
           customProductionFeeRub: Number(quote.customProductionFeeRub),
           buyoutCommissionPercent: Number(quote.buyoutCommissionPercent),
           buyoutCommissionRub: Number(quote.buyoutCommissionRub),
+          isCargoOnly: quote.isCargoOnly,
           packagingCostRub: Number(quote.packagingCostRub),
           insuranceCostRub: Number(quote.insuranceCostRub),
           mskExpensesRub: Number(quote.mskExpensesRub),

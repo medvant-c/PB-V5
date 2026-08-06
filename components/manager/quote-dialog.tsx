@@ -141,6 +141,7 @@ interface QuoteDetail {
   buyoutCommissionOverrideConfirmed: boolean;
   searchFeeWaived: boolean;
   isCustomProduction: boolean;
+  isCargoOnly: boolean;
 }
 
 interface QuoteDialogProps {
@@ -190,6 +191,7 @@ const BLANK_FORM = {
   destinationCountry: "russia" as DestinationCountry,
   quoteType: "standard" as "standard" | "expert" | "pro",
   isCustomProduction: false,
+  isCargoOnly: false,
   productName: "",
   productLink: "",
   productDescription: "",
@@ -251,6 +253,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   const [destinationCountry, setDestinationCountry] = useState<DestinationCountry>(BLANK_FORM.destinationCountry);
   const [quoteType, setQuoteType] = useState(BLANK_FORM.quoteType);
   const [isCustomProduction, setIsCustomProduction] = useState(BLANK_FORM.isCustomProduction);
+  const [isCargoOnly, setIsCargoOnly] = useState(BLANK_FORM.isCargoOnly);
   const [photos, setPhotos] = useState<File[]>([]);
   const [existingPhotos, setExistingPhotos] = useState<ExistingPhoto[]>([]);
   const [removedPhotoIds, setRemovedPhotoIds] = useState<string[]>([]);
@@ -369,6 +372,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       setDestinationCountry(BLANK_FORM.destinationCountry);
       setQuoteType(BLANK_FORM.quoteType);
       setIsCustomProduction(BLANK_FORM.isCustomProduction);
+      setIsCargoOnly(BLANK_FORM.isCargoOnly);
       setProductName(BLANK_FORM.productName);
       setProductLink(BLANK_FORM.productLink);
       setProductDescription(BLANK_FORM.productDescription);
@@ -416,6 +420,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           setDestinationCountry(q.destinationCountry);
           setQuoteType(q.quoteType);
           setIsCustomProduction(q.isCustomProduction);
+          setIsCargoOnly(q.isCargoOnly);
           setProductName(q.productName);
           setProductLink(q.productLink ?? "");
           setProductDescription(q.productDescription ?? "");
@@ -590,6 +595,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       cargoDiscountUsd: num(cargoDiscountUsd),
       cargoRateUsdOverride: num(cargoRateUsdOverride),
       lowDensityVolumeThresholdKgM3,
+      isCargoOnly,
     };
 
     const manualOverride = num(cnyRateRubOverride);
@@ -627,6 +633,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     lowDensityVolumeThresholdKgM3,
     quoteType,
     isCustomProduction,
+    isCargoOnly,
     quantity,
     priceCnyPerUnit,
     chinaDeliveryCny,
@@ -692,6 +699,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       formData.append("destinationCountry", destinationCountry);
       formData.append("quoteType", quoteType);
       formData.append("isCustomProduction", String(isCustomProduction));
+      formData.append("isCargoOnly", String(isCargoOnly));
       if (productName.trim()) formData.append("productName", productName.trim());
       if (productLink.trim()) formData.append("productLink", productLink.trim());
       if (productDescription.trim()) formData.append("productDescription", productDescription.trim());
@@ -867,6 +875,30 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
             <label
               className={cn(
                 "flex cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors",
+                isCargoOnly ? "border-primary bg-primary/5" : "border-border bg-surface",
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={isCargoOnly}
+                  onChange={(e) => setIsCargoOnly(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium text-text">Только карго</span>
+                  <span className="block text-xs text-text-secondary">
+                    Клиент сам купил товар — Panda Bridge только доставляет карго. Данные о товаре по-прежнему
+                    вводятся (для расчёта веса/объёма), но клиенту выставляется и оплачивается только доставка
+                    карго (+ упаковка/страховка/расходы МСК при отгрузке).
+                  </span>
+                </span>
+              </span>
+            </label>
+
+            {!isCargoOnly && (
+            <label
+              className={cn(
+                "flex cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors",
                 isCustomProduction ? "border-primary bg-primary/5" : "border-border bg-surface",
               )}
             >
@@ -889,6 +921,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                 </span>
               )}
             </label>
+            )}
 
             <div className="space-y-1.5">
               <Label>Фото товара</Label>
@@ -1133,6 +1166,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               </div>
             </div>
 
+            {!isCargoOnly && (
             <div className="rounded-lg border border-border">
               <button
                 type="button"
@@ -1190,14 +1224,22 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                   </div>
                 ))}
             </div>
+            )}
 
             {preview && (
               <div className="space-y-1 rounded-lg border border-border bg-bg p-3 text-sm">
-                <div className="flex justify-between text-text-secondary">
-                  <span>Стоимость товара</span>
-                  <span>{fmt(preview.totalPriceRub)} ₽</span>
-                </div>
-                {preview.chinaDeliveryRub > 0 && (
+                {isCargoOnly && (
+                  <p className="mb-1 text-xs text-text-secondary">
+                    Только карго — товар/Китай/поиск/выкуп/доп. услуги посчитаны, но клиенту не выставляются.
+                  </p>
+                )}
+                {!isCargoOnly && (
+                  <div className="flex justify-between text-text-secondary">
+                    <span>Стоимость товара</span>
+                    <span>{fmt(preview.totalPriceRub)} ₽</span>
+                  </div>
+                )}
+                {!isCargoOnly && preview.chinaDeliveryRub > 0 && (
                   <div className="flex justify-between text-text-secondary">
                     <span>Доставка по Китаю</span>
                     <span>{fmt(preview.chinaDeliveryRub)} ₽</span>
@@ -1207,18 +1249,22 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                   <span>Карго доставка</span>
                   <span>{fmt(preview.cargoDeliveryRub)} ₽</span>
                 </div>
-                <div className="flex justify-between text-text-secondary">
-                  <span>Услуга поиска</span>
-                  <span>{fmt(preview ? (quoteType === "standard" ? Number(tariffs.standardPriceRub) : quoteType === "expert" ? Number(tariffs.expertPriceRub) : Number(tariffs.proPriceRub)) : 0)} ₽</span>
-                </div>
-                <div className="flex justify-between text-text-secondary">
-                  <span>
-                    Комиссия за выкуп ({preview.buyoutCommissionPercent.toFixed(2)}%
-                    {buyoutCommissionPercentOverride.trim() && " — вручную"})
-                  </span>
-                  <span>{fmt(preview.buyoutCommissionRub)} ₽</span>
-                </div>
-                {isCustomProduction && (
+                {!isCargoOnly && (
+                  <div className="flex justify-between text-text-secondary">
+                    <span>Услуга поиска</span>
+                    <span>{fmt(preview ? (quoteType === "standard" ? Number(tariffs.standardPriceRub) : quoteType === "expert" ? Number(tariffs.expertPriceRub) : Number(tariffs.proPriceRub)) : 0)} ₽</span>
+                  </div>
+                )}
+                {!isCargoOnly && (
+                  <div className="flex justify-between text-text-secondary">
+                    <span>
+                      Комиссия за выкуп ({preview.buyoutCommissionPercent.toFixed(2)}%
+                      {buyoutCommissionPercentOverride.trim() && " — вручную"})
+                    </span>
+                    <span>{fmt(preview.buyoutCommissionRub)} ₽</span>
+                  </div>
+                )}
+                {!isCargoOnly && isCustomProduction && (
                   <div className="flex justify-between text-text-secondary">
                     <span>Производство под заказ</span>
                     <span>
@@ -1233,12 +1279,13 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                     </span>
                   </div>
                 )}
-                {attachedServices.map((service, index) => (
-                  <div key={index} className="flex justify-between text-text-secondary">
-                    <span className="truncate">{service.name}</span>
-                    <span>{fmt(Number(service.priceRub) || 0)} ₽</span>
-                  </div>
-                ))}
+                {!isCargoOnly &&
+                  attachedServices.map((service, index) => (
+                    <div key={index} className="flex justify-between text-text-secondary">
+                      <span className="truncate">{service.name}</span>
+                      <span>{fmt(Number(service.priceRub) || 0)} ₽</span>
+                    </div>
+                  ))}
                 <div className="mt-1 flex justify-between border-t border-border pt-1.5 text-base font-bold text-text">
                   <span>ИТОГО</span>
                   <span className="text-primary">{fmt(preview.totalRub)} ₽</span>

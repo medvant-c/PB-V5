@@ -89,6 +89,7 @@ const CONFIRMED_QUOTE_SELECT = {
   packagingCostRub: true,
   insuranceCostRub: true,
   mskExpensesRub: true,
+  isCargoOnly: true,
   totalRub: true,
   client: { select: { id: true, name: true, selfSourcedConfirmed: true, createdByManagerId: true, vladShareRatePercentOverride: true } },
   paymentAllocations: { select: { category: true, amountRub: true, premiumRub: true } },
@@ -244,6 +245,7 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
       packagingCostRub: 0,
       insuranceCostRub: 0,
       mskExpensesRub: 0,
+      isCargoOnly: false,
     });
     const cargoBonusRub = Number(q.cargoBonusRatePercent) > 0 ? flatCargoBonusRub(q, cargoRates) : 0;
     events.push({

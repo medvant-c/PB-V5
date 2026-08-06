@@ -109,6 +109,9 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     // numbers against today's rates, it doesn't touch the manual override
     // itself or its confirmation state (see Quote.cargoRateUsdOverride).
     cargoRateUsdOverride: existing.cargoRateUsdOverride !== null ? Number(existing.cargoRateUsdOverride) : undefined,
+    // Frozen quote-type flag, not something recalculate itself changes —
+    // see Quote.isCargoOnly in prisma/schema.prisma.
+    isCargoOnly: existing.isCargoOnly,
   };
 
   let computed;

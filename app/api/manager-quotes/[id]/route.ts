@@ -243,6 +243,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       searchServiceFeeRub,
       isCustomProduction: fields.isCustomProduction,
       customProductionFeeRub,
+      isCargoOnly: fields.isCargoOnly,
       productName: fields.productName,
       productLink: fields.productLink,
       productDescription: fields.productDescription,

@@ -95,6 +95,15 @@ interface QuoteEngineInputs {
   // the *rate* lookup, not the basis decision. See Quote.cargoRateUsdOverride
   // in prisma/schema.prisma.
   cargoRateUsdOverride?: number;
+  // "Только карго" — see Quote.isCargoOnly in prisma/schema.prisma. When
+  // true, totalRub collapses to cargoDeliveryRub alone; every other line
+  // (totalPriceRub, chinaDeliveryRub, searchServiceFeeRub,
+  // buyoutCommissionRub, customProductionFeeRub, attachedServicesTotalRub)
+  // is still computed and returned/echoed normally (the caller still
+  // stores them for record-keeping), just excluded from the client-facing
+  // total. Defaults to false/undefined so every existing caller keeps
+  // computing the full sum unchanged.
+  isCargoOnly?: boolean;
 }
 
 interface QuoteEngineOutputs {
@@ -287,14 +296,20 @@ function computeQuote(inputs: QuoteEngineInputs): QuoteEngineOutputs {
   // delivery, our search-service fee, the buyout commission, international
   // cargo delivery, производство под заказ (if any), and any extra attached
   // services.
-  const totalRub =
-    totalPriceRub +
-    chinaDeliveryRub +
-    inputs.searchServiceFeeRub +
-    buyoutCommissionRub +
-    cargoDeliveryRub +
-    (inputs.customProductionFeeRub ?? 0) +
-    (inputs.attachedServicesTotalRub ?? 0);
+  // "Только карго" (Quote.isCargoOnly): the client only pays for the cargo
+  // leg — everything above (goods, China delivery, search fee, buyout
+  // commission, производство под заказ, attached services) is still
+  // computed and returned below for the caller to store, just excluded
+  // from what the client actually owes.
+  const totalRub = inputs.isCargoOnly
+    ? cargoDeliveryRub
+    : totalPriceRub +
+      chinaDeliveryRub +
+      inputs.searchServiceFeeRub +
+      buyoutCommissionRub +
+      cargoDeliveryRub +
+      (inputs.customProductionFeeRub ?? 0) +
+      (inputs.attachedServicesTotalRub ?? 0);
 
   return {
     priceRubPerUnit,

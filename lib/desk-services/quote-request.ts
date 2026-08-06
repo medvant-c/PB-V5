@@ -105,6 +105,8 @@ interface ParsedQuoteFields {
   // fee from TariffSettings once this is known, same pattern as
   // searchServiceFeeRub.
   isCustomProduction: boolean;
+  // "Только карго" — see Quote.isCargoOnly in prisma/schema.prisma.
+  isCargoOnly: boolean;
 }
 
 function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } | { error: string } {
@@ -186,6 +188,7 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
       usdRateRubOverride: optionalNumber(formData.get("usdRateRubOverride")),
       buyoutCommissionPercentOverride: optionalNumber(formData.get("buyoutCommissionPercentOverride")),
       isCustomProduction: formData.get("isCustomProduction") === "true",
+      isCargoOnly: formData.get("isCargoOnly") === "true",
     },
   };
 }
@@ -226,6 +229,7 @@ function buildEngineInputs(fields: ParsedQuoteFields, rates: QuoteRates): QuoteE
     cargoCategoryKey: fields.cargoCategoryKey,
     cargoDiscountUsd: fields.cargoDiscountUsd,
     cargoRateUsdOverride: fields.cargoRateUsdOverride,
+    isCargoOnly: fields.isCargoOnly,
     densityTiers: rates.densityTiers,
     volumeTariffs: rates.volumeTariffs,
     searchServiceFeeRub: rates.searchServiceFeeRub,
