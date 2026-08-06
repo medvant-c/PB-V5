@@ -73,8 +73,17 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const threshold = Number(systemSettings.lowDensityVolumeThresholdKgM3);
   const basisIsDensity = quote.deliveryPricingMode === "density" && Number(quote.densityKgM3) >= threshold;
   const quantityBasis = basisIsDensity ? Number(quote.totalWeightKg) : Number(quote.totalVolumeM3);
-  const cargoRateUsd = Number(quote.cargoRateUsd);
-  const cargoCostUsd = (cargoRateUsd - cost) * quantityBasis;
+  // `cost` is the REAL purchase price per кг/м³ the owner/senior just typed
+  // in — cargoCostUsd must be that cost times quantity, same as
+  // actualize-cargo/route.ts's `actualCargoCostRateUsdNum * quantity`. This
+  // used to subtract cost from cargoRateUsd first ((cargoRateUsd - cost) *
+  // quantityBasis), which computed total MARGIN, not total cost — silently
+  // swapping cost and margin everywhere downstream (cargoProfitRub =
+  // cargoDeliveryRub - cargoCostRub in lib/desk-services/quote-profit.ts
+  // then reported the real COST as if it were PROFIT, wildly overstating
+  // company profit/investor shares/cargo bonuses for every quote confirmed
+  // through this route). See PB-V5 chat 2026-08-06.
+  const cargoCostUsd = cost * quantityBasis;
   const cargoCostRub = cargoCostUsd * Number(quote.usdRateUsed);
 
   if (file instanceof File) {
