@@ -153,6 +153,13 @@ interface QuoteListItem {
 
 interface DashboardData {
   overall: StatSummary;
+  // Same shape as `overall`, but summarized only over quotes created inside
+  // the currently selected Дашборд period (День/Неделя/Месяц) — null when
+  // no period is requested (the /api/manager-dashboard call always sends
+  // one, so this is really just "still loading"). See PB-V5 chat 2026-08-06.
+  periodOverall: StatSummary | null;
+  periodExpectedIncomeRub: number | null;
+  periodActualIncomeRub: number | null;
   perManager: PerManagerRow[] | null;
   // Owner-only company-wide income — potential (if everything open gets
   // bought/actualized/handed over as currently estimated) and factual (only
@@ -975,10 +982,27 @@ function NewRequestsWidget({ refreshKey, onOpenQuote }: QuoteWidgetProps) {
   );
 }
 
+type DashboardPeriod = "day" | "week" | "month";
+
+const DASHBOARD_PERIOD_LABEL: Record<DashboardPeriod, string> = { day: "День", week: "Неделя", month: "Месяц" };
+
+// Boundaries for the StatCardsRow period filter — by quote CREATION date
+// (unlike "Реальные деньги за период" in Отчёт о прибыли, which dates by
+// real money/fact events instead). See PB-V5 chat 2026-08-06.
+function dashboardPeriodRange(period: DashboardPeriod): { from: string; to: string } {
+  const to = new Date();
+  const from = new Date();
+  from.setHours(0, 0, 0, 0);
+  if (period === "week") from.setDate(from.getDate() - 6);
+  if (period === "month") from.setDate(1);
+  return { from: from.toISOString(), to: to.toISOString() };
+}
+
 function ManagerDashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [incomeExplainerOpen, setIncomeExplainerOpen] = useState(true);
+  const [dashboardPeriod, setDashboardPeriod] = useState<DashboardPeriod>("month");
 
   // The pill row's own list panel — quotes are fetched once (all statuses,
   // across every client this manager can see) and filtered client-side per
@@ -997,11 +1021,14 @@ function ManagerDashboard() {
   const [quotesRefreshKey, setQuotesRefreshKey] = useState(0);
 
   useEffect(() => {
-    fetch("/api/manager-dashboard")
+    const { from, to } = dashboardPeriodRange(dashboardPeriod);
+    const params = new URLSearchParams({ from, to });
+    setLoading(true);
+    fetch(`/api/manager-dashboard?${params.toString()}`)
       .then((res) => res.json())
       .then((d) => setData(d))
       .finally(() => setLoading(false));
-  }, [quotesRefreshKey]);
+  }, [quotesRefreshKey, dashboardPeriod]);
 
   // Drop the pill row's own cached quote list on save too, so it re-fetches
   // fresh data next time a pill is clicked instead of showing a quote
@@ -1044,6 +1071,22 @@ function ManagerDashboard() {
           </div>
         </div>
 
+        <div className="flex gap-1 rounded-xl border border-border bg-bg p-1 sm:w-fit">
+          {(["day", "week", "month"] as const).map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setDashboardPeriod(p)}
+              className={cn(
+                "flex-1 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors sm:flex-none",
+                dashboardPeriod === p ? "bg-surface text-primary shadow-sm" : "text-text-secondary hover:text-text",
+              )}
+            >
+              {DASHBOARD_PERIOD_LABEL[p]}
+            </button>
+          ))}
+        </div>
+
         <NewRequestsWidget
           refreshKey={quotesRefreshKey}
           onOpenQuote={(quote) => setEditingQuote({ clientId: quote.clientId, clientName: quote.client.name, quoteId: quote.id })}
@@ -1056,17 +1099,17 @@ function ManagerDashboard() {
         />
 
         <StatCardsRow
-          stats={data.overall}
-          expectedIncomeRub={data.expectedIncomeRub}
-          actualIncomeRub={data.actualIncomeRub}
+          stats={data.periodOverall ?? data.overall}
+          expectedIncomeRub={data.periodExpectedIncomeRub ?? data.expectedIncomeRub}
+          actualIncomeRub={data.periodActualIncomeRub ?? data.actualIncomeRub}
           cnyRateRub={data.cnyRateRub}
-          potentialProscetRub={data.potentialProscetRub}
-          potentialBuyoutRub={data.potentialBuyoutRub}
-          potentialCargoProfitRub={data.potentialCargoProfitRub}
-          factualProscetRub={data.factualProscetRub}
-          factualBuyoutRub={data.factualBuyoutRub}
-          factualDiscountRub={data.factualDiscountRub}
-          factualCargoProfitRub={data.factualCargoProfitRub}
+          potentialProscetRub={data.periodOverall ? data.periodOverall.potentialProscetRub : data.potentialProscetRub}
+          potentialBuyoutRub={data.periodOverall ? data.periodOverall.potentialBuyoutRub : data.potentialBuyoutRub}
+          potentialCargoProfitRub={data.periodOverall ? data.periodOverall.potentialCargoProfitRub : data.potentialCargoProfitRub}
+          factualProscetRub={data.periodOverall ? data.periodOverall.factualProscetRub : data.factualProscetRub}
+          factualBuyoutRub={data.periodOverall ? data.periodOverall.factualBuyoutRub : data.factualBuyoutRub}
+          factualDiscountRub={data.periodOverall ? data.periodOverall.factualDiscountRub : data.factualDiscountRub}
+          factualCargoProfitRub={data.periodOverall ? data.periodOverall.factualCargoProfitRub : data.factualCargoProfitRub}
         />
         <StatusPillsRow
           stats={data.overall}

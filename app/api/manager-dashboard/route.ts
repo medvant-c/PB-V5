@@ -68,6 +68,7 @@ interface QuoteForStats {
   id: string;
   managerId: string;
   status: QuoteStatus;
+  createdAt: Date;
   totalRub: unknown;
   totalPriceRub: unknown;
   // ¥-denominated (not chinaDeliveryRub/totalPriceRub's ₽ conversion) —
@@ -335,6 +336,7 @@ export async function GET(req: NextRequest) {
       id: true,
       managerId: true,
       status: true,
+      createdAt: true,
       totalRub: true,
       totalPriceRub: true,
       totalPriceCny: true,
@@ -440,6 +442,39 @@ export async function GET(req: NextRequest) {
     summarize(quotes, cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId),
     "all",
   );
+
+  // Опциональный период (День/Неделя/Месяц/свой) — фильтрует ВЕСЬ дашборд
+  // (карточки «В работе»/«Конверсия»/«Премия»/«Доход компании») по дате
+  // СОЗДАНИЯ просчёта, не по дате оплаты/факта (то другое — см.
+  // lib/desk-services/period-report.ts, "Реальные деньги за период" в
+  // Отчёте о прибыли, которая датирует по реальным денежным событиям).
+  // Это здесь — просто "как выглядела бы эта же карточка, если бы мы
+  // считали её только по сделкам этого периода", тот же summarize(), на
+  // подмножестве quotes. См. PB-V5 chat 2026-08-06.
+  // Fulfillment premium is deliberately NOT folded in here (unlike
+  // `overall` above) — fulfillment orders aren't quotes and have no
+  // creation-date link to this period filter, so mixing an all-time
+  // fulfillment figure into an otherwise period-scoped card would be
+  // misleading rather than helpful.
+  let periodOverall: ReturnType<typeof summarize> | null = null;
+  let periodExpectedIncomeRub: number | null = null;
+  let periodActualIncomeRub: number | null = null;
+  const dashboardFromParam = req.nextUrl.searchParams.get("from");
+  const dashboardToParam = req.nextUrl.searchParams.get("to");
+  if (dashboardFromParam && dashboardToParam) {
+    const dashboardFrom = new Date(dashboardFromParam);
+    const dashboardTo = new Date(dashboardToParam);
+    if (!Number.isNaN(dashboardFrom.getTime()) && !Number.isNaN(dashboardTo.getTime())) {
+      const periodQuotes = quotes.filter((q) => q.createdAt >= dashboardFrom && q.createdAt < dashboardTo);
+      periodOverall = summarize(periodQuotes, cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId);
+      if (session.role === "owner") {
+        periodExpectedIncomeRub =
+          periodOverall.potentialProscetRub + periodOverall.potentialBuyoutRub + periodOverall.potentialCargoProfitRub + periodOverall.potentialFxProfitRub - periodOverall.estimatedPremiumRub;
+        periodActualIncomeRub =
+          periodOverall.factualProscetRub + periodOverall.factualBuyoutRub + periodOverall.factualDiscountRub + periodOverall.factualCargoProfitRub - periodOverall.factualPremiumRub;
+      }
+    }
+  }
 
   // Per-manager breakdown — meaningful for owner (sees everyone) and senior
   // (sees their team); a plain manager only ever sees themself here, so
@@ -636,9 +671,14 @@ export async function GET(req: NextRequest) {
   const responseOverall = session.role === "owner" ? overall : stripCargoProfit(overall);
   const responsePerManager = perManager && session.role !== "owner" ? perManager.map(stripCargoProfit) : perManager;
 
+  const responsePeriodOverall = periodOverall && session.role !== "owner" ? stripCargoProfit(periodOverall) : periodOverall;
+
   return Response.json({
     overall: responseOverall,
     perManager: responsePerManager,
+    periodOverall: responsePeriodOverall,
+    periodExpectedIncomeRub,
+    periodActualIncomeRub,
     expectedIncomeRub,
     actualIncomeRub,
     potentialProscetRub,
