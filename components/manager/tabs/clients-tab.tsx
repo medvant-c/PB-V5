@@ -7,6 +7,7 @@ import {
   Banknote,
   Check,
   ChevronDown,
+  ChevronLeft,
   Container,
   Copy,
   Download,
@@ -2798,8 +2799,11 @@ function ManagerClientsTab() {
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-4 lg:h-[calc(100vh-260px)] lg:min-h-140 lg:flex-row">
-        {/* LEFT: client list */}
-        <div className="flex w-full shrink-0 flex-col rounded-xl border border-border bg-surface lg:w-80">
+        {/* LEFT: client list — hidden on mobile once a client is picked (see
+            RIGHT panel below), so picking a client doesn't leave the whole
+            list still scrolled above it. Always shown on lg+, where both
+            panels sit side by side. See PB-V5 chat 2026-08-05. */}
+        <div className={cn("w-full shrink-0 flex-col rounded-xl border border-border bg-surface lg:flex lg:w-80", selectedClient ? "hidden lg:flex" : "flex")}>
           <div className="space-y-2 border-b border-border p-3">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-sm font-bold text-text">Клиенты · {filteredClients.length}</h2>
@@ -2989,12 +2993,22 @@ function ManagerClientsTab() {
           </div>
         </div>
 
-        {/* RIGHT: selected client's details + quotes */}
-        <div className="min-w-0 flex-1 overflow-y-auto rounded-xl border border-border bg-bg p-4 lg:min-h-0">
+        {/* RIGHT: selected client's details + quotes — hidden on mobile
+            until a client is actually picked, so there's no empty-state
+            block sitting under the full client list requiring a scroll
+            past it. See PB-V5 chat 2026-08-05. */}
+        <div className={cn("min-w-0 flex-1 overflow-y-auto rounded-xl border border-border bg-bg p-4 lg:block lg:min-h-0", selectedClient ? "block" : "hidden lg:block")}>
           {!selectedClient ? (
             <EmptyState icon={UserRound} message="Выберите клиента слева, чтобы увидеть его данные и просчёты." />
           ) : (
             <div className="space-y-3">
+              <button
+                type="button"
+                onClick={() => setSelectedClientId(null)}
+                className="-ml-1 flex items-center gap-1 text-xs font-medium text-text-secondary hover:text-primary lg:hidden"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" /> Назад к списку клиентов
+              </button>
               <div>
                 <h3 className="text-sm font-bold text-text">
                   <span className="text-text-secondary">№{selectedClient.displayId}</span> {selectedClient.name}
