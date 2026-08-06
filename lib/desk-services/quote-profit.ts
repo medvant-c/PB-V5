@@ -129,18 +129,28 @@ function isSelfSourcedFor(
   return client.selfSourcedConfirmed && client.createdByManagerId === managerId;
 }
 
-// Self-sourced-client cargo bonus: flat $/кг or $/м³ (owner-editable in
-// Тарифы), on whichever basis the quote actually prices cargo on — same
-// "density mode AND density>=100 -> weight basis, else volume basis" rule
-// as the actualize-cargo route, so the bonus always matches how
-// cargoDeliveryRub itself was computed.
+// Бонус менеджера за карго по своему клиенту: плоская ставка $/кг или
+// $/м³ (задаётся руководителем в Тарифы), на той же базе, на которой сама
+// сделка считает карго — то же правило "density-режим И density>=100 ->
+// база вес, иначе объём", что и в actualize-cargo, чтобы бонус всегда
+// совпадал с тем, как посчитан cargoDeliveryRub.
+//
+// ratePercent — множитель к этой базовой ставке: 10 (стандарт, ставится
+// автоматически при "выдано клиенту", см. status/route.ts) даёт бонус
+// ровно по базовой ставке, 5 — половину, 20 — двойной, 0 — ничего.
+// Раньше Quote.cargoBonusRatePercent использовался ТОЛЬКО как флаг "> 0"
+// (см. PB-V5 chat 2026-08-06) — ручная правка руководителем через
+// cargo-bonus-rate/route.ts визуально позволяла задать любой %, но реально
+// ни на что не влияла, кроме 0. Теперь процент — реальный множитель.
 function flatCargoBonusRub(
   q: { deliveryPricingMode: string; densityKgM3: unknown; totalWeightKg: unknown; totalVolumeM3: unknown; usdRateUsed: unknown },
   rates: { usdPerKg: number; usdPerM3: number },
+  ratePercent = 10,
 ): number {
   const basisIsDensity = q.deliveryPricingMode === "density" && Number(q.densityKgM3) >= 100;
   const usdRateUsed = Number(q.usdRateUsed);
-  return basisIsDensity ? Number(q.totalWeightKg) * rates.usdPerKg * usdRateUsed : Number(q.totalVolumeM3) * rates.usdPerM3 * usdRateUsed;
+  const baseRub = basisIsDensity ? Number(q.totalWeightKg) * rates.usdPerKg * usdRateUsed : Number(q.totalVolumeM3) * rates.usdPerM3 * usdRateUsed;
+  return baseRub * (ratePercent / 10);
 }
 
 // Four-tier bracket lookup by ¥ volume — same shape/threshold convention as

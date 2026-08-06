@@ -259,13 +259,15 @@ function summarize(
 
     // Карго — gated on cargoBonusRatePercent being locked in, which only
     // happens at the handed_to_client transition (see status/route.ts).
-    // The stored value distinguishes self-sourced (10) from company-lead
-    // (0) — only self-sourced gets the flat-rate bonus, company-lead gets
-    // nothing (cargoProfitRub itself is still tracked either way, for the
-    // owner's own accounting).
+    // The stored value distinguishes self-sourced (10, тот самый стандартный
+    // множитель по умолчанию — см. flatCargoBonusRub в quote-profit.ts) от
+    // company-lead (0) — только свой клиент даёт менеджеру бонус, и
+    // руководитель может вручную поднять/понизить именно эту ставку по
+    // конкретной сделке (см. cargo-bonus-rate/route.ts) — она теперь реально
+    // масштабирует сумму бонуса, а не просто включает/выключает его.
     if (q.cargoBonusRatePercent !== null && q.cargoBonusRatePercent !== undefined) {
       factualCargoProfitRub += cargoProfitRub(q);
-      factualCargoBonusRub += Number(q.cargoBonusRatePercent) > 0 ? flatCargoBonusRub(q, cargoRates) : 0;
+      factualCargoBonusRub += flatCargoBonusRub(q, cargoRates, Number(q.cargoBonusRatePercent));
     } else {
       potentialCargoProfitRub += cargoProfitRub(q);
       potentialCargoBonusRub += isSelfSourcedFor(q.client, q.managerId) ? flatCargoBonusRub(q, cargoRates) : 0;
@@ -615,12 +617,15 @@ export async function GET(req: NextRequest) {
         sumAlreadyPaidPremium(q.paymentAllocations),
       );
       // cargoBonusRatePercent is set (to 0 OR a real rate) the moment cargo
-      // hands off to the client — the VALUE only decides whether the
-      // manager personally gets a self-sourced bonus, not whether cargo
-      // counts as realized for Юра/Влад/remainder_share investors.
+      // hands off to the client — the VALUE зафиксирована на этот момент и
+      // сама по себе решает, сколько (если вообще) менеджер получает; не
+      // перепроверяем self-sourced-статус клиента живьём здесь, иначе
+      // сделка "разъедет­ся" с тем, что уже заморожено в cargoBonusRatePercent,
+      // если статус клиента поменяется позже. Не влияет на то, считается ли
+      // карго реализованным для Юры/Влада/remainder_share — те получают
+      // свою долю независимо от company-lead/свой клиент.
       const cargoRealized = q.cargoBonusRatePercent !== null;
-      const managerCargoBonusRub =
-        cargoRealized && Number(q.cargoBonusRatePercent) > 0 && isSelfSourcedFor(q.client, q.managerId) ? flatCargoBonusRub(q, cargoRates) : 0;
+      const managerCargoBonusRub = cargoRealized ? flatCargoBonusRub(q, cargoRates, Number(q.cargoBonusRatePercent)) : 0;
       const { investorSharesById: perQuoteShares } = computeQuoteShares(
         sourceProfits.proscetRub + sourceProfits.buyoutRub + sourceProfits.discountRub + fx,
         managerServicesPremiumRub,

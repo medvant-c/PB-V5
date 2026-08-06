@@ -154,14 +154,15 @@ function computeQuoteBreakdown(
   // buyoutFactConfirmed while cargo hasn't shipped, and that margin isn't
   // real income until it does). See PB-V5 chat 2026-08-06.
   // cargoBonusRatePercent is set (to 0 OR a real rate) the moment cargo
-  // hands off to the client — the VALUE only decides whether the manager
-  // personally gets a self-sourced bonus, it isn't what gates whether cargo
-  // counts as realized at all (a company-lead client's cargo margin is
-  // still very much realized income for Юра/Влад/remainder, just not for
-  // the manager). See status/route.ts for where this gets set.
+  // hands off to the client — значение зафиксировано на тот момент и само
+  // решает, сколько (если вообще) менеджер получает; не перепроверяем
+  // self-sourced-статус клиента живьём (иначе разойдётся с уже
+  // замороженным значением при более позднем изменении статуса клиента).
+  // Не влияет на то, считается ли карго реализованным для Юры/Влада/
+  // remainder — company-lead клиент тоже даёт им реальный доход, просто не
+  // менеджеру. See status/route.ts for where this gets set.
   const cargoRealized = q.cargoBonusRatePercent !== null;
-  const managerCargoBonusRub =
-    cargoRealized && Number(q.cargoBonusRatePercent) > 0 && isSelfSourcedFor(q.client, q.managerId) ? flatCargoBonusRub(q, cargoRates) : 0;
+  const managerCargoBonusRub = cargoRealized ? flatCargoBonusRub(q, cargoRates, Number(q.cargoBonusRatePercent)) : 0;
 
   const { managerPremiumRub, investorSharesById } = computeQuoteShares(
     proscetRub + buyoutRub + discountRub + fx,

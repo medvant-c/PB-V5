@@ -247,7 +247,9 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
       mskExpensesRub: 0,
       isCargoOnly: false,
     });
-    const cargoBonusRub = Number(q.cargoBonusRatePercent) > 0 ? flatCargoBonusRub(q, cargoRates) : 0;
+    // cargoBonusRatePercent теперь реальный множитель к базовой ставке
+    // (10 = стандарт, 0 = ничего) — см. flatCargoBonusRub в quote-profit.ts.
+    const cargoBonusRub = flatCargoBonusRub(q, cargoRates, Number(q.cargoBonusRatePercent));
     events.push({
       managerId: q.managerId,
       client: q.client,
