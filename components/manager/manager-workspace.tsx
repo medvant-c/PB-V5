@@ -314,7 +314,7 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
       {/* Card doesn't forward refs (plain function component, not
           forwardRef) — wrapping div carries the scroll target instead. */}
       <div ref={contentRef} className="mt-6 scroll-mt-4">
-        <Card className="p-6 sm:p-8">
+        <Card className="p-3 sm:p-6 lg:p-8">
           <ActiveComponent />
         </Card>
       </div>

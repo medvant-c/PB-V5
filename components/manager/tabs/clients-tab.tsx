@@ -2843,7 +2843,7 @@ function ManagerClientsTab() {
               )}
             </div>
             <Input
-              placeholder="Поиск по имени, компании, телефону, email…"
+              placeholder="Поиск по имени, телефону, email…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="h-8 text-xs"

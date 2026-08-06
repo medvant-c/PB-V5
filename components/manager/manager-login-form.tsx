@@ -42,7 +42,7 @@ function ManagerLoginForm() {
   }
 
   return (
-    <div className="mx-auto flex min-h-[60vh] max-w-sm items-center px-4">
+    <div className="mx-auto flex min-h-screen max-w-sm items-center px-4">
       <Card className="w-full p-8">
         <div className="flex items-center gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-secondary text-white">
