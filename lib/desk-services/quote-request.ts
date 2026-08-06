@@ -128,6 +128,12 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
   const destinationCountry = DESTINATION_COUNTRIES.some((c) => c.value === destinationCountryRaw)
     ? (destinationCountryRaw as DestinationCountry)
     : "russia";
+  // "Только карго" (see Quote.isCargoOnly) — the client never pays for the
+  // goods themselves, so the manager may legitimately not know/care about
+  // a ¥ price at all; required for every other quote type since a blank
+  // price there would silently zero out a real charge. See PB-V5 chat
+  // 2026-08-06.
+  const isCargoOnly = formData.get("isCargoOnly") === "true";
 
   if (!clientId) return { error: "Не выбран клиент." };
   if (quoteType !== "standard" && quoteType !== "expert" && quoteType !== "pro") {
@@ -139,7 +145,7 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
   // TypeScript narrows productName to `string` below.
   if (!productName) return { error: "Укажите описание товара." };
   if (quantity === null || quantity <= 0) return { error: "Укажите количество." };
-  if (priceCnyPerUnit === null || priceCnyPerUnit < 0) {
+  if (isCargoOnly ? priceCnyPerUnit !== null && priceCnyPerUnit < 0 : priceCnyPerUnit === null || priceCnyPerUnit < 0) {
     return { error: "Укажите цену за единицу в юанях." };
   }
   if (weightPerUnitKg === null || weightPerUnitKg <= 0) {
@@ -168,7 +174,11 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
       color: requiredString(formData.get("color")),
       dimensions: requiredString(formData.get("dimensions")),
       quantity,
-      priceCnyPerUnit,
+      // isCargoOnly can leave this blank (see the isCargoOnly check above) —
+      // defaults to 0 rather than staying null, since ParsedQuoteFields
+      // requires a real number for the engine to compute totalPriceCny/Rub
+      // from (harmlessly 0, since a cargo-only quote never bills it anyway).
+      priceCnyPerUnit: priceCnyPerUnit ?? 0,
       chinaDeliveryCny: optionalNumber(formData.get("chinaDeliveryCny")) ?? 0,
       weightPerUnitKg,
       volumeInputMode,

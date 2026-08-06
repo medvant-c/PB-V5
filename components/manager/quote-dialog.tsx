@@ -514,7 +514,12 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   const preview = useMemo(() => {
     if (!tariffs) return null;
     const quantityNum = num(quantity);
-    const priceNum = num(priceCnyPerUnit);
+    // "Только карго": the client never pays for the goods, so a manager may
+    // legitimately leave this blank — defaults to 0 rather than blocking
+    // the whole preview (and therefore the cargo delivery calc) the way it
+    // still correctly does for every other quote type. See PB-V5 chat
+    // 2026-08-06.
+    const priceNum = isCargoOnly ? (num(priceCnyPerUnit) ?? 0) : num(priceCnyPerUnit);
     const weightNum = num(weightPerUnitKg);
     if (!quantityNum || priceNum === undefined || !weightNum) return null;
 
