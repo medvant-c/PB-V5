@@ -56,14 +56,25 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     getSystemSettings(),
   ]);
 
-  const searchServiceFeeRub = existing.searchFeeWaived
-    ? 0
-    : ({
-        standard: Number(tariffSettings.standardPriceRub),
-        expert: Number(tariffSettings.expertPriceRub),
-        pro: Number(tariffSettings.proPriceRub),
-      }[existing.quoteType] ?? 0);
-  const customProductionFeeRub = customProductionFeeForTier(tariffSettings, existing.quoteType, existing.isCustomProduction);
+  // A manual override (see Quote.searchServiceFeeRubOverride) is reused
+  // as-is, same as cargoRateUsdOverride/cnyRateRubOverride below —
+  // recalculate re-prices tariff-driven numbers against today's rates, it
+  // doesn't touch the manual override itself or its confirmation state.
+  const searchServiceFeeRub =
+    existing.searchServiceFeeRubOverride !== null
+      ? Number(existing.searchServiceFeeRubOverride)
+      : existing.searchFeeWaived
+        ? 0
+        : ({
+            standard: Number(tariffSettings.standardPriceRub),
+            expert: Number(tariffSettings.expertPriceRub),
+            pro: Number(tariffSettings.proPriceRub),
+          }[existing.quoteType] ?? 0);
+  // Same reused-as-is pattern for the "производство под заказ" override.
+  const customProductionFeeRub =
+    existing.customProductionFeeRubOverride !== null
+      ? Number(existing.customProductionFeeRubOverride)
+      : customProductionFeeForTier(tariffSettings, existing.quoteType, existing.isCustomProduction);
 
   const attachedServices = await prisma.quoteAttachedService.findMany({ where: { quoteId: id } });
   const attachedServicesTotalRub = attachedServices.reduce((sum, s) => sum + Number(s.priceRub), 0);

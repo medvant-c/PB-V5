@@ -115,10 +115,21 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     };
     searchServiceFeeRub = feeByType[fields.quoteType];
   }
+  // A manual override (see Quote.searchServiceFeeRubOverride) wins over
+  // both branches above — usable immediately, same as every other override
+  // in this route. searchFeeWaived only moves if an override is actually
+  // present on this edit; otherwise the original promo/no-promo decision
+  // from creation stays frozen, same as before this field existed.
+  if (fields.searchServiceFeeRubOverride !== undefined) searchServiceFeeRub = fields.searchServiceFeeRubOverride;
+  const searchFeeWaived =
+    fields.searchServiceFeeRubOverride !== undefined ? fields.searchServiceFeeRubOverride === 0 : existing.searchFeeWaived;
 
   const attachedServices = parseAttachedServices(formData);
   const attachedServicesTotalRub = attachedServices.reduce((sum, s) => sum + s.priceRub, 0);
-  const customProductionFeeRub = customProductionFeeForTier(tariffSettings, fields.quoteType, fields.isCustomProduction);
+  // Same override pattern for "производство под заказ" — see
+  // Quote.customProductionFeeRubOverride.
+  const customProductionFeeRub =
+    fields.customProductionFeeRubOverride ?? customProductionFeeForTier(tariffSettings, fields.quoteType, fields.isCustomProduction);
 
   const engineInputs = buildEngineInputs(fields, {
     // Frozen unless a manual override is present — same reasoning as the
@@ -204,6 +215,28 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const usdRateOverrideConfirmedByManagerId = usdRateOverrideChanged ? null : existing.usdRateOverrideConfirmedByManagerId;
   const usdRateOverrideConfirmedAt = usdRateOverrideChanged ? null : existing.usdRateOverrideConfirmedAt;
 
+  // Same reset-on-change rule again, for the manual search-service fee —
+  // see Quote.searchServiceFeeOverrideConfirmed in prisma/schema.prisma.
+  const existingSearchServiceFeeRubOverride =
+    existing.searchServiceFeeRubOverride !== null ? Number(existing.searchServiceFeeRubOverride) : undefined;
+  const searchServiceFeeOverrideChanged = fields.searchServiceFeeRubOverride !== existingSearchServiceFeeRubOverride;
+  const searchServiceFeeOverrideConfirmed = searchServiceFeeOverrideChanged ? false : existing.searchServiceFeeOverrideConfirmed;
+  const searchServiceFeeOverrideConfirmedByManagerId = searchServiceFeeOverrideChanged
+    ? null
+    : existing.searchServiceFeeOverrideConfirmedByManagerId;
+  const searchServiceFeeOverrideConfirmedAt = searchServiceFeeOverrideChanged ? null : existing.searchServiceFeeOverrideConfirmedAt;
+
+  // Same reset-on-change rule again, for the manual "производство под
+  // заказ" fee — see Quote.customProductionFeeOverrideConfirmed.
+  const existingCustomProductionFeeRubOverride =
+    existing.customProductionFeeRubOverride !== null ? Number(existing.customProductionFeeRubOverride) : undefined;
+  const customProductionFeeOverrideChanged = fields.customProductionFeeRubOverride !== existingCustomProductionFeeRubOverride;
+  const customProductionFeeOverrideConfirmed = customProductionFeeOverrideChanged ? false : existing.customProductionFeeOverrideConfirmed;
+  const customProductionFeeOverrideConfirmedByManagerId = customProductionFeeOverrideChanged
+    ? null
+    : existing.customProductionFeeOverrideConfirmedByManagerId;
+  const customProductionFeeOverrideConfirmedAt = customProductionFeeOverrideChanged ? null : existing.customProductionFeeOverrideConfirmedAt;
+
   // Same per-category cost lookup as the POST route — see its comment. A
   // confirmed manual rate's real supplier cost (confirmedCargoCostUsd)
   // wins over the catalog lookup — that's the whole point of the
@@ -241,8 +274,17 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     data: {
       quoteType: fields.quoteType,
       searchServiceFeeRub,
+      searchFeeWaived,
+      searchServiceFeeRubOverride: fields.searchServiceFeeRubOverride ?? null,
+      searchServiceFeeOverrideConfirmed,
+      searchServiceFeeOverrideConfirmedByManagerId,
+      searchServiceFeeOverrideConfirmedAt,
       isCustomProduction: fields.isCustomProduction,
       customProductionFeeRub,
+      customProductionFeeRubOverride: fields.customProductionFeeRubOverride ?? null,
+      customProductionFeeOverrideConfirmed,
+      customProductionFeeOverrideConfirmedByManagerId,
+      customProductionFeeOverrideConfirmedAt,
       isCargoOnly: fields.isCargoOnly,
       productName: fields.productName,
       productLink: fields.productLink,

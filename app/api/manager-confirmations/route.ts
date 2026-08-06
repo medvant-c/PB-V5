@@ -39,7 +39,17 @@ export async function GET(req: NextRequest) {
     select: { id: true, name: true },
   });
 
-  const [pendingBuyouts, pendingClients, pendingCargoRates, pendingCnyRates, pendingUsdRates, pendingBuyoutCommissions, pendingUnassignedClients] = await Promise.all([
+  const [
+    pendingBuyouts,
+    pendingClients,
+    pendingCargoRates,
+    pendingCnyRates,
+    pendingUsdRates,
+    pendingBuyoutCommissions,
+    pendingSearchFees,
+    pendingCustomProductionFees,
+    pendingUnassignedClients,
+  ] = await Promise.all([
     prisma.quote.findMany({
       where: { ...managerFilter, status: { in: POST_BUYOUT_STATUSES }, buyoutFactConfirmed: false, deletedAt: null },
       orderBy: { statusChangedAt: "asc" },
@@ -140,6 +150,43 @@ export async function GET(req: NextRequest) {
         client: { select: { name: true, company: true } },
       },
     }),
+    // A manual search-service-fee override needs the same owner/senior
+    // sign-off — this fee is 100% margin and feeds straight into the
+    // manager's own premium. See PB-V5 chat 2026-08-06.
+    prisma.quote.findMany({
+      where: { ...managerFilter, searchServiceFeeRubOverride: { not: null }, searchServiceFeeOverrideConfirmed: false, deletedAt: null },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        displayId: true,
+        productName: true,
+        createdAt: true,
+        searchServiceFeeRub: true,
+        searchServiceFeeRubOverride: true,
+        manager: { select: { id: true, name: true } },
+        client: { select: { name: true, company: true } },
+      },
+    }),
+    // Same for a manual "производство под заказ" fee override.
+    prisma.quote.findMany({
+      where: {
+        ...managerFilter,
+        customProductionFeeRubOverride: { not: null },
+        customProductionFeeOverrideConfirmed: false,
+        deletedAt: null,
+      },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        displayId: true,
+        productName: true,
+        createdAt: true,
+        customProductionFeeRub: true,
+        customProductionFeeRubOverride: true,
+        manager: { select: { id: true, name: true } },
+        client: { select: { name: true, company: true } },
+      },
+    }),
     // A client who self-registered at /account (no manager ever touched
     // them — createdByManagerId is only ever null right after that, or for
     // a handful of legacy rows from before this field existed) sits
@@ -173,6 +220,8 @@ export async function GET(req: NextRequest) {
     pendingCnyRates,
     pendingUsdRates,
     pendingBuyoutCommissions,
+    pendingSearchFees,
+    pendingCustomProductionFees,
     pendingUnassignedClients,
     pendingUsdtRateConfirmation,
     teamManagers,

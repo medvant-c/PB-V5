@@ -45,6 +45,11 @@ const styles = StyleSheet.create({
   // separate from `cell` — applying these to the photo column's View
   // (which wraps an Image, not text) breaks the image render entirely.
   cellText: { maxLines: 1, textOverflow: "ellipsis" },
+  // Наименование only — wide enough (flex: 1) and made of ordinary
+  // space-separated words, so wrapping to a second line instead of
+  // truncating to one doesn't risk the mid-word hyphenation-clip bug
+  // cellText's own comment warns about for narrow columns like "Тип".
+  cellTextWrap: { maxLines: 2, textOverflow: "ellipsis" },
   colNum: { width: 26 },
   colType: { width: 60 },
   colPhoto: { width: 52 },
@@ -185,7 +190,7 @@ function QuotesListPdfDocument({ client, rows, showTariff, cargoInUsd }: QuotesL
                   <Text style={{ color: "#9a9c9f" }}>—</Text>
                 )}
               </View>
-              <Text style={[styles.cell, styles.cellText, styles.colName]}>{row.productName}</Text>
+              <Text style={[styles.cell, styles.cellTextWrap, styles.colName]}>{row.productName}</Text>
               <Text style={[styles.cell, styles.cellText, styles.colQty]}>{row.quantity} шт</Text>
               <Text style={[styles.cell, styles.cellText, styles.colWeight]}>{row.totalWeightKg.toFixed(1)}</Text>
               <Text style={[styles.cell, styles.cellText, styles.colVolume]}>{row.totalVolumeM3.toFixed(3)}</Text>

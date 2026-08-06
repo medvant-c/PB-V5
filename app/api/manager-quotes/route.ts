@@ -127,12 +127,23 @@ export async function POST(req: NextRequest) {
     pro: Number(tariffSettings.proPriceRub),
   };
 
-  const searchFeeWaived =
+  // A manual override (see Quote.searchServiceFeeRubOverride in
+  // prisma/schema.prisma) is usable immediately, same as every other
+  // override in this route — confirmation only gates the sign-off, not the
+  // price itself. Without one, falls back to the existing promo-eligibility
+  // check. searchFeeWaived reads as "should the PDF show БЕСПЛАТНО" — true
+  // either for the real promo, or a manual override of exactly 0.
+  const autoSearchFeeWaived =
     fields.quoteType === "standard" &&
     (await isFreeStandardQuoteEligible(fields.clientId, systemSettings.freeStandardQuoteLimit));
+  const searchFeeWaived =
+    fields.searchServiceFeeRubOverride !== undefined ? fields.searchServiceFeeRubOverride === 0 : autoSearchFeeWaived;
   const attachedServices = parseAttachedServices(formData);
   const attachedServicesTotalRub = attachedServices.reduce((sum, s) => sum + s.priceRub, 0);
-  const customProductionFeeRub = customProductionFeeForTier(tariffSettings, fields.quoteType, fields.isCustomProduction);
+  // Same override pattern for "производство под заказ" — see
+  // Quote.customProductionFeeRubOverride.
+  const customProductionFeeRub =
+    fields.customProductionFeeRubOverride ?? customProductionFeeForTier(tariffSettings, fields.quoteType, fields.isCustomProduction);
 
   // A manual override is usable immediately, same as cargoRateUsdOverride
   // below — confirmation only gates the sign-off, not the price itself.
@@ -159,7 +170,7 @@ export async function POST(req: NextRequest) {
       fields.buyoutCommissionPercentOverride,
       buyoutCommissionTariffsToEngineInput(buyoutCommissionTiers),
     ),
-    searchServiceFeeRub: searchFeeWaived ? 0 : searchServiceFeeByType[fields.quoteType],
+    searchServiceFeeRub: fields.searchServiceFeeRubOverride ?? (autoSearchFeeWaived ? 0 : searchServiceFeeByType[fields.quoteType]),
     densityTiers: densityTiersToEngineInput(densityTiers),
     volumeTariffs: volumeTariffsToEngineInput(volumeTariffs),
     lowDensityVolumeThresholdKgM3: Number(systemSettings.lowDensityVolumeThresholdKgM3),
@@ -226,8 +237,14 @@ export async function POST(req: NextRequest) {
       quoteType: fields.quoteType,
       searchServiceFeeRub: engineInputs.searchServiceFeeRub,
       searchFeeWaived,
+      // A manual override always starts unconfirmed — see
+      // Quote.searchServiceFeeOverrideConfirmed in prisma/schema.prisma.
+      searchServiceFeeRubOverride: fields.searchServiceFeeRubOverride ?? null,
       isCustomProduction: fields.isCustomProduction,
       customProductionFeeRub,
+      // A manual override always starts unconfirmed — see
+      // Quote.customProductionFeeOverrideConfirmed in prisma/schema.prisma.
+      customProductionFeeRubOverride: fields.customProductionFeeRubOverride ?? null,
       isCargoOnly: fields.isCargoOnly,
       productName: fields.productName,
       productLink: fields.productLink,

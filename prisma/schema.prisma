@@ -53,6 +53,14 @@ enum DeskFileTab {
   // (Quote.buyoutCommissionPercentOverride). relatedId is the Quote id.
   // See PB-V5 chat 2026-07-31.
   quote_buyout_commission_proof
+  // Same idea again, for a manual search-service-fee override
+  // (Quote.searchServiceFeeRubOverride). relatedId is the Quote id. See
+  // PB-V5 chat 2026-08-06.
+  quote_search_fee_proof
+  // Same idea again, for a manual "производство под заказ" fee override
+  // (Quote.customProductionFeeRubOverride). relatedId is the Quote id.
+  // See PB-V5 chat 2026-08-06.
+  quote_custom_production_fee_proof
 }
 
 model DeskFile {
@@ -711,12 +719,25 @@ model Quote {
   // TariffSettings), editable per quote afterwards if the manager wants to
   // give a discount — same reasoning as Order.price's own snapshot comment.
   searchServiceFeeRub Decimal
-  // True when this quote landed in the client's first-3-Standard-quotes
-  // promo (searchServiceFeeRub forced to 0 at creation) — kept as its own
-  // flag rather than inferred from searchServiceFeeRub==0 so the PDF can
-  // show "БЕСПЛАТНО" specifically for the promo case, not for an unrelated
-  // manual discount down to zero.
+  // True when this quote's search fee reads as free on the PDF — either the
+  // client's first-3-Standard-quotes promo (auto, at creation), OR a manual
+  // override of exactly 0 below. Kept as its own flag rather than inferred
+  // from searchServiceFeeRub==0 alone so a manual discount down to some
+  // other small-but-nonzero number never accidentally reads as "free".
   searchFeeWaived     Boolean   @default(false)
+  // Manual override for searchServiceFeeRub — null = normal tier price
+  // (TariffSettings.standardPriceRub/expertPriceRub/proPriceRub) or the
+  // promo waiver, same as before this field existed. When set, this value
+  // replaces the tier lookup entirely — 0 marks it manually free (see
+  // searchFeeWaived above), any other number is a manual custom price.
+  // Same self-report risk as buyoutCommissionPercentOverride below (this
+  // fee is 100% margin, feeding straight into the manager's own premium),
+  // so it needs the same owner/senior sign-off before profit accounting
+  // trusts it. See PB-V5 chat 2026-08-06.
+  searchServiceFeeRubOverride         Decimal?
+  searchServiceFeeOverrideConfirmed   Boolean   @default(false)
+  searchServiceFeeOverrideConfirmedByManagerId String?
+  searchServiceFeeOverrideConfirmedAt DateTime?
 
   // "Производство под заказ" — the manager flags a made-to-order product,
   // billing the tier-priced service from TariffSettings.customProduction*Rub
@@ -726,6 +747,14 @@ model Quote {
   // product. See PB-V5 chat 2026-07-29.
   isCustomProduction     Boolean @default(false)
   customProductionFeeRub Decimal @default(0)
+  // Manual override for customProductionFeeRub — same shape/reasoning as
+  // searchServiceFeeRubOverride above: null = normal tier lookup, set =
+  // this exact value instead, needs owner/senior sign-off (same 100%-margin
+  // self-report risk). See PB-V5 chat 2026-08-06.
+  customProductionFeeRubOverride         Decimal?
+  customProductionFeeOverrideConfirmed   Boolean   @default(false)
+  customProductionFeeOverrideConfirmedByManagerId String?
+  customProductionFeeOverrideConfirmedAt DateTime?
 
   // "Только карго" — product data (name/price/weight/dims/photos) is still
   // entered and stored exactly like a normal quote, but totalRub (see

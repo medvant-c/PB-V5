@@ -50,19 +50,31 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: "Тарифы не заданы — заполните вкладку «Тарифы»." }, { status: 400 });
   }
 
-  const newSearchServiceFeeRub = existing.searchFeeWaived
-    ? 0
-    : ({
-        standard: Number(tariffSettings.standardPriceRub),
-        expert: Number(tariffSettings.expertPriceRub),
-        pro: Number(tariffSettings.proPriceRub),
-      }[quoteType] ?? 0);
+  // A manual override (see Quote.searchServiceFeeRubOverride) is an
+  // explicit decision independent of tier — a tier switch must never
+  // silently overwrite it, so it stays exactly as-is (delta 0) whenever
+  // one is set.
+  const newSearchServiceFeeRub =
+    existing.searchServiceFeeRubOverride !== null
+      ? Number(existing.searchServiceFeeRubOverride)
+      : existing.searchFeeWaived
+        ? 0
+        : ({
+            standard: Number(tariffSettings.standardPriceRub),
+            expert: Number(tariffSettings.expertPriceRub),
+            pro: Number(tariffSettings.proPriceRub),
+          }[quoteType] ?? 0);
   const searchFeeDeltaRub = newSearchServiceFeeRub - Number(existing.searchServiceFeeRub);
 
   // "Производство под заказ" is tier-priced too — re-derive it for the new
   // tier the same way, so switching a custom-production quote from
-  // Standart to Pro also moves its production fee, not just the search fee.
-  const newCustomProductionFeeRub = customProductionFeeForTier(tariffSettings, quoteType, existing.isCustomProduction);
+  // Standart to Pro also moves its production fee, not just the search fee
+  // — UNLESS a manual override is set (Quote.customProductionFeeRubOverride),
+  // same "explicit decision, tier switch never overwrites it" rule as above.
+  const newCustomProductionFeeRub =
+    existing.customProductionFeeRubOverride !== null
+      ? Number(existing.customProductionFeeRubOverride)
+      : customProductionFeeForTier(tariffSettings, quoteType, existing.isCustomProduction);
   const customProductionFeeDeltaRub = newCustomProductionFeeRub - Number(existing.customProductionFeeRub);
 
   const quote = await prisma.quote.update({

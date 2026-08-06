@@ -140,6 +140,10 @@ interface QuoteDetail {
   buyoutCommissionPercentOverride: string | null;
   buyoutCommissionOverrideConfirmed: boolean;
   searchFeeWaived: boolean;
+  searchServiceFeeRubOverride: string | null;
+  searchServiceFeeOverrideConfirmed: boolean;
+  customProductionFeeRubOverride: string | null;
+  customProductionFeeOverrideConfirmed: boolean;
   isCustomProduction: boolean;
   isCargoOnly: boolean;
 }
@@ -217,6 +221,8 @@ const BLANK_FORM = {
   cnyRateRubOverride: "",
   usdRateRubOverride: "",
   buyoutCommissionPercentOverride: "",
+  searchServiceFeeRubOverride: "",
+  customProductionFeeRubOverride: "",
 };
 
 function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: QuoteDialogProps) {
@@ -292,6 +298,10 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   const [usdRateOverrideConfirmed, setUsdRateOverrideConfirmed] = useState(false);
   const [buyoutCommissionPercentOverride, setBuyoutCommissionPercentOverride] = useState(BLANK_FORM.buyoutCommissionPercentOverride);
   const [buyoutCommissionOverrideConfirmed, setBuyoutCommissionOverrideConfirmed] = useState(false);
+  const [searchServiceFeeRubOverride, setSearchServiceFeeRubOverride] = useState(BLANK_FORM.searchServiceFeeRubOverride);
+  const [searchServiceFeeOverrideConfirmed, setSearchServiceFeeOverrideConfirmed] = useState(false);
+  const [customProductionFeeRubOverride, setCustomProductionFeeRubOverride] = useState(BLANK_FORM.customProductionFeeRubOverride);
+  const [customProductionFeeOverrideConfirmed, setCustomProductionFeeOverrideConfirmed] = useState(false);
 
   const [catalog, setCatalog] = useState<ServiceCatalogItemRecord[]>([]);
   const [attachedServices, setAttachedServices] = useState<AttachedServiceState[]>([]);
@@ -402,6 +412,10 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       setUsdRateOverrideConfirmed(false);
       setBuyoutCommissionPercentOverride(BLANK_FORM.buyoutCommissionPercentOverride);
       setBuyoutCommissionOverrideConfirmed(false);
+      setSearchServiceFeeRubOverride(BLANK_FORM.searchServiceFeeRubOverride);
+      setSearchServiceFeeOverrideConfirmed(false);
+      setCustomProductionFeeRubOverride(BLANK_FORM.customProductionFeeRubOverride);
+      setCustomProductionFeeOverrideConfirmed(false);
       setFrozenRates(null);
       setExistingPhotos([]);
       return;
@@ -452,6 +466,10 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           setUsdRateOverrideConfirmed(q.usdRateOverrideConfirmed);
           setBuyoutCommissionPercentOverride(q.buyoutCommissionPercentOverride ?? "");
           setBuyoutCommissionOverrideConfirmed(q.buyoutCommissionOverrideConfirmed);
+          setSearchServiceFeeRubOverride(q.searchServiceFeeRubOverride ?? "");
+          setSearchServiceFeeOverrideConfirmed(q.searchServiceFeeOverrideConfirmed);
+          setCustomProductionFeeRubOverride(q.customProductionFeeRubOverride ?? "");
+          setCustomProductionFeeOverrideConfirmed(q.customProductionFeeOverrideConfirmed);
           setFrozenRates({
             cnyRateRub: Number(q.cnyRateUsed),
             usdRateRub: Number(q.usdRateUsed),
@@ -529,21 +547,35 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     // Cargo rate itself (density or volume) is always a live category
     // lookup, matching the server.
     const isFrozen = isEditing && frozenRates;
-    const searchServiceFeeRub = isFrozen && frozenRates.searchFeeWaived
-      ? 0
-      : quoteType === "standard"
-        ? Number(tariffs.standardPriceRub)
-        : quoteType === "expert"
-          ? Number(tariffs.expertPriceRub)
-          : Number(tariffs.proPriceRub);
+    // A manual override (0 = «бесплатно», any other number = «своя цена») is
+    // usable immediately, same as every other override in this dialog —
+    // confirmation only gates the sign-off. See Quote.
+    // searchServiceFeeRubOverride in prisma/schema.prisma and the mirrored
+    // resolution in app/api/manager-quotes/route.ts.
+    const searchServiceFeeOverrideNum = num(searchServiceFeeRubOverride);
+    const searchServiceFeeRub = searchServiceFeeOverrideNum !== undefined
+      ? searchServiceFeeOverrideNum
+      : isFrozen && frozenRates.searchFeeWaived
+        ? 0
+        : quoteType === "standard"
+          ? Number(tariffs.standardPriceRub)
+          : quoteType === "expert"
+            ? Number(tariffs.expertPriceRub)
+            : Number(tariffs.proPriceRub);
 
-    const customProductionFeeRub = !isCustomProduction
-      ? 0
-      : quoteType === "standard"
-        ? Number(tariffs.customProductionStandardRub)
-        : quoteType === "expert"
-          ? Number(tariffs.customProductionExpertRub)
-          : Number(tariffs.customProductionProRub);
+    // Same override pattern for "производство под заказ" — wins regardless
+    // of the isCustomProduction checkbox, matching customProductionFeeForTier's
+    // server-side resolution order.
+    const customProductionFeeOverrideNum = num(customProductionFeeRubOverride);
+    const customProductionFeeRub = customProductionFeeOverrideNum !== undefined
+      ? customProductionFeeOverrideNum
+      : !isCustomProduction
+        ? 0
+        : quoteType === "standard"
+          ? Number(tariffs.customProductionStandardRub)
+          : quoteType === "expert"
+            ? Number(tariffs.customProductionExpertRub)
+            : Number(tariffs.customProductionProRub);
 
     const densityTiers: DensityTierInput[] = tiers.map((tier) => ({
       categoryKey: tier.categoryKey,
@@ -606,12 +638,19 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     const manualOverride = num(cnyRateRubOverride);
     try {
       if (manualOverride !== undefined) {
-        return { ...computeQuote({ ...inputsWithoutRate, cnyRateRub: manualOverride }), cnyRateRubResolved: manualOverride };
+        return {
+          ...computeQuote({ ...inputsWithoutRate, cnyRateRub: manualOverride }),
+          cnyRateRubResolved: manualOverride,
+          searchServiceFeeRub,
+          customProductionFeeRub,
+        };
       }
       if (isFrozen) {
         return {
           ...computeQuote({ ...inputsWithoutRate, cnyRateRub: frozenRates.cnyRateRub }),
           cnyRateRubResolved: frozenRates.cnyRateRub,
+          searchServiceFeeRub,
+          customProductionFeeRub,
         };
       }
       // New quote, no manual override: pick the ¥→₽ bracket the quote's
@@ -626,7 +665,12 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         tier30000: tariffs.cnyRateRubTier30000 !== null ? Number(tariffs.cnyRateRubTier30000) : null,
       };
       const result = computeQuoteWithAutoCnyTier(inputsWithoutRate, cnyTiers);
-      return { ...result.computed, cnyRateRubResolved: result.cnyRateRub };
+      return {
+        ...result.computed,
+        cnyRateRubResolved: result.cnyRateRub,
+        searchServiceFeeRub,
+        customProductionFeeRub,
+      };
     } catch {
       return null;
     }
@@ -660,6 +704,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     cnyRateRubOverride,
     usdRateRubOverride,
     buyoutCommissionPercentOverride,
+    searchServiceFeeRubOverride,
+    customProductionFeeRubOverride,
     isEditing,
     frozenRates,
   ]);
@@ -758,6 +804,12 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         if (usdRateRubOverride.trim()) formData.append("usdRateRubOverride", usdRateRubOverride.trim());
         if (buyoutCommissionPercentOverride.trim()) {
           formData.append("buyoutCommissionPercentOverride", buyoutCommissionPercentOverride.trim());
+        }
+        if (searchServiceFeeRubOverride.trim()) {
+          formData.append("searchServiceFeeRubOverride", searchServiceFeeRubOverride.trim());
+        }
+        if (customProductionFeeRubOverride.trim()) {
+          formData.append("customProductionFeeRubOverride", customProductionFeeRubOverride.trim());
         }
       }
 
@@ -1256,8 +1308,12 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                 </div>
                 {!isCargoOnly && (
                   <div className="flex justify-between text-text-secondary">
-                    <span>Услуга поиска</span>
-                    <span>{fmt(preview ? (quoteType === "standard" ? Number(tariffs.standardPriceRub) : quoteType === "expert" ? Number(tariffs.expertPriceRub) : Number(tariffs.proPriceRub)) : 0)} ₽</span>
+                    <span>
+                      Услуга поиска
+                      {searchServiceFeeRubOverride.trim() &&
+                        (preview.searchServiceFeeRub === 0 ? " — бесплатно вручную" : " — своя цена вручную")}
+                    </span>
+                    <span>{fmt(preview.searchServiceFeeRub)} ₽</span>
                   </div>
                 )}
                 {!isCargoOnly && (
@@ -1269,19 +1325,13 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                     <span>{fmt(preview.buyoutCommissionRub)} ₽</span>
                   </div>
                 )}
-                {!isCargoOnly && isCustomProduction && (
+                {!isCargoOnly && (isCustomProduction || customProductionFeeRubOverride.trim()) && (
                   <div className="flex justify-between text-text-secondary">
-                    <span>Производство под заказ</span>
                     <span>
-                      {fmt(
-                        quoteType === "standard"
-                          ? Number(tariffs.customProductionStandardRub)
-                          : quoteType === "expert"
-                            ? Number(tariffs.customProductionExpertRub)
-                            : Number(tariffs.customProductionProRub),
-                      )}{" "}
-                      ₽
+                      Производство под заказ
+                      {customProductionFeeRubOverride.trim() && " — вручную"}
                     </span>
+                    <span>{fmt(preview.customProductionFeeRub)} ₽</span>
                   </div>
                 )}
                 {!isCargoOnly &&
@@ -1395,6 +1445,65 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                       {buyoutCommissionOverrideConfirmed
                         ? "✓ Комиссия подтверждена руководителем/старшим менеджером."
                         : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — комиссия уже применяется в просчёте."}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-warning">
+                      После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
+                    </p>
+                  ))}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Услуга поиска, ₽ вручную (необязательно — иначе из тарифов; 0 = бесплатно)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    step="1"
+                    placeholder="из тарифов"
+                    value={searchServiceFeeRubOverride}
+                    onChange={(e) => setSearchServiceFeeRubOverride(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSearchServiceFeeRubOverride("0")}
+                  >
+                    Бесплатно
+                  </Button>
+                </div>
+                {searchServiceFeeRubOverride.trim() &&
+                  (isEditing ? (
+                    <p className={cn("text-xs", searchServiceFeeOverrideConfirmed ? "text-success" : "text-warning")}>
+                      {searchServiceFeeOverrideConfirmed
+                        ? "✓ Сумма подтверждена руководителем/старшим менеджером."
+                        : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — сумма уже применяется в просчёте."}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-warning">
+                      После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
+                    </p>
+                  ))}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Производство под заказ, ₽ вручную (необязательно — иначе из тарифов)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="1"
+                  placeholder="из тарифов"
+                  value={customProductionFeeRubOverride}
+                  onChange={(e) => setCustomProductionFeeRubOverride(e.target.value)}
+                />
+                {customProductionFeeRubOverride.trim() &&
+                  (isEditing ? (
+                    <p className={cn("text-xs", customProductionFeeOverrideConfirmed ? "text-success" : "text-warning")}>
+                      {customProductionFeeOverrideConfirmed
+                        ? "✓ Сумма подтверждена руководителем/старшим менеджером."
+                        : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — сумма уже применяется в просчёте."}
                     </p>
                   ) : (
                     <p className="text-xs text-warning">

@@ -102,6 +102,13 @@ interface ParsedQuoteFields {
   // above — the route resolves the final buyoutCommissionTiers to pass the
   // engine via buyoutCommissionTiersForQuote below.
   buyoutCommissionPercentOverride?: number;
+  // Manual overrides for the two 100%-margin service fees — see
+  // Quote.searchServiceFeeRubOverride/customProductionFeeRubOverride in
+  // prisma/schema.prisma. undefined = no override, normal tier lookup (the
+  // route resolves the final value, same split as the other overrides
+  // above). 0 marks the fee manually free.
+  searchServiceFeeRubOverride?: number;
+  customProductionFeeRubOverride?: number;
   // "Производство под заказ" — see Quote.isCustomProduction in
   // prisma/schema.prisma. The route (not this parser) looks up the actual
   // fee from TariffSettings once this is known, same pattern as
@@ -199,6 +206,8 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
       cnyRateRubOverride: optionalNumber(formData.get("cnyRateRubOverride")),
       usdRateRubOverride: optionalNumber(formData.get("usdRateRubOverride")),
       buyoutCommissionPercentOverride: optionalNumber(formData.get("buyoutCommissionPercentOverride")),
+      searchServiceFeeRubOverride: optionalNumber(formData.get("searchServiceFeeRubOverride")),
+      customProductionFeeRubOverride: optionalNumber(formData.get("customProductionFeeRubOverride")),
       isCustomProduction: formData.get("isCustomProduction") === "true",
       isCargoOnly: formData.get("isCargoOnly") === "true",
     },

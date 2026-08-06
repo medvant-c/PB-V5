@@ -88,6 +88,28 @@ interface PendingBuyoutCommission {
   client: { name: string; company: string | null };
 }
 
+interface PendingSearchFee {
+  id: string;
+  displayId: number;
+  productName: string;
+  createdAt: string;
+  searchServiceFeeRub: string;
+  searchServiceFeeRubOverride: string;
+  manager: { id: string; name: string };
+  client: { name: string; company: string | null };
+}
+
+interface PendingCustomProductionFee {
+  id: string;
+  displayId: number;
+  productName: string;
+  createdAt: string;
+  customProductionFeeRub: string;
+  customProductionFeeRubOverride: string;
+  manager: { id: string; name: string };
+  client: { name: string; company: string | null };
+}
+
 // Single shared TariffSettings.usdtRateCny, not per-quote — see
 // app/api/manager-tariffs/confirm-usdt-rate/route.ts.
 interface PendingUsdtRateConfirmation {
@@ -379,6 +401,8 @@ function ManagerConfirmationsTab() {
   const [pendingCnyRates, setPendingCnyRates] = useState<PendingCnyRate[]>([]);
   const [pendingUsdRates, setPendingUsdRates] = useState<PendingUsdRate[]>([]);
   const [pendingBuyoutCommissions, setPendingBuyoutCommissions] = useState<PendingBuyoutCommission[]>([]);
+  const [pendingSearchFees, setPendingSearchFees] = useState<PendingSearchFee[]>([]);
+  const [pendingCustomProductionFees, setPendingCustomProductionFees] = useState<PendingCustomProductionFee[]>([]);
   // Owner-only (see /api/manager-confirmations) — empty for senior/manager
   // sessions without any extra gating needed here, since the API itself
   // never sends anything for them.
@@ -408,6 +432,14 @@ function ManagerConfirmationsTab() {
   const [busyBuyoutCommissionId, setBusyBuyoutCommissionId] = useState<string | null>(null);
   const [buyoutCommissionError, setBuyoutCommissionError] = useState<string | null>(null);
 
+  const [searchFeeFiles, setSearchFeeFiles] = useState<Record<string, File | null>>({});
+  const [busySearchFeeId, setBusySearchFeeId] = useState<string | null>(null);
+  const [searchFeeError, setSearchFeeError] = useState<string | null>(null);
+
+  const [customProductionFeeFiles, setCustomProductionFeeFiles] = useState<Record<string, File | null>>({});
+  const [busyCustomProductionFeeId, setBusyCustomProductionFeeId] = useState<string | null>(null);
+  const [customProductionFeeError, setCustomProductionFeeError] = useState<string | null>(null);
+
   const [pendingUsdtRateConfirmation, setPendingUsdtRateConfirmation] = useState<PendingUsdtRateConfirmation | null>(null);
   const [busyUsdtRateConfirm, setBusyUsdtRateConfirm] = useState(false);
   const [usdtRateConfirmError, setUsdtRateConfirmError] = useState<string | null>(null);
@@ -423,6 +455,8 @@ function ManagerConfirmationsTab() {
         setPendingCnyRates(data.pendingCnyRates ?? []);
         setPendingUsdRates(data.pendingUsdRates ?? []);
         setPendingBuyoutCommissions(data.pendingBuyoutCommissions ?? []);
+        setPendingSearchFees(data.pendingSearchFees ?? []);
+        setPendingCustomProductionFees(data.pendingCustomProductionFees ?? []);
         setPendingUnassignedClients(data.pendingUnassignedClients ?? []);
         setPendingUsdtRateConfirmation(data.pendingUsdtRateConfirmation ?? null);
         setTeamManagers(data.teamManagers ?? []);
@@ -573,6 +607,54 @@ function ManagerConfirmationsTab() {
     }
   }
 
+  async function handleConfirmSearchFee(quoteId: string) {
+    const file = searchFeeFiles[quoteId];
+    setBusySearchFeeId(quoteId);
+    setSearchFeeError(null);
+    try {
+      const formData = new FormData();
+      if (file) formData.append("file", file);
+      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-search-fee`, { method: "PATCH", body: formData });
+      if (res.ok) {
+        setSearchFeeFiles((current) => {
+          const { [quoteId]: _omit, ...rest } = current;
+          void _omit;
+          return rest;
+        });
+        await load();
+      } else {
+        const data = await res.json();
+        setSearchFeeError(data.error ?? "Не удалось подтвердить стоимость услуги поиска.");
+      }
+    } finally {
+      setBusySearchFeeId(null);
+    }
+  }
+
+  async function handleConfirmCustomProductionFee(quoteId: string) {
+    const file = customProductionFeeFiles[quoteId];
+    setBusyCustomProductionFeeId(quoteId);
+    setCustomProductionFeeError(null);
+    try {
+      const formData = new FormData();
+      if (file) formData.append("file", file);
+      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-custom-production-fee`, { method: "PATCH", body: formData });
+      if (res.ok) {
+        setCustomProductionFeeFiles((current) => {
+          const { [quoteId]: _omit, ...rest } = current;
+          void _omit;
+          return rest;
+        });
+        await load();
+      } else {
+        const data = await res.json();
+        setCustomProductionFeeError(data.error ?? "Не удалось подтвердить стоимость производства под заказ.");
+      }
+    } finally {
+      setBusyCustomProductionFeeId(null);
+    }
+  }
+
   useEffect(() => {
     load();
   }, []);
@@ -665,6 +747,8 @@ function ManagerConfirmationsTab() {
     pendingCnyRates.length === 0 &&
     pendingUsdRates.length === 0 &&
     pendingBuyoutCommissions.length === 0 &&
+    pendingSearchFees.length === 0 &&
+    pendingCustomProductionFees.length === 0 &&
     pendingUnassignedClients.length === 0 &&
     !pendingUsdtRateConfirmation;
 
@@ -1097,6 +1181,112 @@ function ManagerConfirmationsTab() {
                       className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
                     >
                       {busyBuyoutCommissionId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      Подтвердить
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {pendingSearchFees.length > 0 && (
+            <div>
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
+                <DollarSign className="h-3.5 w-3.5" /> Ручная стоимость услуги поиска ({pendingSearchFees.length})
+              </h3>
+              <p className="mt-1 text-xs text-text-secondary">
+                Менеджер вписал стоимость услуги поиска вручную, не из тарифов (0 ₽ — вручную бесплатно). Скриншот
+                переписки — необязательно, но поможет при проверке.
+              </p>
+              {searchFeeError && <p className="mt-1 text-xs text-error">{searchFeeError}</p>}
+              <ul className="mt-2 space-y-2">
+                {pendingSearchFees.map((quote) => (
+                  <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <span className="font-medium text-text">
+                          №{quote.displayId} · {quote.productName}
+                        </span>
+                        <span className="ml-2 text-xs text-text-secondary">
+                          {quote.client.name}
+                          {quote.client.company ? ` · ${quote.client.company}` : ""} · менеджер {quote.manager.name}
+                        </span>
+                      </div>
+                      <span className="text-xs font-medium text-warning">
+                        стоимость: {Number(quote.searchServiceFeeRubOverride) === 0 ? "бесплатно" : `${Math.round(Number(quote.searchServiceFeeRubOverride)).toLocaleString("ru-RU")} ₽`}
+                      </span>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки (необязательно):</span>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        onChange={(e) => setSearchFeeFiles((c) => ({ ...c, [quote.id]: e.target.files?.[0] ?? null }))}
+                        className="text-xs text-text-secondary"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmSearchFee(quote.id)}
+                      disabled={busySearchFeeId === quote.id}
+                      className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
+                    >
+                      {busySearchFeeId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      Подтвердить
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {pendingCustomProductionFees.length > 0 && (
+            <div>
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
+                <Banknote className="h-3.5 w-3.5" /> Ручная стоимость производства под заказ ({pendingCustomProductionFees.length})
+              </h3>
+              <p className="mt-1 text-xs text-text-secondary">
+                Менеджер вписал стоимость производства под заказ вручную, не из тарифов. Скриншот переписки —
+                необязательно, но поможет при проверке.
+              </p>
+              {customProductionFeeError && <p className="mt-1 text-xs text-error">{customProductionFeeError}</p>}
+              <ul className="mt-2 space-y-2">
+                {pendingCustomProductionFees.map((quote) => (
+                  <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <span className="font-medium text-text">
+                          №{quote.displayId} · {quote.productName}
+                        </span>
+                        <span className="ml-2 text-xs text-text-secondary">
+                          {quote.client.name}
+                          {quote.client.company ? ` · ${quote.client.company}` : ""} · менеджер {quote.manager.name}
+                        </span>
+                      </div>
+                      <span className="text-xs font-medium text-warning">
+                        стоимость: {Math.round(Number(quote.customProductionFeeRubOverride)).toLocaleString("ru-RU")} ₽
+                      </span>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки (необязательно):</span>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        onChange={(e) => setCustomProductionFeeFiles((c) => ({ ...c, [quote.id]: e.target.files?.[0] ?? null }))}
+                        className="text-xs text-text-secondary"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmCustomProductionFee(quote.id)}
+                      disabled={busyCustomProductionFeeId === quote.id}
+                      className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
+                    >
+                      {busyCustomProductionFeeId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                       Подтвердить
                     </button>
                   </li>

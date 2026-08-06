@@ -137,10 +137,21 @@ function ManagerWorkspace({ name, role, impersonatedByName, permissions }: Manag
         const cnyRates = data.pendingCnyRates?.length ?? 0;
         const usdRates = data.pendingUsdRates?.length ?? 0;
         const buyoutCommissions = data.pendingBuyoutCommissions?.length ?? 0;
+        const searchFees = data.pendingSearchFees?.length ?? 0;
+        const customProductionFees = data.pendingCustomProductionFees?.length ?? 0;
         const unassignedClients = data.pendingUnassignedClients?.length ?? 0;
         const usdtRateConfirmation = data.pendingUsdtRateConfirmation ? 1 : 0;
         setPendingConfirmationsCount(
-          buyouts + clients + cargoRates + cnyRates + usdRates + buyoutCommissions + unassignedClients + usdtRateConfirmation,
+          buyouts +
+            clients +
+            cargoRates +
+            cnyRates +
+            usdRates +
+            buyoutCommissions +
+            searchFees +
+            customProductionFees +
+            unassignedClients +
+            usdtRateConfirmation,
         );
       })
       .catch(() => {});

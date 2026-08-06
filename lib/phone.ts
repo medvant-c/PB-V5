@@ -63,6 +63,14 @@ function formatPhoneMask(raw: string, previous?: string): string {
     // gave it to them.
     return raw.replace(/[^\d+\s()-]/g, "");
   }
+  // A lone "+" with no digits after it yet can't be classified as
+  // international or not (isInternational needs at least one digit to
+  // tell), but it must never be silently discarded here — extractSignificant
+  // Digits below would otherwise wipe it back to "", so the very next digit
+  // typed starts fresh with no "+" at all, making it impossible to type a
+  // non-RU number one keystroke at a time (only pasting the whole number
+  // worked). See PB-V5 chat 2026-08-06.
+  if (raw.trim() === "+") return "+";
   let digits = extractSignificantDigits(raw);
   if (previous !== undefined && raw.length < previous.length) {
     const previousDigits = extractSignificantDigits(previous);
