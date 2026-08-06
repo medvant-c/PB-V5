@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
-import { canAccessManagerQuote } from "@/lib/manager-scope";
+import { canAccessManagerQuote, canViewCargoCost } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { customProductionFeeForTier, stripCargoCostForNonOwner } from "@/lib/desk-services/quote-request";
 
@@ -42,7 +42,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   }
 
   if (quoteType === existing.quoteType) {
-    return Response.json({ quote: stripCargoCostForNonOwner(existing, session) });
+    return Response.json({ quote: stripCargoCostForNonOwner(existing, await canViewCargoCost(session)) });
   }
 
   const tariffSettings = await prisma.tariffSettings.findFirst({ orderBy: { createdAt: "desc" } });
@@ -82,5 +82,5 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     },
   });
 
-  return Response.json({ quote: stripCargoCostForNonOwner(quote, session) });
+  return Response.json({ quote: stripCargoCostForNonOwner(quote, await canViewCargoCost(session)) });
 }

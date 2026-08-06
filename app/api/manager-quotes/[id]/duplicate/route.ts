@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
-import { canAccessManagerQuote } from "@/lib/manager-scope";
+import { canAccessManagerQuote, canViewCargoCost } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { storage } from "@/lib/storage";
 import { nextQuoteDisplayId } from "@/lib/display-ids";
@@ -125,5 +125,5 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     }
   }
 
-  return Response.json({ quote: stripCargoCostForNonOwner(duplicate, session) }, { status: 201 });
+  return Response.json({ quote: stripCargoCostForNonOwner(duplicate, await canViewCargoCost(session)) }, { status: 201 });
 }

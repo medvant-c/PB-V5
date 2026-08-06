@@ -78,4 +78,56 @@ async function canEditTariffs(session: ManagerSession): Promise<boolean> {
   return manager?.canEditTariffs ?? false;
 }
 
-export { getVisibleManagerIds, canAccessManagerQuote, canAccessManagerClient, clientVisibilityWhere, canEditTariffs };
+// Shared "owner always, otherwise look up this one column live" shape for
+// every individually-grantable permission in prisma/schema.prisma's Manager
+// model (see its own comment for what each one gates and why it's kept
+// separate from a role) — one query per check, same cost/consistency as
+// canEditTariffs above, just generalized so a 6th permission doesn't need a
+// 6th copy-pasted function.
+async function hasManagerPermission(
+  session: ManagerSession,
+  field: "canViewPriceList" | "canViewCash" | "canViewProfitReport" | "canViewTrash" | "canViewCargoCost",
+): Promise<boolean> {
+  if (session.role === "owner") return true;
+  const manager = await prisma.manager.findUnique({ where: { id: session.managerId }, select: { [field]: true } });
+  return Boolean(manager?.[field]);
+}
+
+// "Прайс-лист" tab — see Manager.canViewPriceList's schema comment.
+async function canManagePriceList(session: ManagerSession): Promise<boolean> {
+  return hasManagerPermission(session, "canViewPriceList");
+}
+
+// "Отчёты по дням" (cash ledger) tab — see Manager.canViewCash.
+async function canViewCash(session: ManagerSession): Promise<boolean> {
+  return hasManagerPermission(session, "canViewCash");
+}
+
+// "Отчёт о прибыли" tab (both "по сделкам" and "за период" modes) — see
+// Manager.canViewProfitReport.
+async function canViewProfitReport(session: ManagerSession): Promise<boolean> {
+  return hasManagerPermission(session, "canViewProfitReport");
+}
+
+// "Корзина" tab — see Manager.canViewTrash.
+async function canViewTrash(session: ManagerSession): Promise<boolean> {
+  return hasManagerPermission(session, "canViewTrash");
+}
+
+// Real cargo cost/margin fields — see Manager.canViewCargoCost.
+async function canViewCargoCost(session: ManagerSession): Promise<boolean> {
+  return hasManagerPermission(session, "canViewCargoCost");
+}
+
+export {
+  getVisibleManagerIds,
+  canAccessManagerQuote,
+  canAccessManagerClient,
+  clientVisibilityWhere,
+  canEditTariffs,
+  canManagePriceList,
+  canViewCash,
+  canViewProfitReport,
+  canViewTrash,
+  canViewCargoCost,
+};

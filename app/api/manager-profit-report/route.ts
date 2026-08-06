@@ -1,21 +1,25 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
+import { canViewProfitReport } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { buildProfitReport, parseQuoteIds } from "@/lib/desk-services/profit-report";
 import { isQuoteStatus } from "@/lib/quote-statuses";
 
-// Owner-only "сколько мы заработаем на этих сделках" report — the owner
-// checkbox-selects any set of quotes (across all clients/managers, not
-// scoped to one like every other quote list in this app) and gets back the
-// exact same per-quote profit math the dashboard's aggregate numbers are
-// built from (see lib/desk-services/quote-profit.ts), plus what's actually
-// left for him after Влад's cut and every manager's premium — not just
-// gross company profit. See PB-V5 chat 2026-07-31.
+// "сколько мы заработаем на этих сделках" report — the owner checkbox-
+// selects any set of quotes (across all clients/managers, not scoped to one
+// like every other quote list in this app) and gets back the exact same
+// per-quote profit math the dashboard's aggregate numbers are built from
+// (see lib/desk-services/quote-profit.ts), plus what's actually left after
+// Влад's cut and every manager's premium — not just gross company profit.
+// Owner always; anyone else needs Manager.canViewProfitReport explicitly
+// granted (see lib/manager-scope.ts) — this reveals other managers'
+// premiums and every investor's cut, a bigger grant than the tab name
+// alone suggests. See PB-V5 chat 2026-07-31, 2026-08-06.
 async function requireOwner(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) return { error: Response.json({ error: "Не авторизовано." }, { status: 401 }) } as const;
-  if (session.role !== "owner") {
-    return { error: Response.json({ error: "Доступно только руководителю." }, { status: 403 }) } as const;
+  if (!(await canViewProfitReport(session))) {
+    return { error: Response.json({ error: "Нет доступа к отчёту о прибыли." }, { status: 403 }) } as const;
   }
   return { session } as const;
 }

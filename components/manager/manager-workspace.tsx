@@ -30,6 +30,18 @@ interface ManagerWorkspaceProps {
   // their own name for the banner, not just a boolean, so the banner can
   // say who's actually looking without another round trip.
   impersonatedByName: string | null;
+  // Individually owner-grantable permissions (see Manager in
+  // prisma/schema.prisma) — already resolved server-side in
+  // app/desk/manager/page.tsx (owner always true, regardless of the raw
+  // column). Only the ones that gate a whole NAV TAB live here;
+  // canEditTariffs/canViewCargoCost gate content *inside* an already-visible
+  // tab, so those are checked where they're used, not at this level.
+  permissions: {
+    canViewPriceList: boolean;
+    canViewCash: boolean;
+    canViewProfitReport: boolean;
+    canViewTrash: boolean;
+  };
 }
 
 const ROLE_LABEL: Record<ManagerWorkspaceProps["role"], string> = {
@@ -52,21 +64,29 @@ const ALL_SECTIONS = [
   // Own tab now, not a permanent fixture above every other tab (see PB-V5
   // chat 2026-07-30) — it was pushing every tab's actual content down the
   // page regardless of whether the manager wanted to see it right then.
-  { id: "home", label: "Главная", icon: Home, Component: ManagerDashboard, ownerOnly: false, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
-  { id: "clients", label: "Клиенты", icon: Users, Component: ManagerClientsTab, ownerOnly: false, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "home", label: "Главная", icon: Home, Component: ManagerDashboard, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "clients", label: "Клиенты", icon: Users, Component: ManagerClientsTab, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
   // Same quotes, same actions as inside a client's own card (see
   // components/manager/tabs/clients-tab.tsx's ClientQuotes, reused here
   // with no clientId) — just flattened into one sortable/filterable list
   // instead of grouped by client. See PB-V5 chat 2026-08-01.
-  { id: "all-quotes", label: "Все просчёты", icon: FileText, Component: ManagerAllQuotesTab, ownerOnly: false, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
-  { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentTab, ownerOnly: false, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
-  { id: "confirmations", label: "Подтверждения", icon: CheckSquare, Component: ManagerConfirmationsTab, ownerOnly: false, seniorOrOwnerOnly: true, hiddenFromOutsource: false },
-  { id: "trash", label: "Корзина", icon: Trash2, Component: ManagerTrashTab, ownerOnly: true, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
-  { id: "price-list", label: "Прайс-лист", icon: Tag, Component: ManagerPriceListTab, ownerOnly: true, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
-  { id: "cash", label: "Отчёты по дням", icon: Wallet, Component: ManagerCashTab, ownerOnly: true, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
-  { id: "profit-report", label: "Отчёт о прибыли", icon: FileBarChart, Component: ManagerProfitReportTab, ownerOnly: true, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
-  { id: "database", label: "База данных", icon: Database, Component: ManagerDatabaseTab, ownerOnly: false, seniorOrOwnerOnly: false, hiddenFromOutsource: true },
-  { id: "staff", label: "Сотрудники", icon: UsersRound, Component: ManagerStaffTab, ownerOnly: true, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "all-quotes", label: "Все просчёты", icon: FileText, Component: ManagerAllQuotesTab, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentTab, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "confirmations", label: "Подтверждения", icon: CheckSquare, Component: ManagerConfirmationsTab, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: true, hiddenFromOutsource: false },
+  // ownerOnly here now means "owner, OR anyone the owner individually
+  // granted the matching permission to" — see permissionKey below, checked
+  // against the resolved `permissions` prop (already "owner always true")
+  // instead of the role directly. See PB-V5 chat 2026-08-06.
+  { id: "trash", label: "Корзина", icon: Trash2, Component: ManagerTrashTab, ownerOnly: true, permissionKey: "canViewTrash", seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "price-list", label: "Прайс-лист", icon: Tag, Component: ManagerPriceListTab, ownerOnly: true, permissionKey: "canViewPriceList", seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "cash", label: "Отчёты по дням", icon: Wallet, Component: ManagerCashTab, ownerOnly: true, permissionKey: "canViewCash", seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "profit-report", label: "Отчёт о прибыли", icon: FileBarChart, Component: ManagerProfitReportTab, ownerOnly: true, permissionKey: "canViewProfitReport", seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "database", label: "База данных", icon: Database, Component: ManagerDatabaseTab, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: true },
+  // Deliberately NOT individually grantable, unlike the tabs above —
+  // creating/deleting/promoting other staff accounts (up to and including
+  // granting owner role) is a structural privilege the owner keeps sole
+  // control of, not something to delegate one person at a time.
+  { id: "staff", label: "Сотрудники", icon: UsersRound, Component: ManagerStaffTab, ownerOnly: true, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
   // Was owner-only — now visible to everyone since it also hosts Тарифы/
   // Карго (which every manager needs to price a quote); the genuinely
   // owner-only content (Руководящий состав, Тексты) is gated inside
@@ -74,7 +94,7 @@ const ALL_SECTIONS = [
   // 2026-07-31. Тарифы sub-tab specifically is further hidden from
   // outsource_manager inside ManagerSettingsTab (see that file) — the
   // "Настройки" tab itself stays visible since it also hosts Карго.
-  { id: "settings", label: "Настройки", icon: Settings, Component: ManagerSettingsTab, ownerOnly: false, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "settings", label: "Настройки", icon: Settings, Component: ManagerSettingsTab, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
 ] as const;
 
 const LAST_SECTION_STORAGE_KEY = "manager-last-section";
@@ -83,7 +103,7 @@ function isValidSectionId(value: string | null): value is (typeof ALL_SECTIONS)[
   return ALL_SECTIONS.some((section) => section.id === value);
 }
 
-function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspaceProps) {
+function ManagerWorkspace({ name, role, impersonatedByName, permissions }: ManagerWorkspaceProps) {
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
   const [exitingImpersonation, setExitingImpersonation] = useState(false);
@@ -137,7 +157,7 @@ function ManagerWorkspace({ name, role, impersonatedByName }: ManagerWorkspacePr
 
   const SECTIONS = ALL_SECTIONS.filter(
     (section) =>
-      (!section.ownerOnly || role === "owner") &&
+      (!section.ownerOnly || role === "owner" || (section.permissionKey && permissions[section.permissionKey])) &&
       (!section.seniorOrOwnerOnly || role === "owner" || role === "senior") &&
       (!section.hiddenFromOutsource || role !== "outsource_manager"),
   );

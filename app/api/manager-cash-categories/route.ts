@@ -1,17 +1,16 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
+import { canViewCash } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 
-// Owner-only, no exceptions — this whole ledger is the owner's private cash
-// book, unlike tariffs/price-list which senior/manager can at least read.
-function requireOwner(session: { role: string } | null) {
-  return session !== null && session.role === "owner";
-}
-
+// Owner always; anyone else needs Manager.canViewCash explicitly granted —
+// this whole ledger is the owner's private cash book by default, unlike
+// tariffs/price-list which senior/manager can at least read, but the owner
+// can now individually opt a specific trusted person in from Сотрудники.
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
-  if (!requireOwner(session)) {
-    return Response.json({ error: "Доступно только руководителю." }, { status: 403 });
+  if (!session || !(await canViewCash(session))) {
+    return Response.json({ error: "Нет доступа к кассе." }, { status: 403 });
   }
 
   const type = req.nextUrl.searchParams.get("type");
@@ -25,8 +24,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
-  if (!requireOwner(session)) {
-    return Response.json({ error: "Доступно только руководителю." }, { status: 403 });
+  if (!session || !(await canViewCash(session))) {
+    return Response.json({ error: "Нет доступа к кассе." }, { status: 403 });
   }
 
   let body: unknown;

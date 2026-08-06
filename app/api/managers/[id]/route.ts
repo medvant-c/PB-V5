@@ -24,8 +24,28 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { active, canEditTariffs, role, supervisorId } =
-    (body as { active?: unknown; canEditTariffs?: unknown; role?: unknown; supervisorId?: unknown }) ?? {};
+  const {
+    active,
+    canEditTariffs,
+    canViewPriceList,
+    canViewCash,
+    canViewProfitReport,
+    canViewTrash,
+    canViewCargoCost,
+    role,
+    supervisorId,
+  } =
+    (body as {
+      active?: unknown;
+      canEditTariffs?: unknown;
+      canViewPriceList?: unknown;
+      canViewCash?: unknown;
+      canViewProfitReport?: unknown;
+      canViewTrash?: unknown;
+      canViewCargoCost?: unknown;
+      role?: unknown;
+      supervisorId?: unknown;
+    }) ?? {};
 
   // Never let the owner lock themselves out — blocking/demoting the last
   // owner account would leave nobody able to manage staff at all.
@@ -39,6 +59,11 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const data: Record<string, unknown> = {};
   if (typeof active === "boolean") data.active = active;
   if (typeof canEditTariffs === "boolean") data.canEditTariffs = canEditTariffs;
+  if (typeof canViewPriceList === "boolean") data.canViewPriceList = canViewPriceList;
+  if (typeof canViewCash === "boolean") data.canViewCash = canViewCash;
+  if (typeof canViewProfitReport === "boolean") data.canViewProfitReport = canViewProfitReport;
+  if (typeof canViewTrash === "boolean") data.canViewTrash = canViewTrash;
+  if (typeof canViewCargoCost === "boolean") data.canViewCargoCost = canViewCargoCost;
   if (typeof role === "string") {
     if (!VALID_ROLES.includes(role)) return Response.json({ error: "Некорректная роль." }, { status: 400 });
     data.role = role;

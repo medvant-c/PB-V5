@@ -1,10 +1,7 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
+import { canViewCash } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
-
-function requireOwner(session: { role: string } | null) {
-  return session !== null && session.role === "owner";
-}
 
 // "YYYY-MM" -> [monthStart, monthEndExclusive]. Defaults to the current
 // month when omitted/invalid.
@@ -32,8 +29,8 @@ function sumByType(orders: OrderForSum[], type: "income" | "expense"): number {
 // (also whole-month, for the Excel "Свод" sheet and the summary cards).
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
-  if (!requireOwner(session)) {
-    return Response.json({ error: "Доступно только руководителю." }, { status: 403 });
+  if (!session || !(await canViewCash(session))) {
+    return Response.json({ error: "Нет доступа к кассе." }, { status: 403 });
   }
 
   const [monthStart, monthEnd] = parseMonthRange(req.nextUrl.searchParams.get("month"));
@@ -85,8 +82,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
-  if (!requireOwner(session)) {
-    return Response.json({ error: "Доступно только руководителю." }, { status: 403 });
+  if (!session || !(await canViewCash(session))) {
+    return Response.json({ error: "Нет доступа к кассе." }, { status: 403 });
   }
 
   let body: unknown;
@@ -158,7 +155,7 @@ export async function POST(req: NextRequest) {
       // CashOrder.cnyToCurrencyRate for why this direction was chosen.
       amountCny: amountNum / rateNum,
       comment: typeof comment === "string" ? comment.trim() : "",
-      createdByManagerId: session!.managerId,
+      createdByManagerId: session.managerId,
     },
     include: { category: true, client: { select: { id: true, name: true } }, createdByManager: { select: { name: true } } },
   });

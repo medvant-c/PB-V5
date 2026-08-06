@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
+import { canManagePriceList } from "@/lib/manager-scope";
 import { OrderDirection } from "@/generated/prisma/enums";
 import { prisma } from "@/lib/prisma";
 import { nextServiceCode } from "@/lib/display-ids";
@@ -9,8 +10,9 @@ const VALID_DIRECTIONS = new Set<string>(Object.values(OrderDirection));
 // Read access for the manager cabinet — the existing /api/desk-service-
 // catalog is gated by the old shared-password /desk session, which a
 // manager-cabinet user never has. Any logged-in manager can read the full
-// catalog (needed to attach a service to a quote); creating/editing is
-// owner-only (editing is [id]/route.ts).
+// catalog (needed to attach a service to a quote); creating/editing needs
+// Manager.canViewPriceList (owner always has it) — see [id]/route.ts and
+// lib/manager-scope.ts.
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
@@ -25,8 +27,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
-  if (!session || session.role !== "owner") {
-    return Response.json({ error: "Доступно только руководителю." }, { status: 403 });
+  if (!session || !(await canManagePriceList(session))) {
+    return Response.json({ error: "Нет доступа к прайс-листу." }, { status: 403 });
   }
 
   let body: unknown;

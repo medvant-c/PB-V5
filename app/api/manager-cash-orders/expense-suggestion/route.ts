@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
+import { canViewCash } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { buildProfitReport } from "@/lib/desk-services/profit-report";
 
@@ -16,8 +17,8 @@ import { buildProfitReport } from "@/lib/desk-services/profit-report";
 // PB-V5 chat 2026-08-05.
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
-  if (session === null || session.role !== "owner") {
-    return Response.json({ error: "Доступно только руководителю." }, { status: 403 });
+  if (!session || !(await canViewCash(session))) {
+    return Response.json({ error: "Нет доступа к кассе." }, { status: 403 });
   }
 
   const categoryId = req.nextUrl.searchParams.get("categoryId");

@@ -259,6 +259,42 @@ model Manager {
   // manager can read tariffs (needed to build quotes) but not change them
   // until the owner opts them in.
   canEditTariffs     Boolean     @default(false)
+  // Individually owner-grantable permissions, same shape/spirit as
+  // canEditTariffs above (owner always has every one of these regardless of
+  // the stored value; everyone else needs it explicitly turned on from
+  // Сотрудники) — each gates one previously hardcoded "owner-only" tab/
+  // action that a specific trusted manager or senior manager might
+  // plausibly need without promoting them to a whole new role. Checked live
+  // via lib/manager-scope.ts, never trusted from the session token, same as
+  // canEditTariffs. Default false for everyone: migrating this in changes
+  // nothing until the owner opts a specific person in. See PB-V5 chat
+  // 2026-08-06.
+  //
+  // "Прайс-лист" tab — create/edit/delete ServiceCatalogItem rows (reading
+  // the catalog to attach a service to a quote was always open to everyone).
+  canViewPriceList Boolean @default(false)
+  // "Отчёты по дням" tab — the whole cash ledger (CashOrder/CashCategory/
+  // opening balance), company-wide, not scoped to the manager's own clients.
+  canViewCash Boolean @default(false)
+  // "Отчёт о прибыли" tab, both modes — "по выбранным сделкам"
+  // (/api/manager-profit-report) and "реальные деньги за период"
+  // (/api/manager-period-report). Reveals other managers' premiums and
+  // every investor's cut, not just this manager's own numbers — a bigger
+  // grant than it might look like from the tab name alone.
+  canViewProfitReport Boolean @default(false)
+  // "Корзина" tab — browse and restore soft-deleted quotes (deliberately
+  // stricter than everything else in this list per an earlier explicit
+  // instruction that only the owner gets the final word on undoing a
+  // deletion; this override exists because the owner is still the one
+  // deciding to grant it, not because the restriction itself is being
+  // relaxed by default).
+  canViewTrash Boolean @default(false)
+  // Real cargo purchase cost/margin (Quote.cargoCostUsd/cargoCostRub) —
+  // owner-confidential everywhere else (see stripCargoCostForNonOwner in
+  // lib/desk-services/quote-request.ts); useful for a senior manager who
+  // needs to manage their own team's real profitability without full owner
+  // access.
+  canViewCargoCost Boolean @default(false)
   // Self-relation for the "старший менеджер" hierarchy: a manager attached
   // to a senior manager via supervisorId shows up in that senior's scope
   // (lib/manager-scope.ts) without changing who created their own clients.

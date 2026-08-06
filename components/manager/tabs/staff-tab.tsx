@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, LogIn, Mail, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Loader2, LogIn, Mail, Plus, Trash2 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,10 +28,30 @@ interface ManagerRecord {
   role: "manager" | "senior" | "owner" | "outsource_manager";
   active: boolean;
   canEditTariffs: boolean;
+  canViewPriceList: boolean;
+  canViewCash: boolean;
+  canViewProfitReport: boolean;
+  canViewTrash: boolean;
+  canViewCargoCost: boolean;
   supervisorId: string | null;
   supervisor: { name: string } | null;
   createdAt: string;
 }
+
+// Every individually owner-grantable permission (see Manager in
+// prisma/schema.prisma) — one flat list drives both the popover checklist
+// and the compact "N из 6" summary, so adding a 7th permission later is one
+// line here, not a hunt through JSX. Order matches how they'd naturally be
+// explained to an owner: tariffs first (oldest, most common grant), then
+// each tab, then the one that's not a tab at all (cargo cost).
+const PERMISSION_FIELDS: { key: keyof ManagerRecord; label: string; hint: string }[] = [
+  { key: "canEditTariffs", label: "Тарифы", hint: "Менять курсы, тарифы карго и комиссию за выкуп" },
+  { key: "canViewPriceList", label: "Прайс-лист", hint: "Создавать/менять услуги в прайс-листе" },
+  { key: "canViewCash", label: "Отчёты по дням (касса)", hint: "Весь кассовый журнал компании, не только свои сделки" },
+  { key: "canViewProfitReport", label: "Отчёт о прибыли", hint: "Видит премии других менеджеров и доли инвесторов" },
+  { key: "canViewTrash", label: "Корзина", hint: "Смотреть и восстанавливать удалённые просчёты" },
+  { key: "canViewCargoCost", label: "Себестоимость карго", hint: "Реальная закупочная цена и маржа по карго" },
+];
 
 const ROLE_LABEL: Record<ManagerRecord["role"], string> = {
   manager: "Менеджер",
@@ -49,6 +70,7 @@ function ManagerStaffTab() {
   const [managers, setManagers] = useState<ManagerRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [permissionsMenuId, setPermissionsMenuId] = useState<string | null>(null);
   const [resetSentId, setResetSentId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -239,7 +261,7 @@ function ManagerStaffTab() {
               <TableHead>Сотрудник</TableHead>
               <TableHead>Роль</TableHead>
               <TableHead>Старший менеджер</TableHead>
-              <TableHead>Тарифы</TableHead>
+              <TableHead>Права</TableHead>
               <TableHead>Статус</TableHead>
               <TableHead>Действия</TableHead>
             </TableRow>
@@ -295,19 +317,50 @@ function ManagerStaffTab() {
                   )}
                 </TableCell>
                 <TableCell>
-                  <button
-                    type="button"
-                    onClick={() => patchManager(manager.id, { canEditTariffs: !manager.canEditTariffs })}
-                    disabled={busyId === manager.id || manager.role === "owner"}
-                    className={cn(
-                      "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50",
-                      manager.role === "owner" || manager.canEditTariffs
-                        ? "border-success/30 text-success"
-                        : "border-border text-text-secondary hover:border-primary/30 hover:text-primary",
-                    )}
-                  >
-                    {manager.role === "owner" || manager.canEditTariffs ? "Может менять" : "Не может менять"}
-                  </button>
+                  {manager.role === "owner" ? (
+                    <span className="text-xs text-text-secondary">Все права</span>
+                  ) : (
+                    <Popover
+                      open={permissionsMenuId === manager.id}
+                      onOpenChange={(open) => setPermissionsMenuId(open ? manager.id : null)}
+                    >
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          disabled={busyId === manager.id}
+                          className="flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
+                        >
+                          {PERMISSION_FIELDS.filter((f) => manager[f.key]).length} из {PERMISSION_FIELDS.length}
+                          <ChevronDown className="h-3 w-3" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent align="start" className="w-72 space-y-2 p-3">
+                        <p className="text-xs font-semibold text-text-secondary">
+                          Права {manager.name} — обычно определяются ролью, но можно настроить индивидуально
+                        </p>
+                        <div className="space-y-1.5">
+                          {PERMISSION_FIELDS.map((field) => (
+                            <label
+                              key={field.key}
+                              className="flex cursor-pointer items-start gap-2 rounded-lg px-1.5 py-1 text-sm hover:bg-bg"
+                            >
+                              <input
+                                type="checkbox"
+                                className="mt-0.5"
+                                checked={Boolean(manager[field.key])}
+                                disabled={busyId === manager.id}
+                                onChange={() => patchManager(manager.id, { [field.key]: !manager[field.key] })}
+                              />
+                              <span>
+                                <span className="block font-medium text-text">{field.label}</span>
+                                <span className="block text-xs text-text-secondary">{field.hint}</span>
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  )}
                 </TableCell>
                 <TableCell>
                   <button

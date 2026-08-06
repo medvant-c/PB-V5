@@ -1,15 +1,17 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
+import { canViewProfitReport } from "@/lib/manager-scope";
 import { buildPeriodReport } from "@/lib/desk-services/period-report";
 
-// "Реальные деньги за период" — owner-only, same confidentiality boundary
-// as /api/manager-profit-report (investor shares, manager premiums). See
-// lib/desk-services/period-report.ts for what "period" actually means here
-// (dated by real money/fact events, not by quote creation date).
+// "Реальные деньги за период" — same Manager.canViewProfitReport gate as
+// /api/manager-profit-report (owner always; same confidentiality boundary —
+// investor shares, manager premiums). See lib/desk-services/period-report.ts
+// for what "period" actually means here (dated by real money/fact events,
+// not by quote creation date).
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
-  if (session === null || session.role !== "owner") {
-    return Response.json({ error: "Доступно только руководителю." }, { status: 403 });
+  if (session === null || !(await canViewProfitReport(session))) {
+    return Response.json({ error: "Нет доступа к отчёту о прибыли." }, { status: 403 });
   }
 
   const fromParam = req.nextUrl.searchParams.get("from");

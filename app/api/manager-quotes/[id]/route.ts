@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
-import { canAccessManagerQuote } from "@/lib/manager-scope";
+import { canAccessManagerQuote, canViewCargoCost } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { storage } from "@/lib/storage";
 import { computeQuote, computeCargoCost } from "@/lib/quote-engine";
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     orderBy: { createdAt: "asc" },
   });
 
-  return Response.json({ quote: stripCargoCostForNonOwner(quote, session), photos, attachedServices });
+  return Response.json({ quote: stripCargoCostForNonOwner(quote, await canViewCargoCost(session)), photos, attachedServices });
 }
 
 // Edits never move money the client was already quoted: FX rates and the
@@ -372,7 +372,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     }
   }
 
-  return Response.json({ quote: stripCargoCostForNonOwner(quote, session) });
+  return Response.json({ quote: stripCargoCostForNonOwner(quote, await canViewCargoCost(session)) });
 }
 
 // Soft delete — sets deletedAt/deletedByManagerId instead of actually

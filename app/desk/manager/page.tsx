@@ -22,7 +22,14 @@ export default async function ManagerCabinetPage() {
   // rather than trust the token alone, same reasoning as /account.
   const manager = await prisma.manager.findUnique({
     where: { id: session.managerId },
-    select: { name: true, active: true },
+    select: {
+      name: true,
+      active: true,
+      canViewPriceList: true,
+      canViewCash: true,
+      canViewProfitReport: true,
+      canViewTrash: true,
+    },
   });
   if (!manager || !manager.active) {
     return <ManagerLoginForm />;
@@ -38,5 +45,24 @@ export default async function ManagerCabinetPage() {
     impersonatedByName = owner?.name ?? null;
   }
 
-  return <ManagerWorkspace name={manager.name} role={session.role} impersonatedByName={impersonatedByName} />;
+  // Owner always has every individually-grantable permission regardless of
+  // the stored (default-false) column value — see lib/manager-scope.ts's
+  // hasManagerPermission for the same "owner always" rule enforced
+  // server-side on every API route; this just needs to match it so the
+  // owner's own nav isn't missing tabs their own account's row never had a
+  // reason to have `true` on.
+  const isOwner = session.role === "owner";
+  return (
+    <ManagerWorkspace
+      name={manager.name}
+      role={session.role}
+      impersonatedByName={impersonatedByName}
+      permissions={{
+        canViewPriceList: isOwner || manager.canViewPriceList,
+        canViewCash: isOwner || manager.canViewCash,
+        canViewProfitReport: isOwner || manager.canViewProfitReport,
+        canViewTrash: isOwner || manager.canViewTrash,
+      }}
+    />
+  );
 }

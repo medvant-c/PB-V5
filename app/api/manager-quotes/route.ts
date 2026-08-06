@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
-import { getVisibleManagerIds } from "@/lib/manager-scope";
+import { getVisibleManagerIds, canViewCargoCost } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { storage } from "@/lib/storage";
 import { nextQuoteDisplayId } from "@/lib/display-ids";
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: "Не авторизовано." }, { status: 401 });
   }
 
-  const visibleManagerIds = await getVisibleManagerIds(session);
+  const [visibleManagerIds, canSeeCargoCost] = await Promise.all([getVisibleManagerIds(session), canViewCargoCost(session)]);
   const clientId = req.nextUrl.searchParams.get("clientId");
 
   const quotes = await prisma.quote.findMany({
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
     }
   }
   const quotesWithPhoto = quotes.map((q) => ({
-    ...stripCargoCostForNonOwner(q, session),
+    ...stripCargoCostForNonOwner(q, canSeeCargoCost),
     firstPhotoId: firstPhotoByQuoteId.get(q.id) ?? null,
   }));
 
@@ -321,5 +321,5 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return Response.json({ quote: stripCargoCostForNonOwner(quote, session) }, { status: 201 });
+  return Response.json({ quote: stripCargoCostForNonOwner(quote, await canViewCargoCost(session)) }, { status: 201 });
 }

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
-import { canAccessManagerQuote } from "@/lib/manager-scope";
+import { canAccessManagerQuote, canViewCargoCost } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { isQuoteStatus } from "@/lib/quote-statuses";
 import { BUYOUT_REVERT_DATA, stripCargoCostForNonOwner } from "@/lib/desk-services/quote-request";
@@ -121,5 +121,5 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       ...(cargoBonusRatePercent !== undefined ? { cargoBonusRatePercent } : {}),
     },
   });
-  return Response.json({ quote: stripCargoCostForNonOwner(quote, session) });
+  return Response.json({ quote: stripCargoCostForNonOwner(quote, await canViewCargoCost(session)) });
 }

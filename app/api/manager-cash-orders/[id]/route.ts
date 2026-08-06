@@ -1,13 +1,10 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
+import { canViewCash } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
-}
-
-function requireOwner(session: { role: string } | null) {
-  return session !== null && session.role === "owner";
 }
 
 // Full-record edit — accepts the same shape as POST and recomputes
@@ -15,8 +12,8 @@ function requireOwner(session: { role: string } | null) {
 // together (e.g. correcting both the currency and the amount at once).
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const session = await getManagerSessionFromRequest(req);
-  if (!requireOwner(session)) {
-    return Response.json({ error: "Доступно только руководителю." }, { status: 403 });
+  if (!session || !(await canViewCash(session))) {
+    return Response.json({ error: "Нет доступа к кассе." }, { status: 403 });
   }
 
   const { id } = await params;
@@ -90,8 +87,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
 export async function DELETE(req: NextRequest, { params }: RouteParams) {
   const session = await getManagerSessionFromRequest(req);
-  if (!requireOwner(session)) {
-    return Response.json({ error: "Доступно только руководителю." }, { status: 403 });
+  if (!session || !(await canViewCash(session))) {
+    return Response.json({ error: "Нет доступа к кассе." }, { status: 403 });
   }
 
   const { id } = await params;

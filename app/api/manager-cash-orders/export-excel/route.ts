@@ -1,11 +1,8 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
+import { canViewCash } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { renderCashReportExcel } from "@/lib/desk-services/cash-report-excel";
-
-function requireOwner(session: { role: string } | null) {
-  return session !== null && session.role === "owner";
-}
 
 function parseMonthRange(monthParam: string | null): [Date, Date] {
   const match = monthParam?.match(/^(\d{4})-(\d{2})$/);
@@ -43,8 +40,8 @@ function sumByType(orders: OrderForSum[], type: "income" | "expense"): number {
 // (Prisma records for the UI vs. a rendered .xlsx buffer here).
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
-  if (!requireOwner(session)) {
-    return Response.json({ error: "Доступно только руководителю." }, { status: 403 });
+  if (!session || !(await canViewCash(session))) {
+    return Response.json({ error: "Нет доступа к кассе." }, { status: 403 });
   }
 
   const [monthStart, monthEnd] = parseMonthRange(req.nextUrl.searchParams.get("month"));

@@ -1,18 +1,20 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
+import { canManagePriceList } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-// Owner-only — editing the price list is a bigger, more visible business
-// decision than day-to-day tariff upkeep (canEditTariffs), so it doesn't
-// share that flag; only the owner role can touch it.
+// Gated by Manager.canViewPriceList (owner always has it) — editing the
+// price list is a bigger, more visible business decision than day-to-day
+// tariff upkeep (canEditTariffs), so it's its own separate grant. See
+// lib/manager-scope.ts.
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const session = await getManagerSessionFromRequest(req);
-  if (!session || session.role !== "owner") {
-    return Response.json({ error: "Доступно только руководителю." }, { status: 403 });
+  if (!session || !(await canManagePriceList(session))) {
+    return Response.json({ error: "Нет доступа к прайс-листу." }, { status: 403 });
   }
 
   const { id } = await params;
@@ -37,8 +39,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
 export async function DELETE(req: NextRequest, { params }: RouteParams) {
   const session = await getManagerSessionFromRequest(req);
-  if (!session || session.role !== "owner") {
-    return Response.json({ error: "Доступно только руководителю." }, { status: 403 });
+  if (!session || !(await canManagePriceList(session))) {
+    return Response.json({ error: "Нет доступа к прайс-листу." }, { status: 403 });
   }
 
   const { id } = await params;

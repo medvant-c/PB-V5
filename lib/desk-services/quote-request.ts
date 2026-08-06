@@ -1,7 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { parseLocaleNumber } from "@/lib/number";
-import type { ManagerSession } from "@/lib/manager-auth";
 import type {
   DensityTierInput,
   VolumeTierInput,
@@ -13,15 +12,18 @@ import { DESTINATION_COUNTRIES, type DestinationCountry } from "@/lib/destinatio
 
 // cargoCostUsd/cargoCostRub are owner-confidential (see Quote in
 // prisma/schema.prisma) — every route that returns a Quote row to the
-// client (list, detail, create, edit) must strip them for anyone but the
-// owner. Centralized here since `prisma.quote.findMany`/`findUnique` never
-// use a `select`, so every field rides along by default unless explicitly
-// removed.
+// client (list, detail, create, edit) must strip them for anyone without
+// Manager.canViewCargoCost (owner always has it — see canViewCargoCost in
+// lib/manager-scope.ts). Takes the already-resolved boolean rather than the
+// session itself so a route that calls this several times per request only
+// pays for one permission lookup, not one per call. Centralized here since
+// `prisma.quote.findMany`/`findUnique` never use a `select`, so every field
+// rides along by default unless explicitly removed.
 function stripCargoCostForNonOwner<T extends { cargoCostUsd: unknown; cargoCostRub: unknown }>(
   quote: T,
-  session: ManagerSession,
+  canSeeCargoCost: boolean,
 ): T | Omit<T, "cargoCostUsd" | "cargoCostRub"> {
-  if (session.role === "owner") return quote;
+  if (canSeeCargoCost) return quote;
   const { cargoCostUsd, cargoCostRub, ...rest } = quote;
   void cargoCostUsd;
   void cargoCostRub;
