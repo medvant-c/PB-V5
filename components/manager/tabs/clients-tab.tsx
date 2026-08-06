@@ -520,6 +520,12 @@ function ClientQuotes({
   // Per-row "Счёт на выкуп" currency-picker popover — see
   // app/api/manager-quotes/[id]/buyout-invoice/route.ts.
   const [invoiceMenuQuoteId, setInvoiceMenuQuoteId] = useState<string | null>(null);
+  // Rarer/riskier per-quote actions (передать менеджеру, ставка премии за
+  // карго, пересчитать по тарифам, удалить) collapsed into one "⋯ Действия"
+  // menu instead of sitting as bare icons in the row — see PB-V5 UX audit
+  // 2026-08-05. The always-frequent ones (PDF/счёт/статус/комментарии/
+  // факт/карго/редактировать) stay as direct icon buttons.
+  const [rowActionsMenuId, setRowActionsMenuId] = useState<string | null>(null);
   const [expandedBuyoutId, setExpandedBuyoutId] = useState<string | null>(null);
   const [buyoutDrafts, setBuyoutDrafts] = useState<
     Record<string, { cny: string; rate: string; paymentRub: string; paymentRate: string }>
@@ -1871,38 +1877,6 @@ function ClientQuotes({
                 )}
               </button>
 
-              {teamManagers && teamManagers.length > 1 && (
-                <Select
-                  value=""
-                  onValueChange={(managerId) => handleReassignQuote(quote.id, managerId)}
-                  disabled={reassigningId === quote.id}
-                >
-                  <SelectTrigger
-                    className="h-8 w-8 shrink-0 justify-center gap-0 rounded-lg border-0 p-0 text-text-secondary hover:bg-primary/10 hover:text-primary [&>svg:last-child]:hidden"
-                    aria-label="Передать другому менеджеру"
-                    title="Передать другому менеджеру"
-                  >
-                    {reassigningId === quote.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <ArrowLeftRight className="h-4 w-4" />
-                    )}
-                  </SelectTrigger>
-                  {/* position="popper" — the default "item-aligned" mode tries to
-                      align the (nonexistent, value="") selected item over this
-                      8px-square icon trigger and miscomputes wildly off-screen. */}
-                  <SelectContent position="popper" align="end">
-                    {teamManagers
-                      .filter((m) => m.id !== quote.manager.id)
-                      .map((m) => (
-                        <SelectItem key={m.id} value={m.id}>
-                          {m.name}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              )}
-
               {POST_BUYOUT_STATUSES.includes(quote.status) && (
                 <button
                   type="button"
@@ -1939,28 +1913,6 @@ function ClientQuotes({
                 </button>
               )}
 
-              {allManagers !== null &&
-                quote.cargoBonusRatePercent !== null &&
-                clientSelfSourcedConfirmed &&
-                quote.manager.id === clientCreatedByManagerId && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCargoBonusDrafts((current) => ({
-                        ...current,
-                        [quote.id]: current[quote.id] ?? quote.cargoBonusRatePercent ?? "",
-                      }));
-                      setCargoBonusError(null);
-                      setExpandedCargoBonusId(expandedCargoBonusId === quote.id ? null : quote.id);
-                    }}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary"
-                    aria-label="Ставка премии за карго"
-                    title="Ставка премии менеджера за карго (свой клиент)"
-                  >
-                    <Percent className="h-4 w-4" />
-                  </button>
-                )}
-
               <button
                 type="button"
                 onClick={() => onEdit(quote.id, quote.client)}
@@ -1971,48 +1923,125 @@ function ClientQuotes({
                 <Pencil className="h-4 w-4" />
               </button>
 
-              <button
-                type="button"
-                onClick={() => handleRecalculate(quote.id)}
-                disabled={recalculatingId === quote.id}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-50"
-                aria-label="Пересчитать по новым тарифам"
-                title="Пересчитать по новым тарифам"
-              >
-                {recalculatingId === quote.id ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
-              </button>
-
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
+              {/* Rarer/riskier actions collapsed into one menu instead of
+                  bare icons — передать менеджеру, ставка премии за карго,
+                  пересчитать по тарифам, удалить. See PB-V5 UX audit
+                  2026-08-05. */}
+              <Popover open={rowActionsMenuId === quote.id} onOpenChange={(open) => setRowActionsMenuId(open ? quote.id : null)}>
+                <PopoverTrigger asChild>
                   <button
                     type="button"
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-error/10 hover:text-error"
-                    aria-label="Удалить просчёт"
-                    title="Удалить просчёт"
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary"
+                    aria-label="Действия"
+                    title="Действия"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <MoreHorizontal className="h-4 w-4" />
                   </button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Удалить просчёт?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Просчёт №{quote.displayId} «{quote.productName}» и приложенные к нему фото будут удалены без
-                      возможности восстановления.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Отмена</AlertDialogCancel>
-                    <AlertDialogAction variant="danger" onClick={() => handleDelete(quote.id)} disabled={deletingId === quote.id}>
-                      Удалить
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-64 space-y-0.5 p-1.5">
+                  {teamManagers && teamManagers.length > 1 && (
+                    <Select
+                      value=""
+                      onValueChange={(managerId) => {
+                        handleReassignQuote(quote.id, managerId);
+                        setRowActionsMenuId(null);
+                      }}
+                      disabled={reassigningId === quote.id}
+                    >
+                      <SelectTrigger className="h-auto w-full justify-start gap-2 rounded-lg border-0 px-2.5 py-2 text-xs font-medium text-text-secondary hover:bg-bg hover:text-primary [&>svg:last-child]:hidden">
+                        {reassigningId === quote.id ? (
+                          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                        ) : (
+                          <ArrowLeftRight className="h-3.5 w-3.5 shrink-0" />
+                        )}
+                        Передать другому менеджеру
+                      </SelectTrigger>
+                      <SelectContent position="popper" align="start">
+                        {teamManagers
+                          .filter((m) => m.id !== quote.manager.id)
+                          .map((m) => (
+                            <SelectItem key={m.id} value={m.id}>
+                              {m.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+
+                  {allManagers !== null &&
+                    quote.cargoBonusRatePercent !== null &&
+                    clientSelfSourcedConfirmed &&
+                    quote.manager.id === clientCreatedByManagerId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCargoBonusDrafts((current) => ({
+                            ...current,
+                            [quote.id]: current[quote.id] ?? quote.cargoBonusRatePercent ?? "",
+                          }));
+                          setCargoBonusError(null);
+                          setExpandedCargoBonusId(expandedCargoBonusId === quote.id ? null : quote.id);
+                          setRowActionsMenuId(null);
+                        }}
+                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary"
+                      >
+                        <Percent className="h-3.5 w-3.5 shrink-0" />
+                        Ставка премии за карго
+                      </button>
+                    )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleRecalculate(quote.id);
+                      setRowActionsMenuId(null);
+                    }}
+                    disabled={recalculatingId === quote.id}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {recalculatingId === quote.id ? (
+                      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+                    )}
+                    Пересчитать по новым тарифам
+                  </button>
+
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-error transition-colors hover:bg-error/10"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                        Удалить просчёт
+                      </button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Удалить просчёт?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Просчёт №{quote.displayId} «{quote.productName}» и приложенные к нему фото будут удалены без
+                          возможности восстановления.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Отмена</AlertDialogCancel>
+                        <AlertDialogAction
+                          variant="danger"
+                          onClick={() => {
+                            handleDelete(quote.id);
+                            setRowActionsMenuId(null);
+                          }}
+                          disabled={deletingId === quote.id}
+                        >
+                          Удалить
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </PopoverContent>
+              </Popover>
             </div>
 
             {isStale(quote) && (
