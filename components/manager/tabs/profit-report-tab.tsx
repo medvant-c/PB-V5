@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, ChevronDown, Download, FileBarChart, Loader2, Lock } from "lucide-react";
+import { PeriodProfitReport } from "@/components/manager/period-profit-report";
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -208,16 +209,47 @@ function ManagerProfitReportTab() {
     }
   }
 
+  const [mode, setMode] = useState<"deals" | "period">("deals");
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-sm font-bold text-text">Отчёт о прибыли</h2>
         <p className="mt-1 text-sm text-text-secondary">
-          Отметьте галочками нужные просчёты и сформируйте подробный отчёт — сколько заработает компания на этих
-          сделках и сколько из этого достанется вам после доли Влада и премий менеджеров. Видно только руководителю.
+          {mode === "deals"
+            ? "Отметьте галочками нужные просчёты и сформируйте подробный отчёт — сколько заработает компания на этих сделках и сколько из этого достанется вам после доли Влада и премий менеджеров."
+            : "Сколько компания реально заработала за период и сколько кому причитается по итогам — не «заработаем, когда сделка реализуется», а по датам, когда деньги/факты реально произошли."}{" "}
+          Видно только руководителю.
         </p>
       </div>
 
+      <div className="flex gap-1 rounded-xl border border-border bg-bg p-1">
+        <button
+          type="button"
+          onClick={() => setMode("deals")}
+          className={cn(
+            "flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-colors",
+            mode === "deals" ? "bg-surface text-primary shadow-sm" : "text-text-secondary hover:text-text",
+          )}
+        >
+          По выбранным сделкам
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("period")}
+          className={cn(
+            "flex-1 rounded-lg px-3 py-2 text-sm font-semibold transition-colors",
+            mode === "period" ? "bg-surface text-primary shadow-sm" : "text-text-secondary hover:text-text",
+          )}
+        >
+          Реальные деньги за период
+        </button>
+      </div>
+
+      {mode === "period" && <PeriodProfitReport />}
+
+      {mode === "deals" && (
+      <>
       <div className="flex flex-wrap items-center gap-2">
         {managers.length > 1 && (
           <Select value={managerFilter} onValueChange={setManagerFilter}>
@@ -533,6 +565,8 @@ function ManagerProfitReportTab() {
             </p>
           )}
         </div>
+      )}
+      </>
       )}
     </div>
   );
