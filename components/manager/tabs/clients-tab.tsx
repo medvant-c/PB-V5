@@ -2516,9 +2516,12 @@ function ManagerClientsTab() {
       .catch(() => setOutsourceClientNumbers(null));
   }, []);
 
-  // /api/manager-confirmations is owner/senior-only — its success doubles
+  // /api/manager-team-managers is owner/senior-only — its success doubles
   // as "can I confirm facts" the same way /api/managers above doubles as
-  // "am I the owner", without a dedicated whoami endpoint.
+  // "am I the owner", without a dedicated whoami endpoint. A lightweight
+  // sibling of /api/manager-confirmations (same permission gate, same
+  // teamManagers query) that skips the 9 pending-confirmation queues this
+  // tab never displays — see app/api/manager-team-managers/route.ts.
   const [canConfirmBuyout, setCanConfirmBuyout] = useState(false);
   // Manager-scoped team list (owner: everyone; senior: self + own
   // subordinates) — drives the client-level "передать менеджеру" dropdown
@@ -2527,7 +2530,7 @@ function ManagerClientsTab() {
   // one also gates quote-level reassignment, which stays owner-only.
   const [teamManagers, setTeamManagers] = useState<{ id: string; name: string }[] | null>(null);
   useEffect(() => {
-    fetch("/api/manager-confirmations")
+    fetch("/api/manager-team-managers")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         setCanConfirmBuyout(Boolean(data));

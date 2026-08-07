@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
-import { getVisibleManagerIds } from "@/lib/manager-scope";
+import { getVisibleManagerIds, getTeamManagers } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import type { QuoteStatus } from "@/lib/quote-statuses";
 
@@ -29,15 +29,12 @@ export async function GET(req: NextRequest) {
   const clientManagerFilter = visibleManagerIds === "all" ? {} : { createdByManagerId: { in: visibleManagerIds } };
 
   // Also doubles as the manager-scoped "who can I hand a client off to"
-  // list for clients-tab.tsx's transfer dropdown — owner sees everyone,
-  // senior sees themself + their own subordinates only. Deliberately NOT
-  // the owner-only /api/managers (that one also gates quote-level
-  // reassignment, which stays owner-only).
-  const teamManagers = await prisma.manager.findMany({
-    where: { active: true, ...(session.role === "owner" ? {} : { OR: [{ id: session.managerId }, { supervisorId: session.managerId }] }) },
-    orderBy: { displayId: "asc" },
-    select: { id: true, name: true },
-  });
+  // list — owner sees everyone, senior sees themself + their own
+  // subordinates only. Deliberately NOT the owner-only /api/managers (that
+  // one also gates quote-level reassignment, which stays owner-only).
+  // clients-tab.tsx itself now gets this from the lighter /api/manager-
+  // team-managers instead of this whole route — see that route's comment.
+  const teamManagers = await getTeamManagers(session);
 
   const [
     pendingBuyouts,

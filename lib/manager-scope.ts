@@ -67,6 +67,23 @@ function clientVisibilityWhere(visibleManagerIds: "all" | string[]) {
   };
 }
 
+// Manager-scoped team list for a "hand off to / assigned to" picker —
+// owner sees every active manager, senior sees themself + their own
+// subordinates, everyone else sees just themself. Reuses the same
+// getVisibleManagerIds scope this file already enforces for clients/quotes
+// instead of an independently-derived manager list. Previously duplicated
+// (each with its own inline query) in manager-confirmations,
+// manager-confirmations-archive, and manager-daily-plan-summary — see
+// PB-V5 chat 2026-08-07.
+async function getTeamManagers(session: ManagerSession): Promise<{ id: string; name: string }[]> {
+  const visibleManagerIds = await getVisibleManagerIds(session);
+  return prisma.manager.findMany({
+    where: { active: true, ...(visibleManagerIds === "all" ? {} : { id: { in: visibleManagerIds } }) },
+    orderBy: { displayId: "asc" },
+    select: { id: true, name: true },
+  });
+}
+
 // Owner can always edit tariffs (rates, density tiers, price list); anyone
 // else needs Manager.canEditTariffs explicitly turned on — checked live,
 // never trusted from the session token (same pattern as Manager.active).
@@ -121,6 +138,7 @@ async function canViewCargoCost(session: ManagerSession): Promise<boolean> {
 
 export {
   getVisibleManagerIds,
+  getTeamManagers,
   canAccessManagerQuote,
   canAccessManagerClient,
   clientVisibilityWhere,

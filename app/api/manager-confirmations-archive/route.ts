@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
-import { getVisibleManagerIds } from "@/lib/manager-scope";
+import { getVisibleManagerIds, getTeamManagers } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 
 // Owner/senior only, same gate as /api/manager-confirmations — the
@@ -331,11 +331,7 @@ export async function GET(req: NextRequest) {
 
   // Same manager-filter dropdown source as /api/manager-confirmations —
   // owner sees everyone, senior sees themself + their own subordinates.
-  const teamManagers = await prisma.manager.findMany({
-    where: { active: true, ...(session.role === "owner" ? {} : { OR: [{ id: session.managerId }, { supervisorId: session.managerId }] }) },
-    orderBy: { displayId: "asc" },
-    select: { id: true, name: true },
-  });
+  const teamManagers = await getTeamManagers(session);
 
   return Response.json({ entries, teamManagers });
 }
