@@ -11,6 +11,7 @@ import {
   fxProfitRub,
   investorCargoShareRub,
   isPremiumEligiblePaymentCategory,
+  isProscetPaymentCategory,
   sumAlreadyPaidPremium,
   sumAlreadyPaidProfitRub,
   type InvestorConfig,
@@ -67,6 +68,16 @@ interface ProfitEvent {
   // Only cargo events carry cargo-share info for flat_per_cargo_kg
   // investors (Юра) — everything else is null.
   cargo: { totalWeightKg: unknown; usdRateUsed: unknown } | null;
+  // Только для отображения (см. companyProfitBreakdown в возврате
+  // buildPeriodReport ниже) — НИКОГДА не используется для распределения
+  // премии/долей инвесторов (это по-прежнему только profitRub целиком,
+  // через distributePoolRub). Даёт дашборду ("Доход компании (факт)" при
+  // выбранном периоде) те же 4 категории (Просчёт/Выкуп/Скидка/Карго), что
+  // и обычный (не по периоду) расчёт, но с реальными датами событий вместо
+  // даты создания просчёта — то, из-за чего была вся путаница с оплатами
+  // Oygul M. Курсовая разница (fx) сюда не входит — как и раньше,
+  // "Доход компании" её никогда не показывает. См. PB-V5 chat 2026-08-07.
+  breakdown: { proscetRub: number; buyoutRub: number; discountRub: number; cargoRub: number };
 }
 
 const CONFIRMED_QUOTE_SELECT = {
@@ -159,12 +170,19 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
     // 100%-margin categories count as profit the moment the money arrives;
     // goods/china_delivery carry unknown margin until confirm-buyout.
     if (!isPremiumEligiblePaymentCategory(a.category)) continue;
+    const allocationAmountRub = Number(a.amountRub);
     events.push({
       managerId: a.quote.managerId,
       client: a.quote.client,
-      profitRub: Number(a.amountRub),
+      profitRub: allocationAmountRub,
       managerPremiumRub: Number(a.premiumRub),
       cargo: null,
+      breakdown: {
+        proscetRub: isProscetPaymentCategory(a.category) ? allocationAmountRub : 0,
+        buyoutRub: isProscetPaymentCategory(a.category) ? 0 : allocationAmountRub,
+        discountRub: 0,
+        cargoRub: 0,
+      },
     });
   }
 
@@ -203,6 +221,19 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
       profitRub,
       managerPremiumRub: residualPremiumRub,
       cargo: null,
+      breakdown: {
+        proscetRub: residualProscetRub,
+        // fx исключён из breakdown (не входит ни в один из 4 показываемых
+        // рядов) — та же конвенция, что и у обычного (не по периоду)
+        // расчёта в manager-dashboard/route.ts. buyoutRub/discountRub
+        // клэмпятся отдельно, а не суммой (как уже делает
+        // factualManagerPremiumRub в quote-profit.ts для премии) — иначе
+        // убыточный выкуп со скидкой поверх мог бы съесть часть скидки при
+        // общем клэмпе.
+        buyoutRub: Math.max(0, buyoutRub - alreadyPaidProfit.buyoutRub),
+        discountRub: Math.max(0, discountRub),
+        cargoRub: 0,
+      },
     });
   }
 
@@ -256,6 +287,7 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
       profitRub: cargo,
       managerPremiumRub: cargoBonusRub,
       cargo: { totalWeightKg: q.totalWeightKg, usdRateUsed: q.usdRateUsed },
+      breakdown: { proscetRub: 0, buyoutRub: 0, discountRub: 0, cargoRub: cargo },
     });
   }
 
@@ -274,6 +306,14 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
   const managerPremiumByManagerId = new Map<string, number>();
   let companyProfitRub = 0;
   let totalManagerPremiumRub = 0;
+  // Реальными датами событий — та же связка полей, что показывает главный
+  // дашборд ("Просчёт/Выкуп/Скидка/Карго (факт)"), просто с датой по
+  // фактическому событию, а не по дате создания просчёта. Только для
+  // отображения — не участвует в распределении премии/долей.
+  let proscetRub = 0;
+  let buyoutRub = 0;
+  let discountRub = 0;
+  let cargoProfitTotalRub = 0;
   const investorShareById = new Map<string, number>();
   const addInvestorShare = (id: string, amountRub: number) => investorShareById.set(id, (investorShareById.get(id) ?? 0) + amountRub);
 
@@ -289,6 +329,10 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
     companyProfitRub += ev.profitRub;
     totalManagerPremiumRub += ev.managerPremiumRub;
     managerPremiumByManagerId.set(ev.managerId, (managerPremiumByManagerId.get(ev.managerId) ?? 0) + ev.managerPremiumRub);
+    proscetRub += ev.breakdown.proscetRub;
+    buyoutRub += ev.breakdown.buyoutRub;
+    discountRub += ev.breakdown.discountRub;
+    cargoProfitTotalRub += ev.breakdown.cargoRub;
 
     const percentInvestors = percentInvestorsBase.map((inv) => ({
       id: inv.id,
@@ -369,6 +413,12 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
     period: { from: from.toISOString(), to: to.toISOString() },
     companyProfitRub,
     totalManagerPremiumRub,
+    // Реальными датами событий, для дашборда ("Доход компании (факт)" при
+    // выбранном периоде) — см. комментарий на ProfitEvent.breakdown выше.
+    proscetRub,
+    buyoutRub,
+    discountRub,
+    cargoProfitRub: cargoProfitTotalRub,
     investorPoolRub,
     managerPayouts,
     investorPayouts,

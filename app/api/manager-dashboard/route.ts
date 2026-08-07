@@ -21,6 +21,7 @@ import {
   type CnyProfitTiers,
   type InvestorConfig,
 } from "@/lib/desk-services/quote-profit";
+import { buildPeriodReport } from "@/lib/desk-services/period-report";
 
 // Statuses that imply the buyout has actually happened — client's money
 // has already covered the goods, China delivery, buyout commission, and
@@ -453,19 +454,21 @@ export async function GET(req: NextRequest) {
     "all",
   );
 
-  // Опциональный период (День/Неделя/Месяц/свой) — фильтрует ВЕСЬ дашборд
-  // (карточки «В работе»/«Конверсия»/«Премия»/«Доход компании») по дате
-  // СОЗДАНИЯ просчёта, не по дате оплаты/факта (то другое — см.
-  // lib/desk-services/period-report.ts, "Реальные деньги за период" в
-  // Отчёте о прибыли, которая датирует по реальным денежным событиям).
-  // Это здесь — просто "как выглядела бы эта же карточка, если бы мы
-  // считали её только по сделкам этого периода", тот же summarize(), на
-  // подмножестве quotes. См. PB-V5 chat 2026-08-06.
-  // Fulfillment premium is deliberately NOT folded in here (unlike
-  // `overall` above) — fulfillment orders aren't quotes and have no
-  // creation-date link to this period filter, so mixing an all-time
-  // fulfillment figure into an otherwise period-scoped card would be
-  // misleading rather than helpful.
+  // Опциональный период (День/Неделя/Месяц/свой) — фильтрует карточку «В
+  // работе»/потенциал по дате СОЗДАНИЯ просчёта (это правильно для
+  // потенциала — он и есть "что сейчас в работе", а работа всегда
+  // датируется тем, когда её завели). "Доход компании (факт)" — наоборот,
+  // ниже переопределяется реальными датами событий (см.
+  // lib/desk-services/period-report.ts) вместо даты создания просчёта:
+  // иначе оплата, реально пришедшая В ЭТОМ периоде по СТАРОМУ просчёту
+  // (созданному раньше), вообще не попадала в карточку — именно так
+  // выглядела путаница с оплатами Oygul M. См. PB-V5 chat 2026-08-06,
+  // 2026-08-07.
+  // Fulfillment premium is deliberately NOT folded into either side here
+  // (unlike `overall` above) — fulfillment orders don't feed
+  // buildPeriodReport at all, so mixing an all-time fulfillment figure into
+  // an otherwise period-scoped card would be misleading rather than
+  // helpful.
   let periodOverall: ReturnType<typeof summarize> | null = null;
   let periodExpectedIncomeRub: number | null = null;
   let periodActualIncomeRub: number | null = null;
@@ -480,8 +483,14 @@ export async function GET(req: NextRequest) {
       if (session.role === "owner") {
         periodExpectedIncomeRub =
           periodOverall.potentialProscetRub + periodOverall.potentialBuyoutRub + periodOverall.potentialCargoProfitRub + periodOverall.potentialFxProfitRub - periodOverall.estimatedPremiumRub;
-        periodActualIncomeRub =
-          periodOverall.factualProscetRub + periodOverall.factualBuyoutRub + periodOverall.factualDiscountRub + periodOverall.factualCargoProfitRub - periodOverall.factualPremiumRub;
+
+        const realPeriod = await buildPeriodReport({ from: dashboardFrom, to: dashboardTo });
+        periodOverall.factualProscetRub = realPeriod.proscetRub;
+        periodOverall.factualBuyoutRub = realPeriod.buyoutRub;
+        periodOverall.factualDiscountRub = realPeriod.discountRub;
+        periodOverall.factualCargoProfitRub = realPeriod.cargoProfitRub;
+        periodOverall.factualPremiumRub = realPeriod.totalManagerPremiumRub;
+        periodActualIncomeRub = realPeriod.companyProfitRub - realPeriod.totalManagerPremiumRub;
       }
     }
   }
