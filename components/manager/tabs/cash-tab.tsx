@@ -15,6 +15,8 @@ type CashCurrency = "cny" | "usd" | "rub";
 
 type CashCategoryPayoutTarget = "investor" | "assigned_manager";
 
+type QuotePaymentCategoryValue = "goods" | "china_delivery" | "search_service" | "custom_production" | "buyout_commission" | "attached_services";
+
 interface CashCategoryRecord {
   id: string;
   type: CashOrderType;
@@ -22,7 +24,17 @@ interface CashCategoryRecord {
   payoutTarget: CashCategoryPayoutTarget | null;
   linkedInvestorId: string | null;
   linkedInvestor: { id: string; name: string } | null;
+  linkedProfitCategory: QuotePaymentCategoryValue | null;
 }
+
+const PROFIT_CATEGORY_LABEL: Record<QuotePaymentCategoryValue, string> = {
+  goods: "Стоимость товара",
+  china_delivery: "Доставка по Китаю",
+  search_service: "Услуга поиска",
+  custom_production: "Производство под заказ",
+  buyout_commission: "Комиссия за выкуп",
+  attached_services: "Доп. услуги",
+};
 
 interface InvestorOption {
   id: string;
@@ -157,6 +169,18 @@ function ManagerCashTab() {
     loadClients();
     loadInvestors();
   }, [loadCategories, loadClients, loadInvestors]);
+
+  // Только для подсказки у "Просчёт" — засчитается ли сумма в прибыль
+  // сразу (только руководителю/старшему менеджеру, см. cash-order-profit-
+  // sync.ts) или нет. Ни на что другое здесь роль не влияет — сервер
+  // проверяет права заново на каждый запрос независимо от этого стейта.
+  const [currentRole, setCurrentRole] = useState<string | null>(null);
+  useEffect(() => {
+    fetch("/api/manager-me")
+      .then((res) => res.json())
+      .then((d) => setCurrentRole(d.role ?? null))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     loadOrders();
@@ -512,6 +536,28 @@ function ManagerCashTab() {
     }
   }
 
+  // "" -> сброс привязки; иначе значение — одна из шести категорий
+  // QuotePaymentAllocation (см. CashCategory.linkedProfitCategory).
+  async function handleSetLinkedProfitCategory(id: string, value: string) {
+    setBusyCategoryId(id);
+    setCategoryPanelError(null);
+    try {
+      const res = await fetch(`/api/manager-cash-categories/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ linkedProfitCategory: value || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setCategoryPanelError(data.error ?? "Не удалось привязать статью.");
+        return;
+      }
+      await loadCategories();
+    } finally {
+      setBusyCategoryId(null);
+    }
+  }
+
   async function handleDeleteCategory(id: string) {
     if (!window.confirm("Удалить эту статью?")) return;
     setBusyCategoryId(id);
@@ -746,6 +792,21 @@ function ManagerCashTab() {
                             ))}
                           </select>
                         )}
+                        {type === "income" && (
+                          <select
+                            value={c.linkedProfitCategory ?? ""}
+                            onChange={(e) => handleSetLinkedProfitCategory(c.id, e.target.value)}
+                            disabled={busyCategoryId === c.id}
+                            className="h-7 w-full rounded-md border border-border bg-surface px-2 text-xs text-text disabled:opacity-50"
+                          >
+                            <option value="">Не засчитывается в прибыль автоматически</option>
+                            {(Object.keys(PROFIT_CATEGORY_LABEL) as QuotePaymentCategoryValue[]).map((key) => (
+                              <option key={key} value={key}>
+                                Сразу в прибыль: {PROFIT_CATEGORY_LABEL[key]}
+                              </option>
+                            ))}
+                          </select>
+                        )}
                       </div>
                     ))}
                 </div>
@@ -873,6 +934,24 @@ function ManagerCashTab() {
                     ))}
                   </SelectContent>
                 </Select>
+                {(() => {
+                  if (dialogType !== "income" || !draft.quoteId) return null;
+                  const category = dialogCategories.find((c) => c.id === draft.categoryId);
+                  if (!category?.linkedProfitCategory) return null;
+                  const label = PROFIT_CATEGORY_LABEL[category.linkedProfitCategory];
+                  if (draft.currency !== "rub") {
+                    return <p className="text-xs text-warning">Автоматически в прибыль засчитываются только суммы в ₽.</p>;
+                  }
+                  if (currentRole === "owner" || currentRole === "senior") {
+                    return <p className="text-xs text-success">✓ Эта сумма сразу засчитается в прибыль — «{label}».</p>;
+                  }
+                  return (
+                    <p className="text-xs text-warning">
+                      Эта статья засчитывается в прибыль сразу, но только когда ордер создаёт руководитель или старший
+                      менеджер.
+                    </p>
+                  );
+                })()}
               </div>
             )}
 

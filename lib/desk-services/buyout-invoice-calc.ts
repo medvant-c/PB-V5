@@ -243,5 +243,73 @@ function buildBuyoutInvoiceRowAmounts(
   };
 }
 
-export { buildBuyoutInvoiceAmounts, buildBuyoutInvoiceRowAmounts, sumAlreadyPaidRubByCategory };
-export type { BuyoutInvoiceQuoteInput, BuyoutInvoiceAmounts, BuyoutInvoiceRowAmounts, AlreadyPaidRubByCategory };
+// Шесть категорий QuotePaymentAllocation/QuotePaymentCategory (см.
+// prisma/schema.prisma) — вынесено сюда одной копией, чтобы
+// create-payment/route.ts и manager-cash-orders/[..]/route.ts (обычный
+// приходный ордер, привязанный к статье с CashCategory.linkedProfitCategory)
+// не держали каждый свою версию. См. PB-V5 chat 2026-08-07.
+const QUOTE_PAYMENT_CATEGORIES = ["goods", "china_delivery", "search_service", "custom_production", "buyout_commission", "attached_services"] as const;
+type QuotePaymentCategoryValue = (typeof QUOTE_PAYMENT_CATEGORIES)[number];
+function isQuotePaymentCategory(value: unknown): value is QuotePaymentCategoryValue {
+  return typeof value === "string" && (QUOTE_PAYMENT_CATEGORIES as readonly string[]).includes(value);
+}
+
+// Сколько ₽ у этого просчёта вообще числится по одной категории (до вычета
+// уже оплаченного) — те же шесть полей, что buildBuyoutInvoiceAmounts/
+// buildBuyoutInvoiceRowAmounts выше режут по счёту на выкуп.
+function rawQuotePaymentCategoryAmountRub(
+  quote: {
+    totalPriceRub: unknown;
+    chinaDeliveryRub: unknown;
+    searchServiceFeeRub: unknown;
+    isCustomProduction: boolean;
+    customProductionFeeRub: unknown;
+    buyoutCommissionRub: unknown;
+  },
+  attachedServicesTotalRub: number,
+  category: QuotePaymentCategoryValue,
+): number {
+  switch (category) {
+    case "goods":
+      return Number(quote.totalPriceRub);
+    case "china_delivery":
+      return Number(quote.chinaDeliveryRub);
+    case "search_service":
+      return Number(quote.searchServiceFeeRub);
+    case "custom_production":
+      return quote.isCustomProduction ? Number(quote.customProductionFeeRub) : 0;
+    case "buyout_commission":
+      return Number(quote.buyoutCommissionRub);
+    case "attached_services":
+      return attachedServicesTotalRub;
+  }
+}
+
+// Выбирает нужное поле из AlreadyPaidRubByCategory по той же категории —
+// избавляет вызывающий код от ручной цепочки тернарников.
+function alreadyPaidRubForCategory(alreadyPaidRub: AlreadyPaidRubByCategory, category: QuotePaymentCategoryValue): number {
+  switch (category) {
+    case "goods":
+      return alreadyPaidRub.goods;
+    case "china_delivery":
+      return alreadyPaidRub.chinaDelivery;
+    case "search_service":
+      return alreadyPaidRub.searchService;
+    case "custom_production":
+      return alreadyPaidRub.customProduction;
+    case "buyout_commission":
+      return alreadyPaidRub.buyoutCommission;
+    case "attached_services":
+      return alreadyPaidRub.attachedServices;
+  }
+}
+
+export {
+  buildBuyoutInvoiceAmounts,
+  buildBuyoutInvoiceRowAmounts,
+  sumAlreadyPaidRubByCategory,
+  isQuotePaymentCategory,
+  rawQuotePaymentCategoryAmountRub,
+  alreadyPaidRubForCategory,
+};
+export type { BuyoutInvoiceQuoteInput, BuyoutInvoiceAmounts, BuyoutInvoiceRowAmounts, AlreadyPaidRubByCategory, QuotePaymentCategoryValue };

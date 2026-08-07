@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canViewCash } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
+import { syncQuotePaymentAllocationForCashOrder } from "@/lib/desk-services/cash-order-profit-sync";
 
 // "YYYY-MM" -> [monthStart, monthEndExclusive]. Defaults to the current
 // month when omitted/invalid.
@@ -161,23 +162,59 @@ export async function POST(req: NextRequest) {
     resolvedQuoteId = quoteId;
   }
 
-  const order = await prisma.cashOrder.create({
-    data: {
-      type,
-      date: parsedDate,
-      categoryId,
-      clientId: resolvedClientId,
-      quoteId: resolvedQuoteId,
-      currency,
-      amount: amountNum,
-      cnyToCurrencyRate: rateNum,
-      // rateNum = how many units of `currency` equal 1 ¥, so converting
-      // FROM currency TO ¥ divides — see the schema comment on
-      // CashOrder.cnyToCurrencyRate for why this direction was chosen.
-      amountCny: amountNum / rateNum,
-      comment: typeof comment === "string" ? comment.trim() : "",
-      createdByManagerId: session.managerId,
-    },
+  // Приход, привязанный к конкретному Просчёту, по статье с
+  // CashCategory.linkedProfitCategory — засчитывается в прибыль сразу же
+  // (та же сила, что у «Счёта на выкуп»), но только руководителю/старшему
+  // менеджеру (то же доверие, что и create-payment/route.ts — реальные
+  // деньги + мгновенное начисление премии) и только в ₽ (см. комментарий
+  // в cash-order-profit-sync.ts, почему не конвертируем из ¥/$).
+  const shouldCreditProfit =
+    type === "income" &&
+    resolvedQuoteId !== null &&
+    category.linkedProfitCategory !== null &&
+    currency === "rub" &&
+    (session.role === "owner" || session.role === "senior");
+
+  let orderId: string;
+  try {
+    orderId = await prisma.$transaction(async (tx) => {
+      const created = await tx.cashOrder.create({
+        data: {
+          type,
+          date: parsedDate,
+          categoryId,
+          clientId: resolvedClientId,
+          quoteId: resolvedQuoteId,
+          currency,
+          amount: amountNum,
+          cnyToCurrencyRate: rateNum,
+          // rateNum = how many units of `currency` equal 1 ¥, so converting
+          // FROM currency TO ¥ divides — see the schema comment on
+          // CashOrder.cnyToCurrencyRate for why this direction was chosen.
+          amountCny: amountNum / rateNum,
+          comment: typeof comment === "string" ? comment.trim() : "",
+          createdByManagerId: session.managerId,
+        },
+      });
+      if (shouldCreditProfit) {
+        const result = await syncQuotePaymentAllocationForCashOrder(tx, {
+          cashOrderId: created.id,
+          quoteId: resolvedQuoteId!,
+          linkedProfitCategory: category.linkedProfitCategory!,
+          amountRub: amountNum,
+          createdByManagerId: session.managerId,
+        });
+        if (!result.ok) throw new Error(result.error);
+      }
+      return created.id;
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Не удалось сохранить ордер.";
+    return Response.json({ error: message }, { status: 400 });
+  }
+
+  const order = await prisma.cashOrder.findUnique({
+    where: { id: orderId },
     include: {
       category: true,
       client: { select: { id: true, name: true } },

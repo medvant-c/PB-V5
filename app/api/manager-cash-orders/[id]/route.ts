@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canViewCash } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
+import { syncQuotePaymentAllocationForCashOrder } from "@/lib/desk-services/cash-order-profit-sync";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -49,6 +50,21 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   if (!category || category.type !== existing.type) {
     return Response.json({ error: "Статья не соответствует типу ордера." }, { status: 400 });
   }
+  // Если этот ордер УЖЕ реально засчитан в прибыль (см.
+  // cash-order-profit-sync.ts) — premiumRub там заморожен на момент
+  // создания, как и у «Счёта на выкуп»; редактирование суммы/категории
+  // задним числом означало бы либо тихо пересчитывать чужую уже
+  // выплаченную премию, либо расходиться с ней. Проще и безопаснее
+  // запретить редактирование целиком — удалить и завести заново (каскадно
+  // удалит и распределение, см. QuotePaymentAllocation.cashOrder onDelete:
+  // Cascade). См. PB-V5 chat 2026-08-07.
+  const alreadyCreditsProfit = (await prisma.quotePaymentAllocation.count({ where: { cashOrderId: id } })) > 0;
+  if (alreadyCreditsProfit) {
+    return Response.json(
+      { error: "Этот ордер уже засчитан в прибыль — редактирование недоступно, чтобы не исказить уже начисленную премию. Удалите и создайте заново." },
+      { status: 400 },
+    );
+  }
   if (currency !== "cny" && currency !== "usd" && currency !== "rub") {
     return Response.json({ error: "Некорректная валюта." }, { status: 400 });
   }
@@ -78,19 +94,51 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     resolvedQuoteId = quoteId;
   }
 
-  const order = await prisma.cashOrder.update({
+  // Та же логика, что в POST (см. manager-cash-orders/route.ts) — только
+  // здесь `existing` уже гарантированно без начисленной прибыли (проверено
+  // выше), так что просто создаём распределение, если новые данные под
+  // него подходят.
+  const shouldCreditProfit =
+    existing.type === "income" &&
+    resolvedQuoteId !== null &&
+    category.linkedProfitCategory !== null &&
+    currency === "rub" &&
+    (session.role === "owner" || session.role === "senior");
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.cashOrder.update({
+        where: { id },
+        data: {
+          date: parsedDate,
+          categoryId,
+          clientId: resolvedClientId,
+          quoteId: resolvedQuoteId,
+          currency,
+          amount: amountNum,
+          cnyToCurrencyRate: rateNum,
+          amountCny: amountNum / rateNum,
+          comment: typeof comment === "string" ? comment.trim() : "",
+        },
+      });
+      if (shouldCreditProfit) {
+        const result = await syncQuotePaymentAllocationForCashOrder(tx, {
+          cashOrderId: id,
+          quoteId: resolvedQuoteId!,
+          linkedProfitCategory: category.linkedProfitCategory!,
+          amountRub: amountNum,
+          createdByManagerId: session.managerId,
+        });
+        if (!result.ok) throw new Error(result.error);
+      }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Не удалось сохранить ордер.";
+    return Response.json({ error: message }, { status: 400 });
+  }
+
+  const order = await prisma.cashOrder.findUnique({
     where: { id },
-    data: {
-      date: parsedDate,
-      categoryId,
-      clientId: resolvedClientId,
-      quoteId: resolvedQuoteId,
-      currency,
-      amount: amountNum,
-      cnyToCurrencyRate: rateNum,
-      amountCny: amountNum / rateNum,
-      comment: typeof comment === "string" ? comment.trim() : "",
-    },
     include: {
       category: true,
       client: { select: { id: true, name: true } },

@@ -1292,6 +1292,17 @@ model CashCategory {
   payoutTarget          CashCategoryPayoutTarget?
   linkedInvestorId      String?
   linkedInvestor        Investor?                 @relation(fields: [linkedInvestorId], references: [id])
+  // Обратная связь income-статьи с категорией QuotePaymentAllocation (см.
+  // enum QuotePaymentCategory ниже) — например, статьи "Оплата услуг
+  // поиска товара"/"Оплата услуг за поиск товара" помечаются как
+  // search_service. Пока не задано (null) — обычная статья без привязки к
+  // прибыли конкретного просчёта (напр. "Прочий доход"). Когда задано и
+  // на приходном ордере (CashOrder) выбраны и эта статья, и Просчёт
+  // (CashOrder.quoteId), руководитель/старший менеджер сразу получает
+  // реальную прибыль по этой сумме — так же, как «Счёт на выкуп» (см.
+  // app/api/manager-cash-orders/route.ts). Только для income — у расходных
+  // статей нет своей "категории прибыли". См. PB-V5 chat 2026-08-07.
+  linkedProfitCategory  QuotePaymentCategory?
   createdAt DateTime      @default(now())
   orders    CashOrder[]
 

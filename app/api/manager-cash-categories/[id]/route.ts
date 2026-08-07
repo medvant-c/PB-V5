@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canViewCash } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
+import { isQuotePaymentCategory, type QuotePaymentCategoryValue } from "@/lib/desk-services/buyout-invoice-calc";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -23,16 +24,18 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { name, payoutTarget, linkedInvestorId } = (body as {
+  const { name, payoutTarget, linkedInvestorId, linkedProfitCategory } = (body as {
     name?: unknown;
     payoutTarget?: unknown;
     linkedInvestorId?: unknown;
+    linkedProfitCategory?: unknown;
   }) ?? {};
 
   const data: {
     name?: string;
     payoutTarget?: "investor" | "assigned_manager" | null;
     linkedInvestorId?: string | null;
+    linkedProfitCategory?: QuotePaymentCategoryValue | null;
   } = {};
 
   if (name !== undefined) {
@@ -76,6 +79,24 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       data.linkedInvestorId = linkedInvestorId;
     } else {
       return Response.json({ error: "Некорректная привязка статьи." }, { status: 400 });
+    }
+  }
+
+  // Какую категорию QuotePaymentAllocation эта статья представляет (см.
+  // CashCategory.linkedProfitCategory в prisma/schema.prisma) — только для
+  // статей прихода: у расхода нет своей "категории прибыли просчёта".
+  // Задаётся, чтобы обычный приходный ордер с этой статьёй, привязанный к
+  // Просчёту, сразу засчитывался в прибыль — см. manager-cash-orders/route.ts.
+  if (linkedProfitCategory !== undefined) {
+    if (linkedProfitCategory === null) {
+      data.linkedProfitCategory = null;
+    } else if (isQuotePaymentCategory(linkedProfitCategory)) {
+      if (existing.type !== "income") {
+        return Response.json({ error: "Категория прибыли доступна только для статей прихода." }, { status: 400 });
+      }
+      data.linkedProfitCategory = linkedProfitCategory;
+    } else {
+      return Response.json({ error: "Некорректная категория прибыли." }, { status: 400 });
     }
   }
 

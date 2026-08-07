@@ -4,46 +4,17 @@ import { getVisibleManagerIds } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { getSystemSettings } from "@/lib/system-settings";
 import { getOrCreateBuyoutIncomeCategory } from "@/lib/desk-services/cash-categories";
-import { sumAlreadyPaidRubByCategory } from "@/lib/desk-services/buyout-invoice-calc";
+import {
+  sumAlreadyPaidRubByCategory,
+  isQuotePaymentCategory,
+  rawQuotePaymentCategoryAmountRub,
+  alreadyPaidRubForCategory,
+  type QuotePaymentCategoryValue,
+} from "@/lib/desk-services/buyout-invoice-calc";
 import { computePaymentAllocationPremiumRub, isSelfSourcedFor, type ManagerPremiumRates } from "@/lib/desk-services/quote-profit";
 
-const CATEGORIES = ["goods", "china_delivery", "search_service", "custom_production", "buyout_commission", "attached_services"] as const;
-type Category = (typeof CATEGORIES)[number];
-function isCategory(value: unknown): value is Category {
-  return typeof value === "string" && (CATEGORIES as readonly string[]).includes(value);
-}
-
-// Raw ₽ amount this quote's own snapshot has for one category — the same
-// six fields buildBuyoutInvoiceAmounts/buildBuyoutInvoiceRowAmounts split a
-// quote into (lib/desk-services/buyout-invoice-calc.ts), before any
-// already-paid subtraction.
-function rawCategoryAmountRub(
-  quote: {
-    totalPriceRub: unknown;
-    chinaDeliveryRub: unknown;
-    searchServiceFeeRub: unknown;
-    isCustomProduction: boolean;
-    customProductionFeeRub: unknown;
-    buyoutCommissionRub: unknown;
-  },
-  attachedServicesTotalRub: number,
-  category: Category,
-): number {
-  switch (category) {
-    case "goods":
-      return Number(quote.totalPriceRub);
-    case "china_delivery":
-      return Number(quote.chinaDeliveryRub);
-    case "search_service":
-      return Number(quote.searchServiceFeeRub);
-    case "custom_production":
-      return quote.isCustomProduction ? Number(quote.customProductionFeeRub) : 0;
-    case "buyout_commission":
-      return Number(quote.buyoutCommissionRub);
-    case "attached_services":
-      return attachedServicesTotalRub;
-  }
-}
+type Category = QuotePaymentCategoryValue;
+const isCategory = isQuotePaymentCategory;
 
 // Приходный ордер created straight from a quote card — owner/senior only
 // (real money + immediate premium accrual, same trust level as
@@ -160,21 +131,9 @@ export async function POST(req: NextRequest) {
   for (const a of allocations) {
     const quote = quoteById.get(a.quoteId)!;
     const attachedServicesTotalRub = attachedServicesTotalByQuoteId.get(a.quoteId) ?? 0;
-    const rawAmountRub = rawCategoryAmountRub(quote, attachedServicesTotalRub, a.category);
+    const rawAmountRub = rawQuotePaymentCategoryAmountRub(quote, attachedServicesTotalRub, a.category);
     const alreadyPaidRub = sumAlreadyPaidRubByCategory(existingAllocationsByQuoteId.get(a.quoteId) ?? []);
-    const alreadyPaidForCategory =
-      a.category === "goods"
-        ? alreadyPaidRub.goods
-        : a.category === "china_delivery"
-          ? alreadyPaidRub.chinaDelivery
-          : a.category === "search_service"
-            ? alreadyPaidRub.searchService
-            : a.category === "custom_production"
-              ? alreadyPaidRub.customProduction
-              : a.category === "buyout_commission"
-                ? alreadyPaidRub.buyoutCommission
-                : alreadyPaidRub.attachedServices;
-    const remainingRub = Math.max(0, rawAmountRub - alreadyPaidForCategory);
+    const remainingRub = Math.max(0, rawAmountRub - alreadyPaidRubForCategory(alreadyPaidRub, a.category));
     if (a.amountRub > remainingRub + 0.01) {
       return Response.json(
         {
