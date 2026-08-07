@@ -1073,6 +1073,14 @@ model Quote {
 
   @@index([clientId])
   @@index([managerId])
+  // Почти каждый список просчётов фильтрует по deletedAt:null и/или
+  // сортирует по createdAt; status фильтруется отдельно в нескольких
+  // отчётных выборках (period-report.ts и др.). Не критично при
+  // сегодняшнем объёме (десятки строк), но дёшево завести заранее, а не
+  // когда таблица разрастётся. См. PB-V5 chat 2026-08-07.
+  @@index([deletedAt])
+  @@index([createdAt])
+  @@index([status])
 }
 
 // Extra Panda Bridge services (from the price list, ServiceCatalogItem)

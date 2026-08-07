@@ -42,6 +42,8 @@ next-env.d.ts
 
 # desk — local SQLite db, uploaded files, and generated Prisma client
 /desk.db
+/desk.db-shm
+/desk.db-wal
 /prisma/dev.db
 /desk-uploads
 /generated

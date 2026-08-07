@@ -37,6 +37,25 @@ export async function GET(req: NextRequest) {
   const [visibleManagerIds, canSeeCargoCost] = await Promise.all([getVisibleManagerIds(session), canViewCargoCost(session)]);
   const clientId = req.nextUrl.searchParams.get("clientId");
 
+  // Лёгкий режим — только id/status/clientId, без include/фото. Нужен
+  // клиентам этого роута, которым важен только статус по каждому клиенту
+  // (напр. счётчики needs_replacement/new_request в клиентском табе),
+  // а не полный объект просчёта с ~90 полями и paymentAllocations — раньше
+  // такой счётчик гонял ПОЛНУЮ выдачу по ВСЕЙ компании при каждом
+  // изменении любого просчёта где угодно в системе. См. PB-V5 chat
+  // 2026-08-07.
+  if (req.nextUrl.searchParams.get("summary") === "1") {
+    const summaryQuotes = await prisma.quote.findMany({
+      where: {
+        deletedAt: null,
+        ...(clientId ? { clientId } : {}),
+        ...(visibleManagerIds === "all" ? {} : { managerId: { in: visibleManagerIds } }),
+      },
+      select: { id: true, status: true, clientId: true },
+    });
+    return Response.json({ quotes: summaryQuotes });
+  }
+
   const quotes = await prisma.quote.findMany({
     where: {
       deletedAt: null,

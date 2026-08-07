@@ -2718,7 +2718,10 @@ function ManagerClientsTab() {
   const [needsReplacementCounts, setNeedsReplacementCounts] = useState<Record<string, number>>({});
   const [newRequestCounts, setNewRequestCounts] = useState<Record<string, number>>({});
   useEffect(() => {
-    fetch("/api/manager-quotes")
+    // summary=1 — только id/status/clientId (см. app/api/manager-quotes/
+    // route.ts) вместо полного объекта каждого просчёта компании; это
+    // единственное, что здесь читается.
+    fetch("/api/manager-quotes?summary=1")
       .then((res) => res.json())
       .then((data) => {
         const replacementCounts: Record<string, number> = {};
