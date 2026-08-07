@@ -982,14 +982,25 @@ function NewRequestsWidget({ refreshKey, onOpenQuote }: QuoteWidgetProps) {
   );
 }
 
-type DashboardPeriod = "day" | "week" | "month";
+type DashboardPeriod = "day" | "week" | "month" | "all";
 
-const DASHBOARD_PERIOD_LABEL: Record<DashboardPeriod, string> = { day: "День", week: "Неделя", month: "Месяц" };
+const DASHBOARD_PERIOD_LABEL: Record<DashboardPeriod, string> = {
+  day: "День",
+  week: "Неделя",
+  month: "Месяц",
+  all: "Всё время",
+};
 
 // Boundaries for the StatCardsRow period filter — by quote CREATION date
 // (unlike "Реальные деньги за период" in Отчёт о прибыли, which dates by
-// real money/fact events instead). See PB-V5 chat 2026-08-06.
-function dashboardPeriodRange(period: DashboardPeriod): { from: string; to: string } {
+// real money/fact events instead). See PB-V5 chat 2026-08-06 — именно
+// поэтому оплата, пришедшая сегодня, может "не быть видна" в карточке,
+// если сам просчёт создан раньше начала выбранного периода. "all" — null,
+// сигнал не отправлять from/to вообще: тогда бэкенд не строит periodOverall,
+// и все карточки сами берут данные за всё время (см. data.periodOverall ??
+// data.overall в /api/manager-dashboard/route.ts). См. PB-V5 chat 2026-08-07.
+function dashboardPeriodRange(period: DashboardPeriod): { from: string; to: string } | null {
+  if (period === "all") return null;
   const to = new Date();
   const from = new Date();
   from.setHours(0, 0, 0, 0);
@@ -1021,10 +1032,10 @@ function ManagerDashboard() {
   const [quotesRefreshKey, setQuotesRefreshKey] = useState(0);
 
   useEffect(() => {
-    const { from, to } = dashboardPeriodRange(dashboardPeriod);
-    const params = new URLSearchParams({ from, to });
+    const range = dashboardPeriodRange(dashboardPeriod);
+    const params = new URLSearchParams(range ?? undefined);
     setLoading(true);
-    fetch(`/api/manager-dashboard?${params.toString()}`)
+    fetch(`/api/manager-dashboard${params.toString() ? `?${params.toString()}` : ""}`)
       .then((res) => res.json())
       .then((d) => setData(d))
       .finally(() => setLoading(false));
@@ -1072,7 +1083,7 @@ function ManagerDashboard() {
         </div>
 
         <div className="flex gap-1 rounded-xl border border-border bg-bg p-1 sm:w-fit">
-          {(["day", "week", "month"] as const).map((p) => (
+          {(["day", "week", "month", "all"] as const).map((p) => (
             <button
               key={p}
               type="button"
