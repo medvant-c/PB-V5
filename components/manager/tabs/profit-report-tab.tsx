@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/manager/searchable-select";
 import { QUOTE_STATUSES, QUOTE_STATUS_LABEL, QUOTE_STATUS_DOT_COLOR, type QuoteStatus } from "@/lib/quote-statuses";
 import { cn } from "@/lib/utils";
 
@@ -266,20 +267,17 @@ function ManagerProfitReportTab() {
             </SelectContent>
           </Select>
         )}
-        <Select value={clientFilter} onValueChange={setClientFilter}>
-          <SelectTrigger className="w-48">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Все клиенты</SelectItem>
-            {clients.map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                {c.name}
-                {c.company ? ` (${c.company})` : ""}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <SearchableSelect
+          value={clientFilter}
+          onValueChange={setClientFilter}
+          allLabel="Все клиенты"
+          className="w-48"
+          searchPlaceholder="Поиск клиента…"
+          options={clients.map((c) => ({
+            value: c.id,
+            label: c.company ? `${c.name} (${c.company})` : c.name,
+          }))}
+        />
         <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as QuoteStatus | "all")}>
           <SelectTrigger className="w-52">
             <SelectValue />
