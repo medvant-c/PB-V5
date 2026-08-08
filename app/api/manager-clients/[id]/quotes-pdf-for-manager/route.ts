@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canAccessManagerClient } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
+import { storage } from "@/lib/storage";
 import { renderManagerQuotesListPdf, type ManagerQuoteListRow } from "@/lib/desk-services/quotes-list-pdf";
 
 interface RouteParams {
@@ -41,16 +42,28 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: idsFilter ? "Выбранные просчёты не найдены." : "У клиента пока нет просчётов." }, { status: 404 });
   }
 
-  const rows: ManagerQuoteListRow[] = quotes.map((quote) => ({
-    displayId: quote.displayId,
-    productName: quote.productName,
-    productDescription: quote.productDescription,
-    color: quote.color,
-    dimensions: quote.dimensions,
-    quantity: quote.quantity,
-    priceCnyPerUnit: Number(quote.priceCnyPerUnit),
-    chinaDeliveryCny: Number(quote.chinaDeliveryCny),
-  }));
+  // Первое фото на просчёт, как в /api/manager-clients/[id]/quotes-pdf —
+  // без него список для менеджера бесполезен для сверки с фабрикой. См.
+  // PB-V5 chat 2026-08-08.
+  const rows: ManagerQuoteListRow[] = await Promise.all(
+    quotes.map(async (quote) => {
+      const firstPhoto = await prisma.deskFile.findFirst({
+        where: { tab: "quotes", relatedId: quote.id },
+        orderBy: { uploadedAt: "asc" },
+      });
+      return {
+        displayId: quote.displayId,
+        productName: quote.productName,
+        productDescription: quote.productDescription,
+        color: quote.color,
+        dimensions: quote.dimensions,
+        quantity: quote.quantity,
+        priceCnyPerUnit: Number(quote.priceCnyPerUnit),
+        chinaDeliveryCny: Number(quote.chinaDeliveryCny),
+        photoBuffer: firstPhoto ? await storage.get(firstPhoto.storageKey) : null,
+      };
+    }),
+  );
 
   const buffer = await renderManagerQuotesListPdf({ client: { name: client.name, company: client.company }, rows });
 

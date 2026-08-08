@@ -272,6 +272,7 @@ async function renderQuotesListPdf(props: QuotesListPdfProps): Promise<Buffer> {
 // PB-V5 chat 2026-08-08.
 const managerListStyles = StyleSheet.create({
   colNum: { width: 26 },
+  colPhoto: { width: 52 },
   colName: { width: 130, paddingRight: 8 },
   colDescription: { flex: 1, paddingRight: 8 },
   colColor: { width: 70 },
@@ -290,6 +291,7 @@ interface ManagerQuoteListRow {
   quantity: number;
   priceCnyPerUnit: number;
   chinaDeliveryCny: number;
+  photoBuffer: Buffer | null;
 }
 
 interface ManagerQuotesListPdfProps {
@@ -315,6 +317,7 @@ function ManagerQuotesListPdfDocument({ client, rows }: ManagerQuotesListPdfProp
         <View style={styles.table}>
           <View style={styles.headRow}>
             <Text style={[styles.headCell, managerListStyles.colNum]}>№</Text>
+            <Text style={[styles.headCell, managerListStyles.colPhoto]}>Фото</Text>
             <Text style={[styles.headCell, managerListStyles.colName]}>Наименование</Text>
             <Text style={[styles.headCell, managerListStyles.colDescription]}>Описание</Text>
             <Text style={[styles.headCell, managerListStyles.colColor]}>Цвет</Text>
@@ -327,6 +330,16 @@ function ManagerQuotesListPdfDocument({ client, rows }: ManagerQuotesListPdfProp
           {rows.map((row) => (
             <View key={row.displayId} style={styles.bodyRow}>
               <Text style={[styles.cell, styles.cellText, managerListStyles.colNum]}>{row.displayId}</Text>
+              <View style={[styles.cell, managerListStyles.colPhoto]}>
+                {row.photoBuffer ? (
+                  // cache={false}: см. комментарий у Image в QuotesListPdfDocument выше —
+                  // тот же обходной путь для повторно используемых байтов фото.
+                  // eslint-disable-next-line jsx-a11y/alt-text -- @react-pdf/renderer's Image is a PDF drawing primitive, not an HTML <img>; it has no alt prop
+                  <Image src={row.photoBuffer} style={styles.thumb} cache={false} />
+                ) : (
+                  <Text style={{ color: "#9a9c9f" }}>—</Text>
+                )}
+              </View>
               <Text style={[styles.cell, styles.cellTextWrap, managerListStyles.colName]}>{row.productName}</Text>
               <Text style={[styles.cell, styles.cellTextWrap, managerListStyles.colDescription]}>
                 {row.productDescription || "—"}
