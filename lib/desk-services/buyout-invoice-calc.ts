@@ -162,6 +162,14 @@ function buildBuyoutInvoiceAmounts(
     };
   }
 
+  if (currency === "cny") {
+    return {
+      lineItems: rubLineItems.map((item) => ({ label: item.label, amount: item.amount / quote.cnyRateUsed, quantity: item.quantity })),
+      totalAmount: totalAmountRub / quote.cnyRateUsed,
+      rateNote: `Курс на момент расчёта: 1¥ = ${quote.cnyRateUsed.toFixed(2)} ₽.`,
+    };
+  }
+
   // currency === "usdt" — caller guarantees `usdt` is non-null (see doc comment above).
   if (!usdt) {
     throw new Error("buildBuyoutInvoiceAmounts called with currency=usdt but no usdtRateCny — caller must validate this first.");
@@ -224,6 +232,8 @@ function buildBuyoutInvoiceRowAmounts(
   let divisor = 1;
   if (currency === "usd") {
     divisor = quote.usdRateUsed;
+  } else if (currency === "cny") {
+    divisor = quote.cnyRateUsed;
   } else if (currency === "usdt") {
     if (!usdt) {
       throw new Error("buildBuyoutInvoiceRowAmounts called with currency=usdt but no usdtRateCny — caller must validate this first.");

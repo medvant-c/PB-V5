@@ -6,7 +6,7 @@ import { renderBuyoutInvoiceListPdf, type BuyoutInvoiceListRow } from "@/lib/des
 import type { BuyoutInvoiceCurrency } from "@/lib/desk-services/buyout-invoice-pdf";
 import { buildBuyoutInvoiceRowAmounts, sumAlreadyPaidRubByCategory } from "@/lib/desk-services/buyout-invoice-calc";
 
-const CURRENCY_FILE_SUFFIX: Record<BuyoutInvoiceCurrency, string> = { rub: "₽", usd: "$", usdt: "USDT" };
+const CURRENCY_FILE_SUFFIX: Record<BuyoutInvoiceCurrency, string> = { rub: "₽", usd: "$", usdt: "USDT", cny: "¥" };
 
 // Same as /api/manager-clients/[id]/buyout-invoice-pdf-bundle, just not
 // anchored to one client — mirrors quotes-pdf-bundle's own "Все просчёты"
@@ -31,8 +31,8 @@ export async function POST(req: NextRequest) {
   if (!Array.isArray(quoteIds) || quoteIds.length === 0 || !quoteIds.every((id) => typeof id === "string")) {
     return Response.json({ error: "Выберите хотя бы один просчёт." }, { status: 400 });
   }
-  if (currencyParam !== "rub" && currencyParam !== "usd" && currencyParam !== "usdt") {
-    return Response.json({ error: "Укажите валюту счёта: rub, usd или usdt." }, { status: 400 });
+  if (currencyParam !== "rub" && currencyParam !== "usd" && currencyParam !== "usdt" && currencyParam !== "cny") {
+    return Response.json({ error: "Укажите валюту счёта: rub, usd, usdt или cny." }, { status: 400 });
   }
   const currency: BuyoutInvoiceCurrency = currencyParam;
 

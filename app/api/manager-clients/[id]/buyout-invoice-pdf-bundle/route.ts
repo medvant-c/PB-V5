@@ -10,7 +10,7 @@ interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-const CURRENCY_FILE_SUFFIX: Record<BuyoutInvoiceCurrency, string> = { rub: "₽", usd: "$", usdt: "USDT" };
+const CURRENCY_FILE_SUFFIX: Record<BuyoutInvoiceCurrency, string> = { rub: "₽", usd: "$", usdt: "USDT", cny: "¥" };
 
 // Client-scoped mirror of /api/manager-quotes/buyout-invoice-pdf-bundle —
 // same split as quotes-pdf-bundle (client-anchored access check via
@@ -41,8 +41,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (!Array.isArray(quoteIds) || quoteIds.length === 0 || !quoteIds.every((id) => typeof id === "string")) {
     return Response.json({ error: "Выберите хотя бы один просчёт." }, { status: 400 });
   }
-  if (currencyParam !== "rub" && currencyParam !== "usd" && currencyParam !== "usdt") {
-    return Response.json({ error: "Укажите валюту счёта: rub, usd или usdt." }, { status: 400 });
+  if (currencyParam !== "rub" && currencyParam !== "usd" && currencyParam !== "usdt" && currencyParam !== "cny") {
+    return Response.json({ error: "Укажите валюту счёта: rub, usd, usdt или cny." }, { status: 400 });
   }
   const currency: BuyoutInvoiceCurrency = currencyParam;
 

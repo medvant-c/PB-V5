@@ -188,6 +188,8 @@ const POST_BUYOUT_STATUSES = ["in_transit_to_warehouse", "delivered_to_warehouse
 // only from here on does actualizing cargo (or re-correcting it) make sense.
 const CARGO_RELEVANT_STATUSES = ["delivered_to_warehouse", "sent_to_client", "handed_to_client"];
 
+const BUYOUT_CURRENCY_LABEL: Record<"rub" | "usd" | "usdt" | "cny", string> = { rub: "₽", usd: "$", usdt: "USDT", cny: "¥" };
+
 function fmtRub(value: number): string {
   return Math.round(value).toLocaleString("ru-RU");
 }
@@ -500,7 +502,7 @@ function ClientQuotes({
   // app/api/manager-quotes/buyout-invoice-pdf-bundle). Separate busy/error
   // state from the per-row buyoutInvoiceBusyId above since this acts on
   // the whole selection at once, not one quote.
-  const [bulkBuyoutInvoiceCurrency, setBulkBuyoutInvoiceCurrency] = useState<"rub" | "usd" | "usdt" | null>(null);
+  const [bulkBuyoutInvoiceCurrency, setBulkBuyoutInvoiceCurrency] = useState<"rub" | "usd" | "usdt" | "cny" | null>(null);
   const [bulkBuyoutInvoiceError, setBulkBuyoutInvoiceError] = useState<string | null>(null);
   const [containerDialogOpen, setContainerDialogOpen] = useState(false);
   const [createPaymentDialogOpen, setCreatePaymentDialogOpen] = useState(false);
@@ -1061,7 +1063,7 @@ function ClientQuotes({
   // not yet confirmed (see app/api/manager-tariffs/confirm-usdt-rate) — and
   // a plain anchor would navigate the whole tab to raw JSON on that error.
   // fetch+blob keeps the manager on the page and shows the reason instead.
-  async function handleDownloadBuyoutInvoice(quoteId: string, currency: "rub" | "usd" | "usdt") {
+  async function handleDownloadBuyoutInvoice(quoteId: string, currency: "rub" | "usd" | "usdt" | "cny") {
     if (buyoutInvoiceBusyId) return;
     setBuyoutInvoiceBusyId(quoteId);
     setBuyoutInvoiceError(null);
@@ -1095,7 +1097,7 @@ function ClientQuotes({
   // handleExportPdfBundle above (one page per selected quote), just
   // pointed at buyout-invoice-pdf-bundle instead of quotes-pdf-bundle, and
   // with a currency to pick.
-  async function handleExportBuyoutInvoiceBundle(currency: "rub" | "usd" | "usdt") {
+  async function handleExportBuyoutInvoiceBundle(currency: "rub" | "usd" | "usdt" | "cny") {
     if (bulkBuyoutInvoiceCurrency || selectedIds.length === 0) return;
     setBulkBuyoutInvoiceCurrency(currency);
     setBulkBuyoutInvoiceError(null);
@@ -1464,7 +1466,7 @@ function ClientQuotes({
             </button>
             <div className="my-1 border-t border-border" />
             {bulkBuyoutInvoiceError && <p className="px-2.5 py-1 text-xs text-error">{bulkBuyoutInvoiceError}</p>}
-            {(["rub", "usd", "usdt"] as const).map((currency) => (
+            {(["rub", "usd", "usdt", "cny"] as const).map((currency) => (
               <button
                 key={currency}
                 type="button"
@@ -1477,8 +1479,7 @@ function ClientQuotes({
                 ) : (
                   <Receipt className="h-3.5 w-3.5 shrink-0" />
                 )}
-                Счёт на выкуп списком — {currency === "rub" ? "₽" : currency === "usd" ? "$" : "USDT"}{" "}
-                {selectedIds.length > 0 && `(${selectedIds.length})`}
+                Счёт на выкуп списком — {BUYOUT_CURRENCY_LABEL[currency]} {selectedIds.length > 0 && `(${selectedIds.length})`}
               </button>
             ))}
           </PopoverContent>
@@ -1878,7 +1879,7 @@ function ClientQuotes({
                   {buyoutInvoiceError && invoiceMenuQuoteId === quote.id && (
                     <p className="px-2.5 py-1 text-xs text-error">{buyoutInvoiceError}</p>
                   )}
-                  {(["rub", "usd", "usdt"] as const).map((currency) => (
+                  {(["rub", "usd", "usdt", "cny"] as const).map((currency) => (
                     <button
                       key={currency}
                       type="button"
@@ -1891,7 +1892,7 @@ function ClientQuotes({
                       ) : (
                         <Receipt className="h-3.5 w-3.5 shrink-0" />
                       )}
-                      Счёт на выкуп — в {currency === "rub" ? "₽" : currency === "usd" ? "$" : "USDT"}
+                      Счёт на выкуп — в {BUYOUT_CURRENCY_LABEL[currency]}
                     </button>
                   ))}
                 </PopoverContent>

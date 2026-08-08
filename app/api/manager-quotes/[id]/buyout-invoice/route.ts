@@ -25,8 +25,8 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   }
 
   const currencyParam = req.nextUrl.searchParams.get("currency");
-  if (currencyParam !== "rub" && currencyParam !== "usd" && currencyParam !== "usdt") {
-    return Response.json({ error: "Укажите валюту счёта: rub, usd или usdt." }, { status: 400 });
+  if (currencyParam !== "rub" && currencyParam !== "usd" && currencyParam !== "usdt" && currencyParam !== "cny") {
+    return Response.json({ error: "Укажите валюту счёта: rub, usd, usdt или cny." }, { status: 400 });
   }
   const currency: BuyoutInvoiceCurrency = currencyParam;
 
@@ -99,7 +99,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     rateNote,
   });
 
-  const CURRENCY_FILE_SUFFIX: Record<BuyoutInvoiceCurrency, string> = { rub: "₽", usd: "$", usdt: "USDT" };
+  const CURRENCY_FILE_SUFFIX: Record<BuyoutInvoiceCurrency, string> = { rub: "₽", usd: "$", usdt: "USDT", cny: "¥" };
   const fileName = `Счёт на выкуп — №${quote.displayId} (${CURRENCY_FILE_SUFFIX[currency]}).pdf`;
   return new Response(new Uint8Array(buffer), {
     headers: {

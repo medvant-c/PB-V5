@@ -48,13 +48,13 @@ const styles = StyleSheet.create({
   footer: { position: "absolute", bottom: 10, left: 28, right: 28, fontSize: 8, color: "#9a9c9f", textAlign: "center" },
 });
 
-type BuyoutInvoiceListCurrency = "rub" | "usd" | "usdt";
+type BuyoutInvoiceListCurrency = "rub" | "usd" | "usdt" | "cny";
 
-const CURRENCY_LABEL: Record<BuyoutInvoiceListCurrency, string> = { rub: "₽", usd: "$", usdt: "USDT" };
+const CURRENCY_LABEL: Record<BuyoutInvoiceListCurrency, string> = { rub: "₽", usd: "$", usdt: "USDT", cny: "¥" };
 
 function fmt(value: number, currency: BuyoutInvoiceListCurrency): string {
   if (!Number.isFinite(value)) return "—";
-  if (currency === "usdt") return value.toFixed(2);
+  if (currency === "usdt" || currency === "cny") return value.toFixed(2);
   return Math.round(value).toLocaleString("ru-RU");
 }
 
@@ -148,7 +148,9 @@ function BuyoutInvoiceListPdfDocument({ client, rows, currency }: BuyoutInvoiceL
           <Text style={styles.note}>
             {currency === "usd"
               ? "Суммы в $ пересчитаны по курсу доллара, зафиксированному в каждом просчёте на момент его расчёта — курс может отличаться между просчётами."
-              : "Суммы в USDT пересчитаны по курсу юаня, зафиксированному в каждом просчёте, и текущему курсу USDT — курс ¥ может отличаться между просчётами."}
+              : currency === "cny"
+                ? "Суммы в ¥ пересчитаны по курсу юаня, зафиксированному в каждом просчёте на момент его расчёта — курс может отличаться между просчётами."
+                : "Суммы в USDT пересчитаны по курсу юаня, зафиксированному в каждом просчёте, и текущему курсу USDT — курс ¥ может отличаться между просчётами."}
           </Text>
         )}
 

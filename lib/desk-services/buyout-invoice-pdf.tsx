@@ -44,17 +44,18 @@ const styles = StyleSheet.create({
   footer: { position: "absolute", bottom: 14, left: 32, right: 32, fontSize: 8, color: "#9a9c9f", textAlign: "center" },
 });
 
-type BuyoutInvoiceCurrency = "rub" | "usd" | "usdt";
+type BuyoutInvoiceCurrency = "rub" | "usd" | "usdt" | "cny";
 
 const CURRENCY_LABEL: Record<BuyoutInvoiceCurrency, string> = {
   rub: "₽",
   usd: "$",
   usdt: "USDT",
+  cny: "¥",
 };
 
 function fmt(value: number, currency: BuyoutInvoiceCurrency): string {
   if (!Number.isFinite(value)) return "—";
-  if (currency === "usdt") return value.toFixed(2);
+  if (currency === "usdt" || currency === "cny") return value.toFixed(2);
   return Math.round(value).toLocaleString("ru-RU");
 }
 
