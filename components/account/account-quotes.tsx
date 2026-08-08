@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { PhotoLightbox } from "@/components/manager/photo-lightbox";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -17,9 +18,11 @@ import {
   PackageSearch,
   Search,
 } from "lucide-react";
-import { QUOTE_STATUS_BADGE_CLASSES, QUOTE_STATUS_LABEL, type QuoteStatus } from "@/lib/quote-statuses";
+import { QUOTE_STATUSES, QUOTE_STATUS_BADGE_CLASSES, QUOTE_STATUS_LABEL, type QuoteStatus } from "@/lib/quote-statuses";
 import { CLIENT_STATUS_EXPLANATION } from "@/lib/client-status-copy";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 interface AccountQuoteService {
@@ -114,6 +117,42 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
   const [busy, setBusy] = useState<"pdf" | "excel" | "all" | string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
 
+  // Поиск по названию/номеру + фильтр по статусу — только для длинных
+  // списков просчётов, ничего не меняет в самих данных (bulk-действия
+  // "Выбрать все"/"Скачать выбранные" ниже работают уже по отфильтрованному
+  // списку; "Скачать список всех" — намеренно по ВСЕЙ истории, не только
+  // видимой). См. PB-V5 chat 2026-08-08.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<QuoteStatus | "all">("all");
+  const filteredQuotes = quotes.filter((q) => {
+    if (statusFilter !== "all" && q.status !== statusFilter) return false;
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return true;
+    return q.productName.toLowerCase().includes(query) || String(q.displayId).includes(query);
+  });
+
+  // Тап/клик по фото просчёта — открывает оригинал (см.
+  // components/manager/photo-lightbox.tsx), то же самое, что уже есть в
+  // карточке просчёта у менеджера.
+  const [zoomedPhotoId, setZoomedPhotoId] = useState<string | null>(null);
+
+  // Открытие просчёта раньше прокручивало страницу непредсказуемо (иногда
+  // сразу к низу развернувшейся карточки) — здесь явно скроллим к ВЕРХУ
+  // именно этой карточки после разворота, а не полагаемся на браузерное
+  // поведение по умолчанию. requestAnimationFrame — ждём кадр, чтобы блок
+  // уже успел развернуться (иначе scrollIntoView мерит ещё не выросшую
+  // высоту). См. PB-V5 chat 2026-08-08.
+  const cardRefs = useRef(new Map<string, HTMLDivElement>());
+  function toggleExpanded(quoteId: string) {
+    const willOpen = expandedId !== quoteId;
+    setExpandedId(willOpen ? quoteId : null);
+    if (willOpen) {
+      requestAnimationFrame(() => {
+        cardRefs.current.get(quoteId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }
+
   async function handleApprove(quoteId: string) {
     setApprovingId(quoteId);
     try {
@@ -175,7 +214,9 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
   }
 
   function toggleSelectAll() {
-    setSelectedIds((current) => (current.length === quotes.length ? [] : quotes.map((q) => q.id)));
+    const visibleIds = filteredQuotes.map((q) => q.id);
+    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
+    setSelectedIds(allVisibleSelected ? [] : visibleIds);
   }
 
   async function handleDownloadOne(quoteId: string) {
@@ -246,11 +287,40 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
   return (
     <TooltipProvider>
     <div className="space-y-3">
+      {quotes.length > 5 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Поиск по названию или номеру просчёта…"
+            className="w-full sm:w-72"
+          />
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as QuoteStatus | "all")}>
+            <SelectTrigger className="w-full sm:w-52">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все статусы</SelectItem>
+              {QUOTE_STATUSES.map((status) => (
+                <SelectItem key={status} value={status}>
+                  {QUOTE_STATUS_LABEL[status]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {(searchQuery || statusFilter !== "all") && (
+            <span className="text-xs text-text-secondary">
+              Найдено: {filteredQuotes.length} из {quotes.length}
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary">
           <input
             type="checkbox"
-            checked={selectedIds.length > 0 && selectedIds.length === quotes.length}
+            checked={filteredQuotes.length > 0 && filteredQuotes.every((q) => selectedIds.includes(q.id))}
             onChange={toggleSelectAll}
             aria-label="Выбрать все просчёты"
           />
@@ -290,14 +360,27 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
         </button>
       </div>
 
+      {filteredQuotes.length === 0 && (
+        <p className="rounded-2xl border border-dashed border-border py-10 text-center text-sm text-text-secondary">
+          Ничего не найдено — попробуйте изменить запрос или сбросить фильтр статуса.
+        </p>
+      )}
+
       <div className="space-y-3">
-        {quotes.map((quote) => {
+        {filteredQuotes.map((quote) => {
           const isOpen = expandedId === quote.id;
           const perUnitRub = quote.quantity > 0 ? quote.totalRub / quote.quantity : 0;
           const heroPhotoId = quote.photoIds[0] ?? null;
 
           return (
-            <div key={quote.id} className="rounded-2xl border border-border bg-surface shadow-sm">
+            <div
+              key={quote.id}
+              ref={(el) => {
+                if (el) cardRefs.current.set(quote.id, el);
+                else cardRefs.current.delete(quote.id);
+              }}
+              className="rounded-2xl border border-border bg-surface shadow-sm"
+            >
               <div className="flex items-start gap-3 p-4">
                 <input
                   type="checkbox"
@@ -309,7 +392,7 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
 
                 <button
                   type="button"
-                  onClick={() => setExpandedId(isOpen ? null : quote.id)}
+                  onClick={() => toggleExpanded(quote.id)}
                   className="flex flex-1 items-center gap-3 text-left"
                 >
                   {heroPhotoId ? (
@@ -318,7 +401,11 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
                       <img
                         src={`/api/account-quotes/photos/${heroPhotoId}`}
                         alt={quote.productName}
-                        className="h-14 w-14 rounded-lg border border-border object-contain bg-bg"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setZoomedPhotoId(heroPhotoId);
+                        }}
+                        className="h-14 w-14 cursor-zoom-in rounded-lg border border-border object-contain bg-bg"
                       />
                       <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden group-hover:block">
                         {/* eslint-disable-next-line @next/next/no-img-element -- see above */}
@@ -393,7 +480,8 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
                           <img
                             src={`/api/account-quotes/photos/${photoId}`}
                             alt={quote.productName}
-                            className="h-16 w-16 rounded-lg border border-border bg-bg object-contain"
+                            onClick={() => setZoomedPhotoId(photoId)}
+                            className="h-16 w-16 cursor-zoom-in rounded-lg border border-border bg-bg object-contain"
                           />
                           <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden group-hover:block">
                             {/* eslint-disable-next-line @next/next/no-img-element -- see above */}
@@ -554,6 +642,8 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
           );
         })}
       </div>
+
+      <PhotoLightbox src={zoomedPhotoId ? `/api/account-quotes/photos/${zoomedPhotoId}` : null} onClose={() => setZoomedPhotoId(null)} />
     </div>
     </TooltipProvider>
   );
