@@ -1366,6 +1366,20 @@ function ClientQuotes({
                 <FileStack className="h-3.5 w-3.5 shrink-0" /> Скачать все просчёты клиента в PDF ({quotes.length})
               </a>
             )}
+            {/* Тот же компактный табличный формат (одна строка на просчёт),
+                что и "Скачать все просчёты..." выше, но только по отмеченным
+                чекбоксами — раньше выбор чекбоксами работал только для
+                "PDF выбранных" ниже, а это другой формат (целая страница на
+                просчёт), не список. См. PB-V5 chat 2026-08-08. */}
+            {!isGlobal && selectedIds.length > 0 && (
+              <a
+                href={`/api/manager-clients/${clientId}/quotes-pdf?ids=${encodeURIComponent(selectedIds.join(","))}`}
+                onClick={() => setExportMenuOpen(false)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary"
+              >
+                <FileStack className="h-3.5 w-3.5 shrink-0" /> Скачать список выбранных в PDF ({selectedIds.length})
+              </a>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -1376,7 +1390,7 @@ function ClientQuotes({
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
               {exportingPdfBundle ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FileText className="h-3.5 w-3.5 shrink-0" />}
-              Скачать PDF выбранных {selectedIds.length > 0 && `(${selectedIds.length})`}
+              Скачать PDF выбранных — по странице на просчёт {selectedIds.length > 0 && `(${selectedIds.length})`}
             </button>
             {!isGlobal && quotes.length > 1 && (
               <>

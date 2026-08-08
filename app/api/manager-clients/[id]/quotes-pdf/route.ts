@@ -29,9 +29,20 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: "Этот клиент вне вашей зоны видимости." }, { status: 403 });
   }
 
-  const quotes = await prisma.quote.findMany({ where: { clientId, deletedAt: null }, orderBy: { createdAt: "asc" } });
+  // Необязательный фильтр — список id через запятую, чтобы можно было
+  // скачать этот же компактный табличный PDF не по ВСЕМ просчётам клиента,
+  // а только по отмеченным в списке (раньше выбор чекбоксами работал
+  // только для "PDF выбранных" — это отдельный формат, целая страница на
+  // просчёт, а не строка в таблице). См. PB-V5 chat 2026-08-08.
+  const idsParam = req.nextUrl.searchParams.get("ids");
+  const idsFilter = idsParam ? idsParam.split(",").filter(Boolean) : null;
+
+  const quotes = await prisma.quote.findMany({
+    where: { clientId, deletedAt: null, ...(idsFilter ? { id: { in: idsFilter } } : {}) },
+    orderBy: { createdAt: "asc" },
+  });
   if (quotes.length === 0) {
-    return Response.json({ error: "У клиента пока нет просчётов." }, { status: 404 });
+    return Response.json({ error: idsFilter ? "Выбранные просчёты не найдены." : "У клиента пока нет просчётов." }, { status: 404 });
   }
 
   const cargoInUsd = req.nextUrl.searchParams.get("cargoInUsd") === "1";
@@ -67,7 +78,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     cargoInUsd,
   });
 
-  const fileName = `Все просчёты — ${client.name}${cargoInUsd ? " (карго в $)" : ""}.pdf`;
+  const fileName = `${idsFilter ? "Выбранные просчёты" : "Все просчёты"} — ${client.name}${cargoInUsd ? " (карго в $)" : ""}.pdf`;
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/pdf",
