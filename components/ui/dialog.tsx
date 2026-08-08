@@ -61,7 +61,19 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-2xl border border-border bg-surface p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          // grid-cols-[minmax(0,1fr)] — an implicit (bare "grid") column
+          // sizes itself to fit its widest child's min-content, so ANY
+          // descendant with unconstrained-width content (e.g. a long Select
+          // value — same root cause already fixed in select.tsx) could
+          // force this whole card wider than max-w-lg, or bleed past it
+          // visually since overflow is visible by default. An explicit
+          // minmax(0, 1fr) column caps every direct child (header/body/
+          // footer) to the card's own width regardless of what's inside,
+          // so a long value truncates properly instead of pushing the
+          // footer buttons out of view. overflow-x-hidden stays as a
+          // second safety net for anything not itself in a flex/grid chain.
+          // See PB-V5 chat 2026-08-08.
+          "fixed top-[50%] left-[50%] z-50 grid grid-cols-[minmax(0,1fr)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-x-hidden rounded-2xl border border-border bg-surface p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
           className
         )}
         {...props}
