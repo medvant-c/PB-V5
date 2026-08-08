@@ -1383,8 +1383,8 @@ model CashOrder {
   // смысла ни для дохода, ни для расхода. Существовавшие до введения
   // счетов записи перенесены на счёт "Александр" при миграции. См. PB-V5
   // chat 2026-08-08.
-  accountId  String?
-  account    CashAccount?  @relation(fields: [accountId], references: [id])
+  accountId  String
+  account    CashAccount   @relation(fields: [accountId], references: [id])
   categoryId String
   category   CashCategory  @relation(fields: [categoryId], references: [id])
   // Only ever set for income orders (UI doesn't offer this field for
@@ -1508,9 +1508,9 @@ model QuotePaymentAllocation {
 // СЧЕТА existed — the one pre-existing row was migrated onto "Александр".
 // See PB-V5 chat 2026-08-08.
 model CashOpeningBalance {
-  id                 String       @id @default(cuid())
-  accountId          String?
-  account            CashAccount? @relation(fields: [accountId], references: [id])
+  id                 String      @id @default(cuid())
+  accountId          String
+  account            CashAccount @relation(fields: [accountId], references: [id])
   effectiveDate      DateTime
   amountCny          Decimal
   updatedByManagerId String
