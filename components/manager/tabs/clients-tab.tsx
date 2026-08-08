@@ -56,6 +56,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { EmptyState } from "@/components/desk/empty-state";
 import { QuoteDialog } from "@/components/manager/quote-dialog";
+import { PhotoLightbox } from "@/components/manager/photo-lightbox";
 import { ClientFilesPanel } from "@/components/manager/client-files-panel";
 import { ContainerShipmentDialog } from "@/components/manager/container-shipment-dialog";
 import { CreatePaymentDialog } from "@/components/manager/create-payment-dialog";
@@ -476,6 +477,12 @@ function ClientQuotes({
   clientCreatedByManagerId?: string | null;
 }) {
   const isGlobal = !clientId;
+  // Клик/тап по фото в строке просчёта — открывает оригинал (см.
+  // components/manager/photo-lightbox.tsx). Раньше увеличенное превью
+  // показывалось только по :hover, что на тач-экране вообще никогда не
+  // срабатывает — тап теперь работает одинаково на десктопе и мобильном.
+  // См. PB-V5 chat 2026-08-08.
+  const [zoomedPhotoId, setZoomedPhotoId] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<QuoteRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [changingStatusId, setChangingStatusId] = useState<string | null>(null);
@@ -1678,12 +1685,17 @@ function ClientQuotes({
                     <img
                       src={`/api/manager-quotes/photos/${quote.firstPhotoId}`}
                       alt=""
-                      className="h-9 w-9 rounded-md border border-border object-cover"
+                      onClick={() => setZoomedPhotoId(quote.firstPhotoId)}
+                      className="h-9 w-9 cursor-zoom-in rounded-md border border-border object-cover"
                     />
-                    {/* No fixed box + object-contain here — that forced every photo
-                        into a square frame, letterboxing a non-square source into a
-                        thin sliver. h-auto/w-auto with only a max-size cap keeps the
-                        source's real aspect ratio ("1 к 1", undistorted) instead. */}
+                    {/* Наведение — быстрый предпросмотр для мыши; клик/тап (выше)
+                        открывает полноразмерный оригинал в диалоге — единственный
+                        способ увидеть фото на тач-экране, где :hover не срабатывает
+                        вообще. No fixed box + object-contain here — that forced
+                        every photo into a square frame, letterboxing a non-square
+                        source into a thin sliver. h-auto/w-auto with only a
+                        max-size cap keeps the source's real aspect ratio ("1 к 1",
+                        undistorted) instead. */}
                     <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden group-hover:block">
                       {/* eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset */}
                       <img
@@ -2475,6 +2487,11 @@ function ClientQuotes({
           }}
         />
       )}
+
+      <PhotoLightbox
+        src={zoomedPhotoId ? `/api/manager-quotes/photos/${zoomedPhotoId}` : null}
+        onClose={() => setZoomedPhotoId(null)}
+      />
     </div>
     </TooltipProvider>
   );

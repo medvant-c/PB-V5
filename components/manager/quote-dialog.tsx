@@ -9,7 +9,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { PhotoPicker } from "@/components/manager/photo-picker";
+import { PhotoPicker, LOW_RES_THRESHOLD_PX } from "@/components/manager/photo-picker";
+import { PhotoLightbox } from "@/components/manager/photo-lightbox";
 import {
   computeQuote,
   computeQuoteWithAutoCnyTier,
@@ -263,6 +264,34 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   const [photos, setPhotos] = useState<File[]>([]);
   const [existingPhotos, setExistingPhotos] = useState<ExistingPhoto[]>([]);
   const [removedPhotoIds, setRemovedPhotoIds] = useState<string[]>([]);
+  // Клик/тап по уже загруженному фото — открывает оригинал в полный размер
+  // (см. components/manager/photo-lightbox.tsx) вместо непредсказуемого
+  // нативного зума браузера.
+  const [zoomedPhotoId, setZoomedPhotoId] = useState<string | null>(null);
+  // Та же проверка "маленькое — будет нечётким", что уже есть в
+  // PhotoPicker для НОВЫХ фото (до загрузки) — здесь для УЖЕ загруженных,
+  // чтобы менеджер видел это и при редактировании старого просчёта, не
+  // только при добавлении. См. PB-V5 chat 2026-08-08.
+  const [lowResExistingPhotoIds, setLowResExistingPhotoIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(
+      existingPhotos.map(
+        (photo) =>
+          new Promise<[string, boolean]>((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve([photo.id, Math.min(img.naturalWidth, img.naturalHeight) < LOW_RES_THRESHOLD_PX]);
+            img.onerror = () => resolve([photo.id, false]);
+            img.src = `/api/manager-quotes/photos/${photo.id}`;
+          }),
+      ),
+    ).then((results) => {
+      if (!cancelled) setLowResExistingPhotoIds(new Set(results.filter(([, isLowRes]) => isLowRes).map(([id]) => id)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [existingPhotos]);
   const [productName, setProductName] = useState(BLANK_FORM.productName);
   const [productLink, setProductLink] = useState(BLANK_FORM.productLink);
   const [productDescription, setProductDescription] = useState(BLANK_FORM.productDescription);
@@ -990,8 +1019,14 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                       <img
                         src={`/api/manager-quotes/photos/${photo.id}`}
                         alt={photo.originalName}
-                        className="h-full w-full object-cover"
+                        onClick={() => setZoomedPhotoId(photo.id)}
+                        className="h-full w-full cursor-zoom-in object-cover"
                       />
+                      {lowResExistingPhotoIds.has(photo.id) && (
+                        <span className="pointer-events-none absolute bottom-0 left-0 right-0 bg-warning/90 px-1 py-0.5 text-center text-[9px] font-medium leading-tight text-white">
+                          Маленькое — нечёткое
+                        </span>
+                      )}
                       {/* Always visible, not just on :hover — there's no hover
                           state on a touch screen, so the opacity-0 + group-hover
                           version left mobile with no visible way to remove a
@@ -1013,6 +1048,10 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               ) : (
                 <p className="text-xs text-text-secondary">Максимум 3 фото — удалите одно, чтобы добавить новое.</p>
               )}
+              <PhotoLightbox
+                src={zoomedPhotoId ? `/api/manager-quotes/photos/${zoomedPhotoId}` : null}
+                onClose={() => setZoomedPhotoId(null)}
+              />
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">

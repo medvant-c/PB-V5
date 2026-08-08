@@ -144,4 +144,4 @@ function PhotoPicker({ photos, onChange }: PhotoPickerProps) {
   );
 }
 
-export { PhotoPicker, MAX_PHOTOS };
+export { PhotoPicker, MAX_PHOTOS, LOW_RES_THRESHOLD_PX };
