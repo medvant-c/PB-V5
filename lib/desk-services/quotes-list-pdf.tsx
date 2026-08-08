@@ -263,5 +263,102 @@ async function renderQuotesListPdf(props: QuotesListPdfProps): Promise<Buffer> {
   return renderToBuffer(<QuotesListPdfDocument {...props} />);
 }
 
-export { renderQuotesListPdf };
-export type { QuoteListRow };
+// «Список для менеджера» — отдельный, более узкий формат для внутренней
+// работы с фабрикой/логистикой (не клиентский расчёт): только то, что
+// нужно, чтобы согласовать заказ — количество, закупочная цена и цена
+// доставки по Китаю (обе в ¥, как они и хранятся на просчёте — без
+// конвертации), описание, габариты, цвет. Никаких итогов/тарифов/тарифной
+// сетки — тот отдельный смысл уже покрывает renderQuotesListPdf выше. См.
+// PB-V5 chat 2026-08-08.
+const managerListStyles = StyleSheet.create({
+  colNum: { width: 26 },
+  colName: { width: 130, paddingRight: 8 },
+  colDescription: { flex: 1, paddingRight: 8 },
+  colColor: { width: 70 },
+  colDimensions: { width: 90 },
+  colQty: { width: 50, textAlign: "right" },
+  colPrice: { width: 70, textAlign: "right" },
+  colDelivery: { width: 80, textAlign: "right" },
+});
+
+interface ManagerQuoteListRow {
+  displayId: number;
+  productName: string;
+  productDescription: string | null;
+  color: string | null;
+  dimensions: string | null;
+  quantity: number;
+  priceCnyPerUnit: number;
+  chinaDeliveryCny: number;
+}
+
+interface ManagerQuotesListPdfProps {
+  client: { name: string; company: string | null };
+  rows: ManagerQuoteListRow[];
+}
+
+function ManagerQuotesListPdfDocument({ client, rows }: ManagerQuotesListPdfProps) {
+  return (
+    <Document>
+      <Page size="A4" orientation="landscape" style={styles.page}>
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.title}>
+              Список для менеджера — {client.name}
+              {client.company ? ` · ${client.company}` : ""}
+            </Text>
+            <Text style={styles.clientLine}>Всего просчётов: {rows.length}</Text>
+          </View>
+          <Text style={styles.meta}>{new Date().toLocaleDateString("ru-RU")}</Text>
+        </View>
+
+        <View style={styles.table}>
+          <View style={styles.headRow}>
+            <Text style={[styles.headCell, managerListStyles.colNum]}>№</Text>
+            <Text style={[styles.headCell, managerListStyles.colName]}>Наименование</Text>
+            <Text style={[styles.headCell, managerListStyles.colDescription]}>Описание</Text>
+            <Text style={[styles.headCell, managerListStyles.colColor]}>Цвет</Text>
+            <Text style={[styles.headCell, managerListStyles.colDimensions]}>Габариты</Text>
+            <Text style={[styles.headCell, managerListStyles.colQty]}>Кол-во</Text>
+            <Text style={[styles.headCell, managerListStyles.colPrice]}>Цена, ¥</Text>
+            <Text style={[styles.headCell, managerListStyles.colDelivery]}>Доставка, ¥</Text>
+          </View>
+
+          {rows.map((row) => (
+            <View key={row.displayId} style={styles.bodyRow}>
+              <Text style={[styles.cell, styles.cellText, managerListStyles.colNum]}>{row.displayId}</Text>
+              <Text style={[styles.cell, styles.cellTextWrap, managerListStyles.colName]}>{row.productName}</Text>
+              <Text style={[styles.cell, styles.cellTextWrap, managerListStyles.colDescription]}>
+                {row.productDescription || "—"}
+              </Text>
+              <Text style={[styles.cell, styles.cellText, managerListStyles.colColor]}>{row.color || "—"}</Text>
+              <Text style={[styles.cell, styles.cellText, managerListStyles.colDimensions]}>{row.dimensions || "—"}</Text>
+              <Text style={[styles.cell, styles.cellText, managerListStyles.colQty]}>{row.quantity} шт</Text>
+              {/* Не через fmt() (округляет до целого) — цена/ед. в ¥ часто
+                  дробная, а на количестве это округление размножается в
+                  заметную разницу. */}
+              <Text style={[styles.cell, styles.cellText, managerListStyles.colPrice]}>
+                {row.priceCnyPerUnit.toFixed(2)}
+              </Text>
+              <Text style={[styles.cell, styles.cellText, managerListStyles.colDelivery]}>
+                {row.chinaDeliveryCny.toFixed(2)}
+              </Text>
+            </View>
+          ))}
+        </View>
+
+        <Text style={styles.footer} fixed>
+          Panda Bridge — экосистема для бизнеса с Китаем.
+        </Text>
+      </Page>
+    </Document>
+  );
+}
+
+async function renderManagerQuotesListPdf(props: ManagerQuotesListPdfProps): Promise<Buffer> {
+  await ensureFontsRegistered();
+  return renderToBuffer(<ManagerQuotesListPdfDocument {...props} />);
+}
+
+export { renderQuotesListPdf, renderManagerQuotesListPdf };
+export type { QuoteListRow, ManagerQuoteListRow };

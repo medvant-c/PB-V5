@@ -1392,6 +1392,27 @@ function ClientQuotes({
               {exportingPdfBundle ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FileText className="h-3.5 w-3.5 shrink-0" />}
               Скачать PDF выбранных — по странице на просчёт {selectedIds.length > 0 && `(${selectedIds.length})`}
             </button>
+            {/* Внутренний формат для согласования с фабрикой/логистикой —
+                кол-во/цена/цена доставки/описание/габариты/цвет, без
+                клиентских итогов и тарифов. См. PB-V5 chat 2026-08-08. */}
+            {!isGlobal && quotes.length > 0 && (
+              <a
+                href={`/api/manager-clients/${clientId}/quotes-pdf-for-manager`}
+                onClick={() => setExportMenuOpen(false)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary"
+              >
+                <FileStack className="h-3.5 w-3.5 shrink-0" /> Скачать список для менеджера ({quotes.length})
+              </a>
+            )}
+            {!isGlobal && selectedIds.length > 0 && (
+              <a
+                href={`/api/manager-clients/${clientId}/quotes-pdf-for-manager?ids=${encodeURIComponent(selectedIds.join(","))}`}
+                onClick={() => setExportMenuOpen(false)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary"
+              >
+                <FileStack className="h-3.5 w-3.5 shrink-0" /> Скачать список для менеджера — выбранные ({selectedIds.length})
+              </a>
+            )}
             {!isGlobal && quotes.length > 1 && (
               <>
                 <a
