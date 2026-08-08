@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { prisma } from "@/lib/prisma";
-import { getOrCreateBuyoutIncomeCategory } from "@/lib/desk-services/cash-categories";
+import { getOrCreateBuyoutIncomeCategory, getDefaultCashAccount } from "@/lib/desk-services/cash-categories";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -86,6 +86,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const selfSourcedBoost = quote.client.selfSourcedConfirmed && quote.client.createdByManagerId === quote.managerId;
 
   const category = await getOrCreateBuyoutIncomeCategory();
+  const defaultAccount = await getDefaultCashAccount();
   const paymentAmountCny = paymentRub / paymentRate;
   // Реконсиляционный остаток — см. комментарий над PATCH выше. Считается от
   // ПОЛНОЙ суммы оплаты клиента (paymentRub), не от остатка ниже — скидка
@@ -131,6 +132,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
           data: {
             type: "income",
             date: new Date(),
+            accountId: defaultAccount.id,
             categoryId: category.id,
             clientId: quote.client.id,
             currency: "rub",

@@ -3,6 +3,7 @@ import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canViewCash } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { syncQuotePaymentAllocationForCashOrder } from "@/lib/desk-services/cash-order-profit-sync";
+import { computeAccountBalanceCny, computeAllAccountBalances } from "@/lib/desk-services/cash-balance";
 
 // "YYYY-MM" -> [monthStart, monthEndExclusive]. Defaults to the current
 // month when omitted/invalid.
@@ -38,19 +39,29 @@ export async function GET(req: NextRequest) {
   const categoryIdFilter = req.nextUrl.searchParams.get("categoryId");
   const typeFilter = req.nextUrl.searchParams.get("type");
   const clientIdFilter = req.nextUrl.searchParams.get("clientId");
+  // Необязательный — сужает и таблицу, и summary/categoryBreakdown до ОДНОГО
+  // счёта (см. CashAccount в prisma/schema.prisma); отдельная сводка по
+  // балансам каждого счёта прямо сейчас живёт в /api/manager-cash-accounts,
+  // не здесь.
+  const accountIdFilter = req.nextUrl.searchParams.get("accountId");
+  const accountScope = accountIdFilter ? { accountId: accountIdFilter } : {};
 
-  const anchor = await prisma.cashOpeningBalance.findFirst({ orderBy: { updatedAt: "desc" } });
-  const beforeMonthOrders = await prisma.cashOrder.findMany({
-    where: {
-      date: { lt: monthStart, ...(anchor ? { gte: anchor.effectiveDate } : {}) },
-    },
-    select: { type: true, amountCny: true },
-  });
-  const openingBalanceCny = Number(anchor?.amountCny ?? 0) + sumByType(beforeMonthOrders, "income") - sumByType(beforeMonthOrders, "expense");
+  // "Остаток на начало месяца" — якорь (у каждого счёта свой, см.
+  // CashOpeningBalance.accountId) + история ДО monthStart. При одном
+  // выбранном счёте — его собственный расчёт; для "всех счетов" — сумма
+  // такого же расчёта по каждому счёту (у них могут быть разные даты
+  // якоря, поэтому нельзя просто взять один общий якорь, как раньше, когда
+  // счетов ещё не было). Переводы между счетами тоже учтены (см.
+  // computeAccountBalanceCny) — на сумму по всем счетам перевод не влияет,
+  // а на баланс отдельного счёта — вполне может.
+  const openingBalanceCny = accountIdFilter
+    ? await computeAccountBalanceCny(accountIdFilter, monthStart)
+    : (await computeAllAccountBalances(monthStart)).totalBalanceCny;
 
   const monthOrders = await prisma.cashOrder.findMany({
-    where: { date: { gte: monthStart, lt: monthEnd } },
+    where: { date: { gte: monthStart, lt: monthEnd }, ...accountScope },
     include: {
+      account: { select: { id: true, name: true } },
       category: true,
       client: { select: { id: true, name: true } },
       quote: { select: { id: true, displayId: true, productName: true } },
@@ -98,10 +109,11 @@ export async function POST(req: NextRequest) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { type, date, categoryId, clientId, quoteId, currency, amount, cnyToCurrencyRate, comment } =
+  const { type, date, accountId, categoryId, clientId, quoteId, currency, amount, cnyToCurrencyRate, comment } =
     (body as {
       type?: unknown;
       date?: unknown;
+      accountId?: unknown;
       categoryId?: unknown;
       clientId?: unknown;
       quoteId?: unknown;
@@ -117,6 +129,13 @@ export async function POST(req: NextRequest) {
   const parsedDate = typeof date === "string" ? new Date(date) : null;
   if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
     return Response.json({ error: "Укажите дату." }, { status: 400 });
+  }
+  if (typeof accountId !== "string" || !accountId) {
+    return Response.json({ error: "Укажите счёт." }, { status: 400 });
+  }
+  const account = await prisma.cashAccount.findUnique({ where: { id: accountId } });
+  if (!account) {
+    return Response.json({ error: "Счёт не найден." }, { status: 400 });
   }
   if (typeof categoryId !== "string" || !categoryId) {
     return Response.json({ error: "Укажите статью." }, { status: 400 });
@@ -182,6 +201,7 @@ export async function POST(req: NextRequest) {
         data: {
           type,
           date: parsedDate,
+          accountId,
           categoryId,
           clientId: resolvedClientId,
           quoteId: resolvedQuoteId,
@@ -216,6 +236,7 @@ export async function POST(req: NextRequest) {
   const order = await prisma.cashOrder.findUnique({
     where: { id: orderId },
     include: {
+      account: { select: { id: true, name: true } },
       category: true,
       client: { select: { id: true, name: true } },
       quote: { select: { id: true, displayId: true, productName: true } },

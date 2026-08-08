@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Download, Loader2, Pencil, Plus, Settings2, Trash2 } from "lucide-react";
+import { ArrowLeftRight, ChevronLeft, ChevronRight, Download, Loader2, Pencil, Plus, Settings2, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,10 +41,37 @@ interface InvestorOption {
   name: string;
 }
 
+// Счёт (см. CashAccount в prisma/schema.prisma) — "кто держит деньги"
+// (Александр/Антон), отдельно от статьи ("на что"). balanceCny — прямо
+// сейчас, независимо от выбранного в ленте месяца (см. /api/manager-cash-
+// accounts, computeAccountBalanceCny).
+interface CashAccountRecord {
+  id: string;
+  name: string;
+  balanceCny: number;
+}
+
+// Перевод между счетами (см. CashTransfer) — не доход/расход, отдельная
+// история. См. PB-V5 chat 2026-08-08.
+interface CashTransferRecord {
+  id: string;
+  date: string;
+  fromAccount: { id: string; name: string };
+  toAccount: { id: string; name: string };
+  currency: CashCurrency;
+  amount: string;
+  cnyToCurrencyRate: string;
+  amountCny: string;
+  comment: string;
+  createdByManager: { name: string };
+}
+
 interface CashOrderRecord {
   id: string;
   type: CashOrderType;
   date: string;
+  accountId: string;
+  account: { id: string; name: string };
   categoryId: string;
   category: { id: string; name: string };
   clientId: string | null;
@@ -103,9 +130,20 @@ function todayIso(): string {
 
 const EMPTY_DRAFT = {
   date: todayIso(),
+  accountId: "",
   categoryId: "",
   clientId: "",
   quoteId: "",
+  currency: "cny" as CashCurrency,
+  amount: "",
+  cnyToCurrencyRate: "1",
+  comment: "",
+};
+
+const EMPTY_TRANSFER_DRAFT = {
+  date: todayIso(),
+  fromAccountId: "",
+  toAccountId: "",
   currency: "cny" as CashCurrency,
   amount: "",
   cnyToCurrencyRate: "1",
@@ -124,6 +162,12 @@ function ManagerCashTab() {
   const [filterCategoryId, setFilterCategoryId] = useState<string>("all");
   const [filterType, setFilterType] = useState<string>("all");
   const [filterClientId, setFilterClientId] = useState<string>("all");
+  // Счета (см. CashAccount) — "all" сводит ленту/summary по ВСЕМ счетам,
+  // как и раньше до их появления; конкретный счёт сужает и то, и другое,
+  // плюс определяет, какой счёт "Остаток на начало периода" редактирует
+  // (см. openObDialog ниже) и на какой счёт по умолчанию попадёт новый
+  // ордер. См. PB-V5 chat 2026-08-08.
+  const [filterAccountId, setFilterAccountId] = useState<string>("all");
 
   const incomeCategories = categories.filter((c) => c.type === "income");
   const expenseCategories = categories.filter((c) => c.type === "expense");
@@ -146,6 +190,17 @@ function ManagerCashTab() {
     if (res.ok) setInvestors(data.investors);
   }, []);
 
+  const [accounts, setAccounts] = useState<CashAccountRecord[]>([]);
+  const [totalBalanceCny, setTotalBalanceCny] = useState(0);
+  const loadAccounts = useCallback(async () => {
+    const res = await fetch("/api/manager-cash-accounts");
+    const data = await res.json();
+    if (res.ok) {
+      setAccounts(data.accounts);
+      setTotalBalanceCny(data.totalBalanceCny);
+    }
+  }, []);
+
   const loadOrders = useCallback(async () => {
     setLoading(true);
     try {
@@ -153,6 +208,7 @@ function ManagerCashTab() {
       if (filterCategoryId !== "all") params.set("categoryId", filterCategoryId);
       if (filterType !== "all") params.set("type", filterType);
       if (filterClientId !== "all") params.set("clientId", filterClientId);
+      if (filterAccountId !== "all") params.set("accountId", filterAccountId);
       const res = await fetch(`/api/manager-cash-orders?${params.toString()}`);
       const data = await res.json();
       if (res.ok) {
@@ -162,13 +218,14 @@ function ManagerCashTab() {
     } finally {
       setLoading(false);
     }
-  }, [month, filterCategoryId, filterType, filterClientId]);
+  }, [month, filterCategoryId, filterType, filterClientId, filterAccountId]);
 
   useEffect(() => {
     loadCategories();
     loadClients();
     loadInvestors();
-  }, [loadCategories, loadClients, loadInvestors]);
+    loadAccounts();
+  }, [loadCategories, loadClients, loadInvestors, loadAccounts]);
 
   // Только для подсказки у "Просчёт" — засчитается ли сумма в прибыль
   // сразу (только руководителю/старшему менеджеру, см. cash-order-profit-
@@ -238,7 +295,13 @@ function ManagerCashTab() {
   function openCreateDialog(type: CashOrderType) {
     setDialogType(type);
     setEditingOrderId(null);
-    setDraft({ ...EMPTY_DRAFT, categoryId: (type === "income" ? incomeCategories : expenseCategories)[0]?.id ?? "" });
+    setDraft({
+      ...EMPTY_DRAFT,
+      // Если сейчас смотрим ленту одного счёта — новый ордер по умолчанию
+      // на нём же; иначе первый по списку (Александр).
+      accountId: (filterAccountId !== "all" ? filterAccountId : accounts[0]?.id) ?? "",
+      categoryId: (type === "income" ? incomeCategories : expenseCategories)[0]?.id ?? "",
+    });
     setDialogError(null);
     setShowNewCategoryForm(false);
     setShowNewClientForm(false);
@@ -249,6 +312,7 @@ function ManagerCashTab() {
     setEditingOrderId(order.id);
     setDraft({
       date: order.date.slice(0, 10),
+      accountId: order.accountId,
       categoryId: order.categoryId,
       clientId: order.clientId ?? "",
       quoteId: order.quoteId ?? "",
@@ -375,6 +439,10 @@ function ManagerCashTab() {
 
   async function handleSaveOrder() {
     if (!dialogType) return;
+    if (!draft.accountId) {
+      setDialogError("Укажите счёт.");
+      return;
+    }
     if (!draft.categoryId) {
       setDialogError("Укажите статью.");
       return;
@@ -389,6 +457,7 @@ function ManagerCashTab() {
       const body = {
         type: dialogType,
         date: draft.date,
+        accountId: draft.accountId,
         categoryId: draft.categoryId,
         clientId: draft.clientId || null,
         quoteId: draft.quoteId || null,
@@ -414,7 +483,7 @@ function ManagerCashTab() {
         return;
       }
       closeDialog();
-      await loadOrders();
+      await Promise.all([loadOrders(), loadAccounts()]);
     } catch {
       setDialogError("Не удалось связаться с сервером.");
     } finally {
@@ -425,7 +494,7 @@ function ManagerCashTab() {
   async function handleDeleteOrder(id: string) {
     if (!window.confirm("Удалить этот ордер?")) return;
     const res = await fetch(`/api/manager-cash-orders/${id}`, { method: "DELETE" });
-    if (res.ok) await loadOrders();
+    if (res.ok) await Promise.all([loadOrders(), loadAccounts()]);
   }
 
   async function handleExport() {
@@ -447,25 +516,34 @@ function ManagerCashTab() {
   const [obSaving, setObSaving] = useState(false);
   const [obError, setObError] = useState<string | null>(null);
 
+  // Якорь теперь на СЧЁТ (см. CashOpeningBalance.accountId) — редактируется
+  // только когда в фильтре выбран конкретный счёт (иначе непонятно, чей
+  // именно якорь двигать); см. кнопку-шестерёнку в карточке ниже, которая
+  // скрыта при filterAccountId==="all".
   async function openObDialog() {
-    const res = await fetch("/api/manager-cash-opening-balance");
+    if (filterAccountId === "all") return;
+    const res = await fetch(`/api/manager-cash-opening-balance?accountId=${filterAccountId}`);
     const data = await res.json();
     if (res.ok && data.balance) {
       setObDate(String(data.balance.effectiveDate).slice(0, 10));
       setObAmount(data.balance.amountCny);
+    } else {
+      setObDate(todayIso());
+      setObAmount("0");
     }
     setObError(null);
     setObOpen(true);
   }
 
   async function handleSaveOb() {
+    if (filterAccountId === "all") return;
     setObSaving(true);
     setObError(null);
     try {
       const res = await fetch("/api/manager-cash-opening-balance", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ effectiveDate: obDate, amountCny: Number(obAmount) }),
+        body: JSON.stringify({ accountId: filterAccountId, effectiveDate: obDate, amountCny: Number(obAmount) }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -473,10 +551,87 @@ function ManagerCashTab() {
         return;
       }
       setObOpen(false);
-      await loadOrders();
+      await Promise.all([loadOrders(), loadAccounts()]);
     } finally {
       setObSaving(false);
     }
+  }
+
+  // --- Перевод между счетами (см. CashTransfer) ---
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferDraft, setTransferDraft] = useState(EMPTY_TRANSFER_DRAFT);
+  const [transferSaving, setTransferSaving] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [transfers, setTransfers] = useState<CashTransferRecord[]>([]);
+  const [showTransferHistory, setShowTransferHistory] = useState(false);
+
+  const loadTransfers = useCallback(async () => {
+    const res = await fetch(`/api/manager-cash-transfers?month=${month}`);
+    const data = await res.json();
+    if (res.ok) setTransfers(data.transfers);
+  }, [month]);
+
+  useEffect(() => {
+    loadTransfers();
+  }, [loadTransfers]);
+
+  function openTransferDialog() {
+    setTransferDraft({
+      ...EMPTY_TRANSFER_DRAFT,
+      fromAccountId: accounts[0]?.id ?? "",
+      toAccountId: accounts[1]?.id ?? "",
+    });
+    setTransferError(null);
+    setTransferOpen(true);
+  }
+
+  async function handleSaveTransfer() {
+    if (!transferDraft.fromAccountId || !transferDraft.toAccountId) {
+      setTransferError("Укажите оба счёта.");
+      return;
+    }
+    if (transferDraft.fromAccountId === transferDraft.toAccountId) {
+      setTransferError("Счета списания и зачисления должны различаться.");
+      return;
+    }
+    if (!transferDraft.amount || Number(transferDraft.amount) <= 0) {
+      setTransferError("Укажите сумму.");
+      return;
+    }
+    setTransferSaving(true);
+    setTransferError(null);
+    try {
+      const res = await fetch("/api/manager-cash-transfers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: transferDraft.date,
+          fromAccountId: transferDraft.fromAccountId,
+          toAccountId: transferDraft.toAccountId,
+          currency: transferDraft.currency,
+          amount: Number(transferDraft.amount),
+          cnyToCurrencyRate: transferDraft.currency === "cny" ? 1 : Number(transferDraft.cnyToCurrencyRate),
+          comment: transferDraft.comment,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setTransferError(data.error ?? "Не удалось сохранить перевод.");
+        return;
+      }
+      setTransferOpen(false);
+      await Promise.all([loadAccounts(), loadTransfers()]);
+    } catch {
+      setTransferError("Не удалось связаться с сервером.");
+    } finally {
+      setTransferSaving(false);
+    }
+  }
+
+  async function handleDeleteTransfer(id: string) {
+    if (!window.confirm("Удалить этот перевод?")) return;
+    const res = await fetch(`/api/manager-cash-transfers/${id}`, { method: "DELETE" });
+    if (res.ok) await Promise.all([loadAccounts(), loadTransfers()]);
   }
 
   // --- Category management panel ---
@@ -598,15 +753,40 @@ function ManagerCashTab() {
         </div>
       </div>
 
+      {/* Баланс "прямо сейчас" по каждому счёту + итого — независимо от
+          выбранного месяца в ленте ниже (см. computeAccountBalanceCny в
+          lib/desk-services/cash-balance.ts). См. PB-V5 chat 2026-08-08. */}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Card className={cn("p-4", filterAccountId === "all" ? "ring-1 ring-primary/40" : "")}>
+          <button type="button" onClick={() => setFilterAccountId("all")} className="w-full text-left">
+            <p className="text-xs text-text-secondary">Итого по всем счетам</p>
+            <p className="mt-1 text-lg font-bold text-text">¥ {money(totalBalanceCny)}</p>
+          </button>
+        </Card>
+        {accounts.map((account) => (
+          <Card key={account.id} className={cn("p-4", filterAccountId === account.id ? "ring-1 ring-primary/40" : "")}>
+            <button type="button" onClick={() => setFilterAccountId(account.id)} className="w-full text-left">
+              <p className="text-xs text-text-secondary">{account.name}</p>
+              <p className="mt-1 text-lg font-bold text-text">¥ {money(account.balanceCny)}</p>
+            </button>
+          </Card>
+        ))}
+      </div>
+
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="p-4">
           <div className="flex items-center justify-between">
             <p className="text-xs text-text-secondary">Баланс на начало периода</p>
-            <button type="button" onClick={openObDialog} className="text-text-secondary hover:text-text" aria-label="Настроить начальный баланс">
-              <Settings2 className="h-3.5 w-3.5" />
-            </button>
+            {filterAccountId !== "all" && (
+              <button type="button" onClick={openObDialog} className="text-text-secondary hover:text-text" aria-label="Настроить начальный баланс">
+                <Settings2 className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
           <p className="mt-1 text-lg font-bold text-text">{summary ? `¥ ${money(summary.openingBalanceCny)}` : "—"}</p>
+          {filterAccountId === "all" && (
+            <p className="mt-1 text-[11px] text-text-secondary">Чтобы задать начальный остаток, выберите один счёт выше.</p>
+          )}
         </Card>
         <Card className="p-4">
           <p className="text-xs text-text-secondary">Приход за период</p>
@@ -629,8 +809,24 @@ function ManagerCashTab() {
         <Button type="button" size="sm" variant="outline" onClick={() => openCreateDialog("expense")}>
           <Plus className="h-4 w-4" /> Расходный ордер
         </Button>
+        <Button type="button" size="sm" variant="outline" onClick={openTransferDialog} disabled={accounts.length < 2}>
+          <ArrowLeftRight className="h-4 w-4" /> Перевести между счетами
+        </Button>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <Select value={filterAccountId} onValueChange={setFilterAccountId}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все счета</SelectItem>
+              {accounts.map((a) => (
+                <SelectItem key={a.id} value={a.id}>
+                  {a.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select value={filterType} onValueChange={setFilterType}>
             <SelectTrigger className="w-36">
               <SelectValue />
@@ -682,6 +878,7 @@ function ManagerCashTab() {
               <tr className="border-b border-border bg-bg text-left text-xs text-text-secondary">
                 <th className="px-3 py-1.5 font-medium">Дата</th>
                 <th className="px-3 py-1.5 font-medium">Тип</th>
+                <th className="px-3 py-1.5 font-medium">Счёт</th>
                 <th className="px-3 py-1.5 font-medium">Статья</th>
                 <th className="px-3 py-1.5 font-medium">Клиент</th>
                 <th className="px-3 py-1.5 font-medium">Сумма</th>
@@ -706,6 +903,7 @@ function ManagerCashTab() {
                       {TYPE_LABEL[order.type]}
                     </span>
                   </td>
+                  <td className="px-3 py-1.5 text-text-secondary">{order.account.name}</td>
                   <td className="px-3 py-1.5 text-text">{order.category.name}</td>
                   <td className="px-3 py-1.5 text-text-secondary">
                     {order.client?.name ?? "—"}
@@ -737,6 +935,61 @@ function ManagerCashTab() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {transfers.length > 0 && (
+        <div className="border-t border-border pt-4">
+          <button
+            type="button"
+            onClick={() => setShowTransferHistory((v) => !v)}
+            className="text-xs font-semibold text-text-secondary hover:text-text"
+          >
+            {showTransferHistory ? "Скрыть историю переводов" : `История переводов (${transfers.length})`}
+          </button>
+          {showTransferHistory && (
+            <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+              <table className="w-full min-w-2xl border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-bg text-left text-xs text-text-secondary">
+                    <th className="px-3 py-1.5 font-medium">Дата</th>
+                    <th className="px-3 py-1.5 font-medium">Со счёта</th>
+                    <th className="px-3 py-1.5 font-medium">На счёт</th>
+                    <th className="px-3 py-1.5 font-medium">Сумма</th>
+                    <th className="px-3 py-1.5 font-medium">Сумма, ¥</th>
+                    <th className="px-3 py-1.5 font-medium">Комментарий</th>
+                    <th className="px-3 py-1.5 font-medium" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {transfers.map((t) => (
+                    <tr key={t.id} className="border-b border-border last:border-0">
+                      <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">{new Date(t.date).toLocaleDateString("ru-RU")}</td>
+                      <td className="px-3 py-1.5 text-text">{t.fromAccount.name}</td>
+                      <td className="px-3 py-1.5 text-text">{t.toAccount.name}</td>
+                      <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">
+                        {money(Number(t.amount))} {CURRENCY_LABEL[t.currency]}
+                      </td>
+                      <td className="px-3 py-1.5 whitespace-nowrap font-medium text-text">¥ {money(Number(t.amountCny))}</td>
+                      <td className="max-w-50 truncate px-3 py-1.5 text-text-secondary" title={t.comment}>
+                        {t.comment}
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTransfer(t.id)}
+                          className="text-text-secondary hover:text-error"
+                          aria-label="Удалить перевод"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -833,6 +1086,22 @@ function ManagerCashTab() {
             <div className="space-y-1.5">
               <Label>Дата</Label>
               <Input type="date" value={draft.date} onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))} />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Счёт</Label>
+              <Select value={draft.accountId} onValueChange={(v) => setDraft((d) => ({ ...d, accountId: v }))}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Выберите счёт" />
+                </SelectTrigger>
+                <SelectContent>
+                  {accounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-1.5">
@@ -1028,9 +1297,9 @@ function ManagerCashTab() {
       <Dialog open={obOpen} onOpenChange={setObOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Начальный баланс</DialogTitle>
+            <DialogTitle>Начальный баланс — {accounts.find((a) => a.id === filterAccountId)?.name ?? ""}</DialogTitle>
             <DialogDescription>
-              Баланс на указанную дату — всё до и после считается автоматически по операциям.
+              Баланс этого счёта на указанную дату — всё до и после считается автоматически по операциям и переводам.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -1050,6 +1319,110 @@ function ManagerCashTab() {
             </Button>
             <Button type="button" onClick={handleSaveOb} disabled={obSaving}>
               {obSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Сохранить"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transfer dialog */}
+      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Перевод между счетами</DialogTitle>
+            <DialogDescription>Не доход и не расход — просто перекладывает сумму с одного счёта на другой.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Дата</Label>
+              <Input type="date" value={transferDraft.date} onChange={(e) => setTransferDraft((d) => ({ ...d, date: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <Label>Со счёта</Label>
+                <Select value={transferDraft.fromAccountId} onValueChange={(v) => setTransferDraft((d) => ({ ...d, fromAccountId: v }))}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Выберите счёт" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accounts.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>На счёт</Label>
+                <Select value={transferDraft.toAccountId} onValueChange={(v) => setTransferDraft((d) => ({ ...d, toAccountId: v }))}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Выберите счёт" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accounts.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-1.5">
+                <Label>Валюта</Label>
+                <Select
+                  value={transferDraft.currency}
+                  onValueChange={(v) =>
+                    setTransferDraft((d) => ({ ...d, currency: v as CashCurrency, cnyToCurrencyRate: v === "cny" ? "1" : d.cnyToCurrencyRate }))
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cny">¥ CNY</SelectItem>
+                    <SelectItem value="usd">$ USD</SelectItem>
+                    <SelectItem value="rub">₽ RUB</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Курс (1¥=)</Label>
+                <Input
+                  type="number"
+                  step="0.0001"
+                  disabled={transferDraft.currency === "cny"}
+                  value={transferDraft.cnyToCurrencyRate}
+                  onChange={(e) => setTransferDraft((d) => ({ ...d, cnyToCurrencyRate: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Сумма</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={transferDraft.amount}
+                  onChange={(e) => setTransferDraft((d) => ({ ...d, amount: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Комментарий</Label>
+              <Input
+                value={transferDraft.comment}
+                onChange={(e) => setTransferDraft((d) => ({ ...d, comment: e.target.value }))}
+                placeholder="Необязательно"
+              />
+            </div>
+            {transferError && <p className="text-xs text-error">{transferError}</p>}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setTransferOpen(false)}>
+              Отмена
+            </Button>
+            <Button type="button" onClick={handleSaveTransfer} disabled={transferSaving}>
+              {transferSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Перевести"}
             </Button>
           </DialogFooter>
         </DialogContent>

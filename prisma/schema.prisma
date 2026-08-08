@@ -327,6 +327,7 @@ model Manager {
   cashOrders     CashOrder[]
   quotePaymentAllocations QuotePaymentAllocation[]
   cashOpeningBalanceUpdates CashOpeningBalance[]
+  cashTransfersCreated CashTransfer[]
   fulfillmentOrders FulfillmentOrder[]
   completedFulfillmentServices FulfillmentOrderItemService[]
   quoteDraftRequests QuoteDraftRequest[]
@@ -1276,6 +1277,61 @@ enum CashCategoryPayoutTarget {
   assigned_manager
 }
 
+// Один физический "счёт" (кто фактически держит эти деньги — банковская
+// карта/нал у конкретного человека), не статья и не категория — статья
+// говорит "на что", счёт говорит "у кого/где". Каждый CashOrder и
+// CashOpeningBalance принадлежит ровно одному счёту; итоговый баланс
+// компании — просто сумма по всем счетам (перевод между счетами, см.
+// CashTransfer ниже, никогда не меняет эту сумму, только то, как она
+// разложена по счетам). Свободный список, не enum — руководитель сможет
+// завести третий счёт из интерфейса без миграции, тем же принципом, что и
+// CashCategory. См. PB-V5 chat 2026-08-08.
+model CashAccount {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  orders          CashOrder[]
+  openingBalances CashOpeningBalance[]
+  transfersFrom   CashTransfer[]       @relation("CashTransferFrom")
+  transfersTo     CashTransfer[]       @relation("CashTransferTo")
+}
+
+// Перенос денег с одного счёта на другой (напр. "Александр передал Антону
+// наличные") — НЕ доход и НЕ расход компании, поэтому не CashOrder: он не
+// имеет статьи, не должен попадать ни в incomeCny, ни в expenseCny, и не
+// должен влиять на СУММАРНЫЙ баланс по всем счетам (одна и та же сумма
+// просто уходит с одного счёта и приходит на другой). Отдельная модель —
+// её собственная история переводов ("запись в истории", см. запрос
+// пользователя) — вместо пары CashOrder-заглушек, которые пришлось бы
+// исключать из каждой income/expense-агрегации по всему коду. См. PB-V5
+// chat 2026-08-08.
+model CashTransfer {
+  id     String   @id @default(cuid())
+  date   DateTime
+
+  fromAccountId String
+  fromAccount   CashAccount @relation("CashTransferFrom", fields: [fromAccountId], references: [id])
+  toAccountId   String
+  toAccount     CashAccount @relation("CashTransferTo", fields: [toAccountId], references: [id])
+
+  currency          CashCurrency
+  amount            Decimal
+  cnyToCurrencyRate Decimal
+  amountCny         Decimal
+  comment           String       @default("")
+
+  createdByManagerId String
+  createdByManager   Manager  @relation(fields: [createdByManagerId], references: [id])
+  createdAt          DateTime @default(now())
+
+  @@index([date])
+  @@index([fromAccountId])
+  @@index([toAccountId])
+}
+
 // Статья — separate lists for income vs expense (an income статья like
 // "приход комиссия" never belongs on an expense order and vice versa).
 // Free-form, not an enum, so the owner can add a new статья from the UI
@@ -1322,6 +1378,13 @@ model CashOrder {
   type       CashOrderType
   // The ledger date the owner assigns to this operation, not createdAt.
   date       DateTime
+  // Какой физический счёт (кто держит деньги) это движение затрагивает —
+  // см. CashAccount выше. Обязательное: "деньги без счёта" не имеет
+  // смысла ни для дохода, ни для расхода. Существовавшие до введения
+  // счетов записи перенесены на счёт "Александр" при миграции. См. PB-V5
+  // chat 2026-08-08.
+  accountId  String?
+  account    CashAccount?  @relation(fields: [accountId], references: [id])
   categoryId String
   category   CashCategory  @relation(fields: [categoryId], references: [id])
   // Only ever set for income orders (UI doesn't offer this field for
@@ -1378,6 +1441,7 @@ model CashOrder {
   @@index([date])
   @@index([categoryId])
   @@index([quoteId])
+  @@index([accountId])
 }
 
 // Which line item of a "Счёт на выкуп" a payment covers — same six
@@ -1435,18 +1499,25 @@ model QuotePaymentAllocation {
   @@index([cashOrderId])
 }
 
-// Single anchor row: "as of this date, the balance was this many CNY" —
-// set once when the owner starts using this ledger (editable later to
-// reconcile). Balance at the start/end of ANY period after effectiveDate is
-// always DERIVED as anchor + running sum of CashOrder.amountCny, never
-// entered by hand month to month.
+// One anchor row PER СЧЁТ: "as of this date, this account's balance was
+// this many CNY" — set once per account when the owner starts reconciling
+// it (editable later). That account's balance at the start/end of ANY
+// period after effectiveDate is always DERIVED as anchor + running sum of
+// that account's own CashOrder.amountCny ± CashTransfer in/out, never
+// entered by hand month to month. Was a single company-wide anchor before
+// СЧЕТА existed — the one pre-existing row was migrated onto "Александр".
+// See PB-V5 chat 2026-08-08.
 model CashOpeningBalance {
-  id                 String   @id @default(cuid())
+  id                 String       @id @default(cuid())
+  accountId          String?
+  account            CashAccount? @relation(fields: [accountId], references: [id])
   effectiveDate      DateTime
   amountCny          Decimal
   updatedByManagerId String
-  updatedByManager   Manager  @relation(fields: [updatedByManagerId], references: [id])
-  updatedAt          DateTime @updatedAt
+  updatedByManager   Manager     @relation(fields: [updatedByManagerId], references: [id])
+  updatedAt          DateTime    @updatedAt
+
+  @@index([accountId])
 }
 
 // Фулфилмент — warehouse services billed directly to a client (goods

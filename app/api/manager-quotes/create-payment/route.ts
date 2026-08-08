@@ -3,7 +3,7 @@ import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { getVisibleManagerIds } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { getSystemSettings } from "@/lib/system-settings";
-import { getOrCreateBuyoutIncomeCategory } from "@/lib/desk-services/cash-categories";
+import { getOrCreateBuyoutIncomeCategory, getDefaultCashAccount } from "@/lib/desk-services/cash-categories";
 import {
   sumAlreadyPaidRubByCategory,
   isQuotePaymentCategory,
@@ -149,6 +149,7 @@ export async function POST(req: NextRequest) {
   }
 
   const category = await getOrCreateBuyoutIncomeCategory();
+  const defaultAccount = await getDefaultCashAccount();
   const date = typeof dateRaw === "string" && dateRaw ? new Date(dateRaw) : new Date();
   const quoteDisplayIds = quotes.map((q) => q.displayId).sort((a, b) => a - b);
   const comment =
@@ -161,6 +162,7 @@ export async function POST(req: NextRequest) {
       data: {
         type: "income",
         date,
+        accountId: defaultAccount.id,
         categoryId: category.id,
         clientId: client.id,
         currency: "rub",

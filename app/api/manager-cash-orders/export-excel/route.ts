@@ -3,6 +3,7 @@ import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canViewCash } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { renderCashReportExcel } from "@/lib/desk-services/cash-report-excel";
+import { computeAccountBalanceCny, computeAllAccountBalances } from "@/lib/desk-services/cash-balance";
 
 function parseMonthRange(monthParam: string | null): [Date, Date] {
   const match = monthParam?.match(/^(\d{4})-(\d{2})$/);
@@ -45,16 +46,17 @@ export async function GET(req: NextRequest) {
   }
 
   const [monthStart, monthEnd] = parseMonthRange(req.nextUrl.searchParams.get("month"));
+  // Необязательный — тот же фильтр по счёту (см. CashAccount в
+  // prisma/schema.prisma), что и основная лента в интерфейсе. См. PB-V5
+  // chat 2026-08-08.
+  const accountIdFilter = req.nextUrl.searchParams.get("accountId");
 
-  const anchor = await prisma.cashOpeningBalance.findFirst({ orderBy: { updatedAt: "desc" } });
-  const beforeMonthOrders = await prisma.cashOrder.findMany({
-    where: { date: { lt: monthStart, ...(anchor ? { gte: anchor.effectiveDate } : {}) } },
-    select: { type: true, amountCny: true },
-  });
-  const openingBalanceCny = Number(anchor?.amountCny ?? 0) + sumByType(beforeMonthOrders, "income") - sumByType(beforeMonthOrders, "expense");
+  const openingBalanceCny = accountIdFilter
+    ? await computeAccountBalanceCny(accountIdFilter, monthStart)
+    : (await computeAllAccountBalances(monthStart)).totalBalanceCny;
 
   const monthOrders = await prisma.cashOrder.findMany({
-    where: { date: { gte: monthStart, lt: monthEnd } },
+    where: { date: { gte: monthStart, lt: monthEnd }, ...(accountIdFilter ? { accountId: accountIdFilter } : {}) },
     include: { category: true, client: { select: { name: true } }, createdByManager: { select: { name: true } } },
     orderBy: { date: "asc" },
   });

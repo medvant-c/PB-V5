@@ -27,9 +27,10 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { date, categoryId, clientId, quoteId, currency, amount, cnyToCurrencyRate, comment } =
+  const { date, accountId, categoryId, clientId, quoteId, currency, amount, cnyToCurrencyRate, comment } =
     (body as {
       date?: unknown;
+      accountId?: unknown;
       categoryId?: unknown;
       clientId?: unknown;
       quoteId?: unknown;
@@ -42,6 +43,13 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const parsedDate = typeof date === "string" ? new Date(date) : null;
   if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
     return Response.json({ error: "Укажите дату." }, { status: 400 });
+  }
+  if (typeof accountId !== "string" || !accountId) {
+    return Response.json({ error: "Укажите счёт." }, { status: 400 });
+  }
+  const account = await prisma.cashAccount.findUnique({ where: { id: accountId } });
+  if (!account) {
+    return Response.json({ error: "Счёт не найден." }, { status: 400 });
   }
   if (typeof categoryId !== "string" || !categoryId) {
     return Response.json({ error: "Укажите статью." }, { status: 400 });
@@ -111,6 +119,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
         where: { id },
         data: {
           date: parsedDate,
+          accountId,
           categoryId,
           clientId: resolvedClientId,
           quoteId: resolvedQuoteId,
@@ -140,6 +149,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const order = await prisma.cashOrder.findUnique({
     where: { id },
     include: {
+      account: { select: { id: true, name: true } },
       category: true,
       client: { select: { id: true, name: true } },
       quote: { select: { id: true, displayId: true, productName: true } },
