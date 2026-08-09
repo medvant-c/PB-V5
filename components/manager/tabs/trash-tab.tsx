@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, Trash2 } from "lucide-react";
 import { EmptyState } from "@/components/desk/empty-state";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface TrashedQuote {
   id: string;
@@ -38,6 +40,28 @@ function ManagerTrashTab() {
   const [loading, setLoading] = useState(true);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Поиск по названию/номеру/клиенту + фильтр по менеджеру — список менеджеров
+  // берём из самих удалённых просчётов (не отдельным запросом), поскольку
+  // корзина и так уже владелец видит целиком. См. PB-V5 chat 2026-08-08.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [managerFilter, setManagerFilter] = useState("all");
+  const managers = useMemo(() => {
+    const byName = new Map<string, string>();
+    for (const q of quotes) byName.set(q.manager.name, q.manager.name);
+    return [...byName.values()].sort((a, b) => a.localeCompare(b, "ru"));
+  }, [quotes]);
+  const filteredQuotes = quotes.filter((q) => {
+    if (managerFilter !== "all" && q.manager.name !== managerFilter) return false;
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return true;
+    return (
+      q.productName.toLowerCase().includes(query) ||
+      String(q.displayId).includes(query) ||
+      q.client.name.toLowerCase().includes(query) ||
+      (q.client.company ?? "").toLowerCase().includes(query)
+    );
+  });
 
   const load = useCallback(() => {
     setLoading(true);
@@ -78,13 +102,48 @@ function ManagerTrashTab() {
 
       {error && <p className="text-xs text-error">{error}</p>}
 
+      {quotes.length > 5 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Поиск по названию, номеру или клиенту…"
+            className="w-full sm:w-72"
+          />
+          {managers.length > 1 && (
+            <Select value={managerFilter} onValueChange={setManagerFilter}>
+              <SelectTrigger className="w-full sm:w-52">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все менеджеры</SelectItem>
+                {managers.map((name) => (
+                  <SelectItem key={name} value={name}>
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {(searchQuery || managerFilter !== "all") && (
+            <span className="text-xs text-text-secondary">
+              Найдено: {filteredQuotes.length} из {quotes.length}
+            </span>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <p className="text-sm text-text-secondary">Загрузка…</p>
       ) : quotes.length === 0 ? (
         <EmptyState icon={Trash2} message="Корзина пуста." />
+      ) : filteredQuotes.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border p-4 text-sm text-text-secondary">
+          Ничего не найдено — попробуйте изменить запрос или сбросить фильтр.
+        </p>
       ) : (
         <div className="space-y-2">
-          {quotes.map((q) => (
+          {filteredQuotes.map((q) => (
             <div
               key={q.id}
               className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface p-3 text-sm"
