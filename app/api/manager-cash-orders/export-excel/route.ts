@@ -55,14 +55,29 @@ export async function GET(req: NextRequest) {
     ? await computeAccountBalanceCny(accountIdFilter, monthStart)
     : (await computeAllAccountBalances(monthStart)).totalBalanceCny;
 
-  const monthOrders = await prisma.cashOrder.findMany({
-    where: { date: { gte: monthStart, lt: monthEnd }, ...(accountIdFilter ? { accountId: accountIdFilter } : {}) },
-    include: { category: true, client: { select: { name: true } }, createdByManager: { select: { name: true } } },
-    orderBy: { date: "asc" },
-  });
+  const [monthOrders, transfersInScope, transfersOutScope] = await Promise.all([
+    prisma.cashOrder.findMany({
+      where: { date: { gte: monthStart, lt: monthEnd }, ...(accountIdFilter ? { accountId: accountIdFilter } : {}) },
+      include: { category: true, client: { select: { name: true } }, createdByManager: { select: { name: true } } },
+      orderBy: { date: "asc" },
+    }),
+    // Тот же учёт переводов между счетами в приход/расход, что и в GET
+    // /api/manager-cash-orders — см. комментарий там. Держим в синхроне,
+    // чтобы Excel-отчёт не расходился с тем, что видно на экране.
+    prisma.cashTransfer.findMany({
+      where: { date: { gte: monthStart, lt: monthEnd }, ...(accountIdFilter ? { toAccountId: accountIdFilter } : {}) },
+      select: { amountCny: true },
+    }),
+    prisma.cashTransfer.findMany({
+      where: { date: { gte: monthStart, lt: monthEnd }, ...(accountIdFilter ? { fromAccountId: accountIdFilter } : {}) },
+      select: { amountCny: true },
+    }),
+  ]);
 
-  const incomeCny = sumByType(monthOrders, "income");
-  const expenseCny = sumByType(monthOrders, "expense");
+  const transfersInCny = transfersInScope.reduce((sum, t) => sum + Number(t.amountCny), 0);
+  const transfersOutCny = transfersOutScope.reduce((sum, t) => sum + Number(t.amountCny), 0);
+  const incomeCny = sumByType(monthOrders, "income") + transfersInCny;
+  const expenseCny = sumByType(monthOrders, "expense") + transfersOutCny;
   const closingBalanceCny = openingBalanceCny + incomeCny - expenseCny;
 
   const breakdownMap = new Map<string, { name: string; type: "income" | "expense"; totalCny: number }>();

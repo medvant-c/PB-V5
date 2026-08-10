@@ -58,20 +58,43 @@ export async function GET(req: NextRequest) {
     ? await computeAccountBalanceCny(accountIdFilter, monthStart)
     : (await computeAllAccountBalances(monthStart)).totalBalanceCny;
 
-  const monthOrders = await prisma.cashOrder.findMany({
-    where: { date: { gte: monthStart, lt: monthEnd }, ...accountScope },
-    include: {
-      account: { select: { id: true, name: true } },
-      category: true,
-      client: { select: { id: true, name: true } },
-      quote: { select: { id: true, displayId: true, productName: true } },
-      createdByManager: { select: { name: true } },
-    },
-    orderBy: { date: "desc" },
-  });
+  const [monthOrders, transfersInScope, transfersOutScope] = await Promise.all([
+    prisma.cashOrder.findMany({
+      where: { date: { gte: monthStart, lt: monthEnd }, ...accountScope },
+      include: {
+        account: { select: { id: true, name: true } },
+        category: true,
+        client: { select: { id: true, name: true } },
+        quote: { select: { id: true, displayId: true, productName: true } },
+        createdByManager: { select: { name: true } },
+      },
+      orderBy: { date: "desc" },
+    }),
+    // Перевод между своими же счетами — это тоже реальные деньги, пришедшие
+    // на счёт / ушедшие со счёта, поэтому считаем его в приход/расход этого
+    // счёта. Без этого "Расход за период" видел только CashOrder, а
+    // openingBalanceCny/баланс сверху (computeAccountBalanceCny) уже
+    // учитывают переводы — из-за этого closingBalanceCny мог уйти в дикий
+    // минус, если за период был перевод БЕЗ дожидающегося его приходного
+    // ордера того же размера. Без фильтра по счёту ("Итого") toAccountId/
+    // fromAccountId ничем не ограничены — тогда это один и тот же набор
+    // переводов для "in" и "out", их суммы равны и взаимно гасятся в
+    // incomeCny−expenseCny, как и должно быть для перевода между своими же
+    // счетами. См. PB-V5 chat 2026-08-10.
+    prisma.cashTransfer.findMany({
+      where: { date: { gte: monthStart, lt: monthEnd }, ...(accountIdFilter ? { toAccountId: accountIdFilter } : {}) },
+      select: { amountCny: true },
+    }),
+    prisma.cashTransfer.findMany({
+      where: { date: { gte: monthStart, lt: monthEnd }, ...(accountIdFilter ? { fromAccountId: accountIdFilter } : {}) },
+      select: { amountCny: true },
+    }),
+  ]);
 
-  const incomeCny = sumByType(monthOrders, "income");
-  const expenseCny = sumByType(monthOrders, "expense");
+  const transfersInCny = transfersInScope.reduce((sum, t) => sum + Number(t.amountCny), 0);
+  const transfersOutCny = transfersOutScope.reduce((sum, t) => sum + Number(t.amountCny), 0);
+  const incomeCny = sumByType(monthOrders, "income") + transfersInCny;
+  const expenseCny = sumByType(monthOrders, "expense") + transfersOutCny;
   const closingBalanceCny = openingBalanceCny + incomeCny - expenseCny;
 
   const breakdownMap = new Map<string, { categoryId: string; name: string; type: string; totalCny: number }>();
