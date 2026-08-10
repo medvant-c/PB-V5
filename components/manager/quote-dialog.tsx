@@ -1017,7 +1017,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                     <div key={photo.id} className="relative h-20 w-20 overflow-hidden rounded-lg border border-border">
                       {/* eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset */}
                       <img
-                        src={`/api/manager-quotes/photos/${photo.id}`}
+                        src={`/api/manager-quotes/photos/${photo.id}/thumbnail`}
                         alt={photo.originalName}
                         onClick={() => setZoomedPhotoId(photo.id)}
                         className="h-full w-full cursor-zoom-in object-cover"

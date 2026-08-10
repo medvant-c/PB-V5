@@ -18,6 +18,11 @@ export interface DeskStorage {
   get(key: string): Promise<Buffer>;
   delete(key: string): Promise<void>;
   list(): Promise<string[]>;
+  // A derived, cached variant of an already-uploaded file (right now: a
+  // resized photo thumbnail) — same key + suffix on disk, generated lazily
+  // on first request and reused after that. `generate` only runs on a
+  // cache miss. See lib/desk-services/photo-thumbnail.ts.
+  getOrCreateVariant(key: string, variant: string, generate: (original: Buffer) => Promise<Buffer>): Promise<Buffer>;
 }
 
 // Files live outside /public — the only way to reach them is through the
@@ -56,12 +61,31 @@ class LocalDiskStorage implements DeskStorage {
   async delete(key: string): Promise<void> {
     assertSafeKey(key);
     await rm(path.join(UPLOAD_ROOT, key), { force: true });
+    // Best-effort — orphaning a tiny cached thumbnail if this ever grows a
+    // second variant name is harmless, so this isn't worth generalizing.
+    await rm(path.join(UPLOAD_ROOT, `${key}.thumb`), { force: true });
   }
 
   async list(): Promise<string[]> {
     await this.ensureRoot();
     const { readdir } = await import("fs/promises");
     return readdir(UPLOAD_ROOT);
+  }
+
+  async getOrCreateVariant(key: string, variant: string, generate: (original: Buffer) => Promise<Buffer>): Promise<Buffer> {
+    assertSafeKey(key);
+    if (variant.includes("..") || variant.includes("/") || variant.includes("\\")) {
+      throw new Error("Invalid storage variant");
+    }
+    await this.ensureRoot();
+    const variantPath = path.join(UPLOAD_ROOT, `${key}.${variant}`);
+    if (await fileExists(variantPath)) {
+      return readFile(variantPath);
+    }
+    const original = await this.get(key);
+    const generated = await generate(original);
+    await writeFile(variantPath, generated);
+    return generated;
   }
 }
 

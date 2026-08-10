@@ -399,7 +399,7 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
                     <div className="group relative shrink-0">
                       {/* eslint-disable-next-line @next/next/no-img-element -- client-facing portal, no next/image domain config needed for a same-origin API route */}
                       <img
-                        src={`/api/account-quotes/photos/${heroPhotoId}`}
+                        src={`/api/account-quotes/photos/${heroPhotoId}/thumbnail`}
                         alt={quote.productName}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -410,7 +410,7 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
                       <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden group-hover:block">
                         {/* eslint-disable-next-line @next/next/no-img-element -- see above */}
                         <img
-                          src={`/api/account-quotes/photos/${heroPhotoId}`}
+                          src={`/api/account-quotes/photos/${heroPhotoId}/thumbnail`}
                           alt={quote.productName}
                           className="h-auto w-auto max-h-[260px] max-w-[260px] rounded-lg border border-border bg-bg shadow-lg"
                         />
@@ -478,7 +478,7 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
                         <div key={photoId} className="group relative">
                           {/* eslint-disable-next-line @next/next/no-img-element -- see above */}
                           <img
-                            src={`/api/account-quotes/photos/${photoId}`}
+                            src={`/api/account-quotes/photos/${photoId}/thumbnail`}
                             alt={quote.productName}
                             onClick={() => setZoomedPhotoId(photoId)}
                             className="h-16 w-16 cursor-zoom-in rounded-lg border border-border bg-bg object-contain"
@@ -486,7 +486,7 @@ function AccountQuotes({ quotes }: { quotes: AccountQuote[] }) {
                           <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden group-hover:block">
                             {/* eslint-disable-next-line @next/next/no-img-element -- see above */}
                             <img
-                              src={`/api/account-quotes/photos/${photoId}`}
+                              src={`/api/account-quotes/photos/${photoId}/thumbnail`}
                               alt={quote.productName}
                               className="h-auto w-auto max-h-[260px] max-w-[260px] rounded-lg border border-border bg-bg shadow-lg"
                             />

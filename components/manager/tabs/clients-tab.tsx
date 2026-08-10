@@ -1719,7 +1719,7 @@ function ClientQuotes({
                   <>
                     {/* eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset */}
                     <img
-                      src={`/api/manager-quotes/photos/${quote.firstPhotoId}`}
+                      src={`/api/manager-quotes/photos/${quote.firstPhotoId}/thumbnail`}
                       alt=""
                       onClick={() => setZoomedPhotoId(quote.firstPhotoId)}
                       className="h-9 w-9 cursor-zoom-in rounded-md border border-border object-cover"
@@ -1735,7 +1735,7 @@ function ClientQuotes({
                     <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden group-hover:block">
                       {/* eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset */}
                       <img
-                        src={`/api/manager-quotes/photos/${quote.firstPhotoId}`}
+                        src={`/api/manager-quotes/photos/${quote.firstPhotoId}/thumbnail`}
                         alt=""
                         className="h-auto w-auto max-h-[140px] max-w-[140px] rounded-lg border border-border bg-bg shadow-lg"
                       />

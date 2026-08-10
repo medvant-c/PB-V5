@@ -2,17 +2,31 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, Calculator, FileText, GraduationCap, Image as ImageIcon, LogOut, ScrollText, Users } from "lucide-react";
+import dynamic from "next/dynamic";
+import { Briefcase, Calculator, FileText, GraduationCap, Image as ImageIcon, Loader2, LogOut, ScrollText, Users } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ClientsTab } from "@/components/desk/tabs/clients-tab";
-import { ServicesTab } from "@/components/desk/tabs/services-tab";
-import { ProductCardsTab } from "@/components/desk/tabs/product-cards-tab";
-import { TrainingTab } from "@/components/desk/tabs/training-tab";
-import { TemplatesTab } from "@/components/desk/tabs/templates-tab";
-import { ScriptsTab } from "@/components/desk/tabs/scripts-tab";
-import { CalculatorsTab } from "@/components/desk/tabs/calculators-tab";
 import { DeskAiPanel } from "@/components/desk/desk-ai-panel";
+
+function TabLoading() {
+  return (
+    <div className="flex items-center justify-center gap-2 py-16 text-sm text-text-secondary">
+      <Loader2 className="h-4 w-4 animate-spin" /> Загрузка…
+    </div>
+  );
+}
+
+// "Клиенты" — вкладка по умолчанию — грузится сразу вместе с остальным
+// shell'ом; все остальные — отдельными чанками по требованию, та же причина
+// и тот же приём, что и в components/manager/manager-workspace.tsx. См.
+// PB-V5 chat 2026-08-10.
+const ServicesTab = dynamic(() => import("@/components/desk/tabs/services-tab").then((m) => m.ServicesTab), { loading: TabLoading });
+const ProductCardsTab = dynamic(() => import("@/components/desk/tabs/product-cards-tab").then((m) => m.ProductCardsTab), { loading: TabLoading });
+const TrainingTab = dynamic(() => import("@/components/desk/tabs/training-tab").then((m) => m.TrainingTab), { loading: TabLoading });
+const TemplatesTab = dynamic(() => import("@/components/desk/tabs/templates-tab").then((m) => m.TemplatesTab), { loading: TabLoading });
+const ScriptsTab = dynamic(() => import("@/components/desk/tabs/scripts-tab").then((m) => m.ScriptsTab), { loading: TabLoading });
+const CalculatorsTab = dynamic(() => import("@/components/desk/tabs/calculators-tab").then((m) => m.CalculatorsTab), { loading: TabLoading });
 
 // Split into two clusters, not one flat peer list — "daily work" is what a
 // manager touches on most visits, "reference" is materials consulted

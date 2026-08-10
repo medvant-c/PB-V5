@@ -547,7 +547,7 @@ function QuoteListPanel({
         <a key={quote.id} href={`/api/manager-quotes/${quote.id}/pdf`} className="flex items-center gap-3 p-3 text-sm transition-colors hover:bg-bg">
           {quote.firstPhotoId ? (
             // eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset
-            <img src={`/api/manager-quotes/photos/${quote.firstPhotoId}`} alt="" className="h-9 w-9 shrink-0 rounded-md border border-border object-cover" />
+            <img src={`/api/manager-quotes/photos/${quote.firstPhotoId}/thumbnail`} alt="" className="h-9 w-9 shrink-0 rounded-md border border-border object-cover" />
           ) : (
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-dashed border-border text-text-secondary">
               <ImageOff className="h-4 w-4" />

@@ -2,28 +2,48 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, CheckSquare, Database, FileBarChart, FileText, Home, LogOut, Menu, Package, Percent, Receipt, Settings, Tag, Trash2, UserCog, Users, UsersRound, Wallet, X } from "lucide-react";
+import dynamic from "next/dynamic";
+import { Briefcase, CheckSquare, Database, FileBarChart, FileText, Home, Loader2, LogOut, Menu, Package, Percent, Receipt, Settings, Tag, Trash2, UserCog, Users, UsersRound, Wallet, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { ManagerClientsTab } from "@/components/manager/tabs/clients-tab";
-import { ManagerAllQuotesTab } from "@/components/manager/tabs/all-quotes-tab";
-import { ManagerStaffTab } from "@/components/manager/tabs/staff-tab";
-import { ManagerPriceListTab } from "@/components/manager/tabs/price-list-tab";
-import { ManagerDatabaseTab } from "@/components/manager/tabs/database-tab";
-import { ManagerConfirmationsTab } from "@/components/manager/tabs/confirmations-tab";
-import { ManagerTrashTab } from "@/components/manager/tabs/trash-tab";
-import { ManagerCashTab } from "@/components/manager/tabs/cash-tab";
-import { ManagerFulfillmentTab } from "@/components/manager/tabs/fulfillment-tab";
-import { ManagerSettingsTab } from "@/components/manager/tabs/settings-tab";
-import { ManagerProfitReportTab } from "@/components/manager/tabs/profit-report-tab";
-import { ManagerIssuedInvoicesTab } from "@/components/manager/tabs/issued-invoices-tab";
-import { ManagerClientDiscountsTab } from "@/components/manager/tabs/client-discounts-tab";
 import { ManagerDashboard } from "@/components/manager/manager-dashboard";
 import { DailyPlanPanel } from "@/components/manager/daily-plan-panel";
 import { DailyPlanReviewModal } from "@/components/manager/daily-plan-review-modal";
 import { DailyPlanAssignedModal } from "@/components/manager/daily-plan-assigned-modal";
 import { AutoRefresh } from "@/components/manager/auto-refresh";
 import { DeploymentWatcher } from "@/components/manager/deployment-watcher";
+
+function TabLoading() {
+  return (
+    <div className="flex items-center justify-center gap-2 py-16 text-sm text-text-secondary">
+      <Loader2 className="h-4 w-4 animate-spin" /> Загрузка…
+    </div>
+  );
+}
+
+// Каждая вкладка, кроме "Главная" (рендерится сразу при открытии кабинета,
+// поэтому грузится обычным static import вместе с остальным shell'ом),
+// раньше импортировалась статически прямо здесь — а значит, ВЕСЬ код
+// каждой вкладки (Касса, Отчёт о прибыли, редактор просчёта и т.д.) попадал
+// в один общий JS-бандл кабинета менеджера ещё до того, как менеджер вообще
+// открыл эту вкладку. На мобильном это ощутимо утяжеляло первую загрузку —
+// парсинг/выполнение кода, который в 90% сессий вообще не понадобится.
+// next/dynamic превращает каждую вкладку в отдельный чанк, который
+// подгружается только при первом переключении на неё. См. PB-V5 chat
+// 2026-08-10.
+const ManagerClientsTab = dynamic(() => import("@/components/manager/tabs/clients-tab").then((m) => m.ManagerClientsTab), { loading: TabLoading });
+const ManagerAllQuotesTab = dynamic(() => import("@/components/manager/tabs/all-quotes-tab").then((m) => m.ManagerAllQuotesTab), { loading: TabLoading });
+const ManagerStaffTab = dynamic(() => import("@/components/manager/tabs/staff-tab").then((m) => m.ManagerStaffTab), { loading: TabLoading });
+const ManagerPriceListTab = dynamic(() => import("@/components/manager/tabs/price-list-tab").then((m) => m.ManagerPriceListTab), { loading: TabLoading });
+const ManagerDatabaseTab = dynamic(() => import("@/components/manager/tabs/database-tab").then((m) => m.ManagerDatabaseTab), { loading: TabLoading });
+const ManagerConfirmationsTab = dynamic(() => import("@/components/manager/tabs/confirmations-tab").then((m) => m.ManagerConfirmationsTab), { loading: TabLoading });
+const ManagerTrashTab = dynamic(() => import("@/components/manager/tabs/trash-tab").then((m) => m.ManagerTrashTab), { loading: TabLoading });
+const ManagerCashTab = dynamic(() => import("@/components/manager/tabs/cash-tab").then((m) => m.ManagerCashTab), { loading: TabLoading });
+const ManagerFulfillmentTab = dynamic(() => import("@/components/manager/tabs/fulfillment-tab").then((m) => m.ManagerFulfillmentTab), { loading: TabLoading });
+const ManagerSettingsTab = dynamic(() => import("@/components/manager/tabs/settings-tab").then((m) => m.ManagerSettingsTab), { loading: TabLoading });
+const ManagerProfitReportTab = dynamic(() => import("@/components/manager/tabs/profit-report-tab").then((m) => m.ManagerProfitReportTab), { loading: TabLoading });
+const ManagerIssuedInvoicesTab = dynamic(() => import("@/components/manager/tabs/issued-invoices-tab").then((m) => m.ManagerIssuedInvoicesTab), { loading: TabLoading });
+const ManagerClientDiscountsTab = dynamic(() => import("@/components/manager/tabs/client-discounts-tab").then((m) => m.ManagerClientDiscountsTab), { loading: TabLoading });
 
 interface ManagerWorkspaceProps {
   name: string;
