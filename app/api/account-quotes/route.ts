@@ -12,9 +12,47 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: "Не авторизовано." }, { status: 401 });
   }
 
+  // Explicit select instead of a bare findMany (which pulled every one of
+  // Quote's ~100 columns, most of them internal-only — manager rates,
+  // overrides, cargo cost, etc. never even reach the mapped response
+  // below) — same "only fetch what this view renders" fix as the manager
+  // list route. See PB-V5 chat 2026-08-10.
   const quotes = await prisma.quote.findMany({
     where: { clientId, deletedAt: null },
     orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      displayId: true,
+      status: true,
+      quoteType: true,
+      productName: true,
+      productDescription: true,
+      color: true,
+      dimensions: true,
+      quantity: true,
+      priceCnyPerUnit: true,
+      totalPriceCny: true,
+      priceRubPerUnit: true,
+      totalPriceRub: true,
+      chinaDeliveryRub: true,
+      totalWeightKg: true,
+      totalVolumeM3: true,
+      densityKgM3: true,
+      cargoDeliveryUsd: true,
+      cargoDeliveryRub: true,
+      searchServiceFeeRub: true,
+      searchFeeWaived: true,
+      isCustomProduction: true,
+      customProductionFeeRub: true,
+      buyoutCommissionPercent: true,
+      buyoutCommissionRub: true,
+      totalRub: true,
+      cnyRateUsed: true,
+      usdRateUsed: true,
+      clientComment: true,
+      managerComment: true,
+      createdAt: true,
+    },
   });
 
   const [photos, attachedServices] = await Promise.all([
