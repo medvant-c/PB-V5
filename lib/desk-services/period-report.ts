@@ -371,17 +371,51 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
   });
   const payoutOrders = await prisma.cashOrder.findMany({
     where: { type: "expense", categoryId: { in: payoutCategories.map((c) => c.id) }, date: { gte: from, lt: to } },
-    select: { categoryId: true, amountCny: true, client: { select: { createdByManagerId: true } } },
+    select: { categoryId: true, amount: true, currency: true, amountCny: true, date: true, client: { select: { createdByManagerId: true } } },
   });
-  const tariffSettings = await prisma.tariffSettings.findFirst({ orderBy: { createdAt: "desc" } });
-  const cnyRateRub = tariffSettings ? Number(tariffSettings.cnyRateRub) : null;
+  // Historical ¥→₽ rate lookup instead of "today's" rate — a ¥-denominated
+  // "Выплата..." order carries no ₽ figure of its own (currency=cny means
+  // cnyToCurrencyRate=1 and amountCny=amount by construction, same as any
+  // other CashOrder), so SOME rate has to be applied to compare it against
+  // owedRub (which is always priced at each deal's own frozen historical
+  // rate, never today's). Using TariffSettings.findFirst() (today, whenever
+  // the report happens to be viewed) made "уже выплачено"/"остаток к
+  // выплате" drift up and down purely from FX movement, with nothing
+  // actually paid or earned changing — a report for a past period must
+  // read the same next month as it does today. TariffSettings rows are
+  // append-only/versioned over time (not a singleton), so this picks
+  // whichever rate was actually in effect on the order's own date. See
+  // PB-V5 chat 2026-08-10.
+  const tariffHistory = await prisma.tariffSettings.findMany({
+    orderBy: { createdAt: "asc" },
+    select: { cnyRateRub: true, createdAt: true },
+  });
+  function cnyRateRubAsOf(date: Date): number | null {
+    let rate: number | null = null;
+    for (const t of tariffHistory) {
+      if (t.createdAt > date) break;
+      rate = Number(t.cnyRateRub);
+    }
+    // The order predates every TariffSettings row on file — fall back to
+    // the earliest known rate rather than showing nothing.
+    return rate ?? (tariffHistory.length > 0 ? Number(tariffHistory[0].cnyRateRub) : null);
+  }
 
   const alreadyPaidRubByManagerId = new Map<string, number>();
   const alreadyPaidRubByInvestorId = new Map<string, number>();
   for (const order of payoutOrders) {
     const category = payoutCategories.find((c) => c.id === order.categoryId);
-    if (!category || !cnyRateRub) continue;
-    const amountRub = Number(order.amountCny) * cnyRateRub;
+    if (!category) continue;
+    // Paid directly in ₽ — the exact real figure, no conversion (and
+    // nothing left to look up) needed at all.
+    let amountRub: number;
+    if (order.currency === "rub") {
+      amountRub = Number(order.amount);
+    } else {
+      const rate = cnyRateRubAsOf(order.date);
+      if (rate === null) continue;
+      amountRub = Number(order.amountCny) * rate;
+    }
     if (category.payoutTarget === "assigned_manager") {
       const managerId = order.client?.createdByManagerId;
       if (!managerId) continue;
@@ -422,7 +456,11 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
     investorPoolRub,
     managerPayouts,
     investorPayouts,
-    cnyRateRub,
+    // Today's rate, purely for the UI's "X ¥ (Y ₽)" display convenience —
+    // every ₽ figure above is already fully computed; this never feeds back
+    // into any of that math. See cnyRateRubAsOf above for the rate actually
+    // used to price historical ¥ payouts into owedRub/paidRub.
+    cnyRateRub: tariffHistory.length > 0 ? Number(tariffHistory[tariffHistory.length - 1].cnyRateRub) : null,
   };
 }
 
