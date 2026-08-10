@@ -49,12 +49,21 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     orderBy: { uploadedAt: "asc" },
   });
 
+  const wechatQr = await prisma.deskFile.findFirst({
+    where: { tab: "quote_wechat_qr", relatedId: quote.id },
+  });
+
   const attachedServices = await prisma.quoteAttachedService.findMany({
     where: { quoteId: quote.id },
     orderBy: { createdAt: "asc" },
   });
 
-  return Response.json({ quote: stripCargoCostForNonOwner(quote, await canViewCargoCost(session)), photos, attachedServices });
+  return Response.json({
+    quote: stripCargoCostForNonOwner(quote, await canViewCargoCost(session)),
+    photos,
+    wechatQr,
+    attachedServices,
+  });
 }
 
 // Edits never move money the client was already quoted: FX rates and the
@@ -196,11 +205,17 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const cnyRateOverrideConfirmedByManagerId = cnyRateOverrideChanged ? null : existing.cnyRateOverrideConfirmedByManagerId;
   const cnyRateOverrideConfirmedAt = cnyRateOverrideChanged ? null : existing.cnyRateOverrideConfirmedAt;
 
-  // Same reset-on-change rule again, for the manual buyout-commission % —
-  // see Quote.buyoutCommissionOverrideConfirmed in prisma/schema.prisma.
+  // Same reset-on-change rule again, for the manual buyout-commission
+  // override — see Quote.buyoutCommissionOverrideConfirmed in
+  // prisma/schema.prisma. One shared confirm flag covers BOTH override
+  // shapes (% or ₽, mutually exclusive) — a change in either resets it.
   const existingBuyoutCommissionPercentOverride =
     existing.buyoutCommissionPercentOverride !== null ? Number(existing.buyoutCommissionPercentOverride) : undefined;
-  const buyoutCommissionOverrideChanged = fields.buyoutCommissionPercentOverride !== existingBuyoutCommissionPercentOverride;
+  const existingBuyoutCommissionRubOverride =
+    existing.buyoutCommissionRubOverride !== null ? Number(existing.buyoutCommissionRubOverride) : undefined;
+  const buyoutCommissionOverrideChanged =
+    fields.buyoutCommissionPercentOverride !== existingBuyoutCommissionPercentOverride ||
+    fields.buyoutCommissionRubOverride !== existingBuyoutCommissionRubOverride;
   const buyoutCommissionOverrideConfirmed = buyoutCommissionOverrideChanged ? false : existing.buyoutCommissionOverrideConfirmed;
   const buyoutCommissionOverrideConfirmedByManagerId = buyoutCommissionOverrideChanged
     ? null
@@ -332,6 +347,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       buyoutCommissionPercent: computed.buyoutCommissionPercent,
       buyoutCommissionRub: computed.buyoutCommissionRub,
       buyoutCommissionPercentOverride: fields.buyoutCommissionPercentOverride ?? null,
+      buyoutCommissionRubOverride: fields.buyoutCommissionRubOverride ?? null,
       buyoutCommissionOverrideConfirmed,
       buyoutCommissionOverrideConfirmedByManagerId,
       buyoutCommissionOverrideConfirmedAt,
@@ -411,6 +427,48 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       uploaded++;
     } catch (error) {
       console.error("Manager quote edit: photo upload failed", error);
+    }
+  }
+
+  // WeChat QR поставщика — один слот на просчёт, та же логика удаления/
+  // замены, что и у обычных фото выше, только своя вкладка DeskFile и без
+  // ограничения на количество (всегда максимум одна штука). См.
+  // Quote.productLink — тот же "внутреннее, в клиентскую выгрузку не идёт"
+  // статус, просто картинка вместо ссылки. PB-V5 chat 2026-08-10.
+  if (formData.get("removeWechatQr") === "true") {
+    const existingQr = await prisma.deskFile.findFirst({ where: { tab: "quote_wechat_qr", relatedId: id } });
+    if (existingQr) {
+      try {
+        await storage.delete(existingQr.storageKey);
+      } catch (error) {
+        console.error("Manager quote edit: WeChat QR cleanup failed", error);
+      }
+      await prisma.deskFile.delete({ where: { id: existingQr.id } });
+    }
+  }
+  const wechatQrPhoto = formData.get("wechatQrPhoto");
+  if (wechatQrPhoto instanceof File && SUPPORTED_IMAGE_TYPES.has(wechatQrPhoto.type) && wechatQrPhoto.size <= MAX_PHOTO_BYTES) {
+    try {
+      // Новая картинка заменяет старую — не более одного QR на просчёт.
+      const previousQr = await prisma.deskFile.findFirst({ where: { tab: "quote_wechat_qr", relatedId: id } });
+      if (previousQr) {
+        await storage.delete(previousQr.storageKey).catch(() => {});
+        await prisma.deskFile.delete({ where: { id: previousQr.id } });
+      }
+      const buffer = Buffer.from(await wechatQrPhoto.arrayBuffer());
+      const stored = await storage.upload(buffer, wechatQrPhoto.name);
+      await prisma.deskFile.create({
+        data: {
+          tab: "quote_wechat_qr",
+          relatedId: id,
+          storageKey: stored.key,
+          originalName: wechatQrPhoto.name,
+          mimeType: wechatQrPhoto.type,
+          size: stored.size,
+        },
+      });
+    } catch (error) {
+      console.error("Manager quote edit: WeChat QR upload failed", error);
     }
   }
 

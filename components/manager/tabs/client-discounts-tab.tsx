@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Percent } from "lucide-react";
+import { Percent, Pencil } from "lucide-react";
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/manager/searchable-select";
+import { QuoteDialog } from "@/components/manager/quote-dialog";
 
 type QuoteDiscountType =
   | "cargo_discount"
@@ -51,6 +52,12 @@ function ManagerClientDiscountsTab() {
   const [typeFilter, setTypeFilter] = useState<QuoteDiscountType | "all">("all");
   const [managerFilter, setManagerFilter] = useState("all");
   const [clientFilter, setClientFilter] = useState("all");
+  // "Отменить или изменить" — не отдельный редактор с собственным пересчётом
+  // цены (второй, потенциально расходящийся с движком расчёта путь для
+  // финансово чувствительных полей — риск не оправдан), а тот же QuoteDialog,
+  // что и везде в кабинете: открыть просчёт, обнулить или поменять поле,
+  // сохранить — движок сам пересчитает totalRub. См. PB-V5 chat 2026-08-10.
+  const [editingQuote, setEditingQuote] = useState<{ id: string; client: { id: string; name: string } } | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -181,6 +188,7 @@ function ManagerClientDiscountsTab() {
                 <th className="px-3 py-1.5 font-medium">Тип</th>
                 <th className="px-3 py-1.5 text-right font-medium">Значение</th>
                 <th className="px-3 py-1.5 font-medium">Дата</th>
+                <th className="px-3 py-1.5 font-medium" />
               </tr>
             </thead>
             <tbody>
@@ -195,11 +203,34 @@ function ManagerClientDiscountsTab() {
                   <td className="px-3 py-1.5 text-text-secondary">{r.label}</td>
                   <td className="px-3 py-1.5 text-right font-medium text-text">{r.valueLabel}</td>
                   <td className="px-3 py-1.5 text-text-secondary">{fmtDate(r.createdAt)}</td>
+                  <td className="px-3 py-1.5 text-right">
+                    <button
+                      type="button"
+                      onClick={() => setEditingQuote({ id: r.quoteId, client: { id: r.client.id, name: r.client.name } })}
+                      className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Отменить/изменить
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {editingQuote && (
+        <QuoteDialog
+          client={editingQuote.client}
+          editingQuoteId={editingQuote.id}
+          open={editingQuote !== null}
+          onOpenChange={(open) => !open && setEditingQuote(null)}
+          onSaved={() => {
+            setEditingQuote(null);
+            load();
+          }}
+        />
       )}
     </div>
   );

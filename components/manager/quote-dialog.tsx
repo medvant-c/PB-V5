@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ExternalLink, Info, Loader2, X } from "lucide-react";
+import { ChevronDown, ExternalLink, Info, Loader2, Plus, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -139,6 +139,7 @@ interface QuoteDetail {
   usdRateOverrideConfirmed: boolean;
   buyoutCommissionPercent: string;
   buyoutCommissionPercentOverride: string | null;
+  buyoutCommissionRubOverride: string | null;
   buyoutCommissionOverrideConfirmed: boolean;
   searchFeeWaived: boolean;
   searchServiceFeeRubOverride: string | null;
@@ -147,6 +148,8 @@ interface QuoteDetail {
   customProductionFeeOverrideConfirmed: boolean;
   isCustomProduction: boolean;
   isCargoOnly: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface QuoteDialogProps {
@@ -175,6 +178,10 @@ const CUSTOM_PRODUCTION_FIELD_BY_TYPE: Record<(typeof QUOTE_TYPES)[number]["valu
 
 function fmt(value: number): string {
   return Number.isFinite(value) ? Math.round(value).toLocaleString("ru-RU") : "—";
+}
+
+function fmtDateTime(value: string): string {
+  return new Date(value).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
 }
 
 // Пусть менеджер вставляет ссылку без протокола (1688 часто копируется как
@@ -222,6 +229,7 @@ const BLANK_FORM = {
   cnyRateRubOverride: "",
   usdRateRubOverride: "",
   buyoutCommissionPercentOverride: "",
+  buyoutCommissionRubOverride: "",
   searchServiceFeeRubOverride: "",
   customProductionFeeRubOverride: "",
 };
@@ -253,6 +261,10 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     buyoutCommissionPercent: number;
     searchFeeWaived: boolean;
   } | null>(null);
+  // Только для отображения в шапке ("Создан.../Изменён...") — ни на что не
+  // влияет, поэтому не сбрасывается вместе с остальной формой при закрытии,
+  // только при открытии нового/другого просчёта. См. PB-V5 chat 2026-08-10.
+  const [quoteDates, setQuoteDates] = useState<{ createdAt: string; updatedAt: string } | null>(null);
 
   // First field in the form — decides which country's DensityTariff/
   // VolumeTariff rows are even eligible below (see the tariff-loading
@@ -264,6 +276,12 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   const [photos, setPhotos] = useState<File[]>([]);
   const [existingPhotos, setExistingPhotos] = useState<ExistingPhoto[]>([]);
   const [removedPhotoIds, setRemovedPhotoIds] = useState<string[]>([]);
+  // WeChat QR поставщика — тот же "внутреннее, не в клиентскую выгрузку"
+  // статус, что и productLink, только картинка вместо ссылки. Один слот, не
+  // массив, как у existingPhotos выше. См. PB-V5 chat 2026-08-10.
+  const [existingWechatQr, setExistingWechatQr] = useState<ExistingPhoto | null>(null);
+  const [wechatQrFile, setWechatQrFile] = useState<File | null>(null);
+  const [removeWechatQr, setRemoveWechatQr] = useState(false);
   // Клик/тап по уже загруженному фото — открывает оригинал в полный размер
   // (см. components/manager/photo-lightbox.tsx) вместо непредсказуемого
   // нативного зума браузера.
@@ -326,6 +344,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   const [usdRateRubOverride, setUsdRateRubOverride] = useState(BLANK_FORM.usdRateRubOverride);
   const [usdRateOverrideConfirmed, setUsdRateOverrideConfirmed] = useState(false);
   const [buyoutCommissionPercentOverride, setBuyoutCommissionPercentOverride] = useState(BLANK_FORM.buyoutCommissionPercentOverride);
+  const [buyoutCommissionRubOverride, setBuyoutCommissionRubOverride] = useState(BLANK_FORM.buyoutCommissionRubOverride);
   const [buyoutCommissionOverrideConfirmed, setBuyoutCommissionOverrideConfirmed] = useState(false);
   const [searchServiceFeeRubOverride, setSearchServiceFeeRubOverride] = useState(BLANK_FORM.searchServiceFeeRubOverride);
   const [searchServiceFeeOverrideConfirmed, setSearchServiceFeeOverrideConfirmed] = useState(false);
@@ -440,13 +459,18 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       setUsdRateRubOverride(BLANK_FORM.usdRateRubOverride);
       setUsdRateOverrideConfirmed(false);
       setBuyoutCommissionPercentOverride(BLANK_FORM.buyoutCommissionPercentOverride);
+      setBuyoutCommissionRubOverride(BLANK_FORM.buyoutCommissionRubOverride);
       setBuyoutCommissionOverrideConfirmed(false);
       setSearchServiceFeeRubOverride(BLANK_FORM.searchServiceFeeRubOverride);
       setSearchServiceFeeOverrideConfirmed(false);
       setCustomProductionFeeRubOverride(BLANK_FORM.customProductionFeeRubOverride);
       setCustomProductionFeeOverrideConfirmed(false);
       setFrozenRates(null);
+      setQuoteDates(null);
       setExistingPhotos([]);
+      setExistingWechatQr(null);
+      setWechatQrFile(null);
+      setRemoveWechatQr(false);
       return;
     }
 
@@ -457,6 +481,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         (data: {
           quote: QuoteDetail;
           photos: ExistingPhoto[];
+          wechatQr: ExistingPhoto | null;
           attachedServices: { serviceCatalogItemId: string | null; name: string; priceRub: string }[];
         }) => {
           const q = data.quote;
@@ -494,6 +519,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           setUsdRateRubOverride(q.usdRateRubOverride ?? "");
           setUsdRateOverrideConfirmed(q.usdRateOverrideConfirmed);
           setBuyoutCommissionPercentOverride(q.buyoutCommissionPercentOverride ?? "");
+          setBuyoutCommissionRubOverride(q.buyoutCommissionRubOverride ?? "");
           setBuyoutCommissionOverrideConfirmed(q.buyoutCommissionOverrideConfirmed);
           setSearchServiceFeeRubOverride(q.searchServiceFeeRubOverride ?? "");
           setSearchServiceFeeOverrideConfirmed(q.searchServiceFeeOverrideConfirmed);
@@ -505,7 +531,11 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
             buyoutCommissionPercent: Number(q.buyoutCommissionPercent),
             searchFeeWaived: q.searchFeeWaived,
           });
+          setQuoteDates({ createdAt: q.createdAt, updatedAt: q.updatedAt });
           setExistingPhotos(data.photos ?? []);
+          setExistingWechatQr(data.wechatQr ?? null);
+          setWechatQrFile(null);
+          setRemoveWechatQr(false);
           setAttachedServices(
             (data.attachedServices ?? []).map((s) => ({
               serviceCatalogItemId: s.serviceCatalogItemId ?? undefined,
@@ -653,6 +683,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       volumeTariffs: volumeTariffInputs,
       searchServiceFeeRub,
       buyoutCommissionTiers,
+      buyoutCommissionRubOverride: num(buyoutCommissionRubOverride),
       // A manual override is usable immediately, same as
       // cnyRateRubOverride below — confirmation only gates the sign-off.
       usdRateRub: num(usdRateRubOverride) ?? (isFrozen ? frozenRates.usdRateRub : Number(tariffs.usdRateRub)),
@@ -733,6 +764,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     cnyRateRubOverride,
     usdRateRubOverride,
     buyoutCommissionPercentOverride,
+    buyoutCommissionRubOverride,
     searchServiceFeeRubOverride,
     customProductionFeeRubOverride,
     isEditing,
@@ -834,6 +866,9 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         if (buyoutCommissionPercentOverride.trim()) {
           formData.append("buyoutCommissionPercentOverride", buyoutCommissionPercentOverride.trim());
         }
+        if (buyoutCommissionRubOverride.trim()) {
+          formData.append("buyoutCommissionRubOverride", buyoutCommissionRubOverride.trim());
+        }
         if (searchServiceFeeRubOverride.trim()) {
           formData.append("searchServiceFeeRubOverride", searchServiceFeeRubOverride.trim());
         }
@@ -850,6 +885,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       }
       photos.forEach((photo, index) => formData.append(`photo${index}`, photo));
       if (isEditing && removedPhotoIds.length > 0) formData.append("removePhotoIds", removedPhotoIds.join(","));
+      if (wechatQrFile) formData.append("wechatQrPhoto", wechatQrFile);
+      if (isEditing && removeWechatQr) formData.append("removeWechatQr", "true");
 
       const res = await fetch(isEditing ? `/api/manager-quotes/${editingQuoteId}` : "/api/manager-quotes", {
         method: isEditing ? "PATCH" : "POST",
@@ -885,6 +922,12 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           <DialogTitle>
             {isEditing ? "Редактировать просчёт" : "Просчёт"} для клиента {client.name}
           </DialogTitle>
+          {quoteDates && (
+            <p className="text-xs text-text-secondary">
+              Создан: {fmtDateTime(quoteDates.createdAt)}
+              {quoteDates.updatedAt !== quoteDates.createdAt && <> · Изменён: {fmtDateTime(quoteDates.updatedAt)}</>}
+            </p>
+          )}
         </DialogHeader>
 
         {loadingTariffs || loadingQuote ? (
@@ -1079,6 +1122,63 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                     >
                       <ExternalLink className="h-4 w-4" />
                     </a>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label>QR-код WeChat поставщика (не показывается клиенту)</Label>
+                <p className="text-xs text-text-secondary">Для поставщиков без прямой ссылки на товар — второй способ найти его снова.</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  {existingWechatQr && !removeWechatQr && (
+                    <div className="relative h-20 w-20 overflow-hidden rounded-lg border border-border">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset */}
+                      <img
+                        src={`/api/manager-quotes/photos/${existingWechatQr.id}/thumbnail`}
+                        alt={existingWechatQr.originalName}
+                        onClick={() => setZoomedPhotoId(existingWechatQr.id)}
+                        className="h-full w-full cursor-zoom-in object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setRemoveWechatQr(true)}
+                        aria-label="Удалить QR-код"
+                        className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                  {wechatQrFile && (
+                    <div className="relative h-20 w-20 overflow-hidden rounded-lg border border-border">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- локальный File, ещё не загружен на сервер */}
+                      <img src={URL.createObjectURL(wechatQrFile)} alt={wechatQrFile.name} className="h-full w-full object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => setWechatQrFile(null)}
+                        aria-label="Отменить выбор файла"
+                        className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                  {!wechatQrFile && (!existingWechatQr || removeWechatQr) && (
+                    <label className="flex h-20 w-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border text-text-secondary transition-colors hover:border-primary/30 hover:text-primary">
+                      <Plus className="h-4 w-4" />
+                      <span className="text-[10px]">Загрузить</span>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setWechatQrFile(file);
+                            setRemoveWechatQr(false);
+                          }
+                        }}
+                      />
+                    </label>
                   )}
                 </div>
               </div>
@@ -1359,7 +1459,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                   <div className="flex justify-between text-text-secondary">
                     <span>
                       Комиссия за выкуп ({preview.buyoutCommissionPercent.toFixed(2)}%
-                      {buyoutCommissionPercentOverride.trim() && " — вручную"})
+                      {(buyoutCommissionPercentOverride.trim() || buyoutCommissionRubOverride.trim()) && " — вручную"})
                     </span>
                     <span>{fmt(preview.buyoutCommissionRub)} ₽</span>
                   </div>
@@ -1468,17 +1568,37 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               </div>
 
               <div className="space-y-1.5">
-                <Label>Ручная комиссия за выкуп, % (необязательно — иначе берётся из тарифов)</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="0.01"
-                  placeholder="из тарифов"
-                  value={buyoutCommissionPercentOverride}
-                  onChange={(e) => setBuyoutCommissionPercentOverride(e.target.value)}
-                />
-                {buyoutCommissionPercentOverride.trim() &&
+                <Label>Ручная комиссия за выкуп (необязательно — иначе берётся из тарифов; либо % либо ₽, не вместе)</Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="0.01"
+                    placeholder="% из тарифов"
+                    value={buyoutCommissionPercentOverride}
+                    onChange={(e) => {
+                      setBuyoutCommissionPercentOverride(e.target.value);
+                      if (e.target.value.trim()) setBuyoutCommissionRubOverride("");
+                    }}
+                    disabled={Boolean(buyoutCommissionRubOverride.trim())}
+                    className="flex-1"
+                  />
+                  <Input
+                    type="number"
+                    min={0}
+                    step="1"
+                    placeholder="₽ вручную"
+                    value={buyoutCommissionRubOverride}
+                    onChange={(e) => {
+                      setBuyoutCommissionRubOverride(e.target.value);
+                      if (e.target.value.trim()) setBuyoutCommissionPercentOverride("");
+                    }}
+                    disabled={Boolean(buyoutCommissionPercentOverride.trim())}
+                    className="flex-1"
+                  />
+                </div>
+                {(buyoutCommissionPercentOverride.trim() || buyoutCommissionRubOverride.trim()) &&
                   (isEditing ? (
                     <p className={cn("text-xs", buyoutCommissionOverrideConfirmed ? "text-success" : "text-warning")}>
                       {buyoutCommissionOverrideConfirmed

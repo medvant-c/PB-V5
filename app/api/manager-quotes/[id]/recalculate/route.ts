@@ -107,6 +107,10 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       existing.buyoutCommissionPercentOverride !== null ? Number(existing.buyoutCommissionPercentOverride) : undefined,
       buyoutCommissionTariffsToEngineInput(buyoutCommissionTiers),
     ),
+    // Same "reused as-is" rule as the % override above — see
+    // Quote.buyoutCommissionRubOverride in prisma/schema.prisma.
+    buyoutCommissionRubOverride:
+      existing.buyoutCommissionRubOverride !== null ? Number(existing.buyoutCommissionRubOverride) : undefined,
     // Reused as-is if set, same as cargoRateUsdOverride/cnyRateRubOverride
     // above — recalculate re-prices tariff-driven numbers against today's
     // rates, it doesn't touch the manual override itself or its

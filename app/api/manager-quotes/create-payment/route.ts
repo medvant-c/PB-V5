@@ -47,6 +47,7 @@ export async function POST(req: NextRequest) {
     date: dateRaw,
     comment: commentRaw,
     allocations: allocationsRaw,
+    accountId: accountIdRaw,
   } = (body as Record<string, unknown>) ?? {};
 
   const amountRub = Number(amountRubRaw);
@@ -149,7 +150,19 @@ export async function POST(req: NextRequest) {
   }
 
   const category = await getOrCreateBuyoutIncomeCategory();
-  const defaultAccount = await getDefaultCashAccount();
+  // Explicit choice from the dialog wins; falls back to the same
+  // self-healing default only for callers that don't pass one at all — see
+  // getDefaultCashAccount's own comment.
+  let resolvedAccountId: string;
+  if (typeof accountIdRaw === "string" && accountIdRaw) {
+    const account = await prisma.cashAccount.findUnique({ where: { id: accountIdRaw } });
+    if (!account) {
+      return Response.json({ error: "Счёт не найден." }, { status: 400 });
+    }
+    resolvedAccountId = account.id;
+  } else {
+    resolvedAccountId = (await getDefaultCashAccount()).id;
+  }
   const date = typeof dateRaw === "string" && dateRaw ? new Date(dateRaw) : new Date();
   const quoteDisplayIds = quotes.map((q) => q.displayId).sort((a, b) => a - b);
   const comment =
@@ -162,7 +175,7 @@ export async function POST(req: NextRequest) {
       data: {
         type: "income",
         date,
-        accountId: defaultAccount.id,
+        accountId: resolvedAccountId,
         categoryId: category.id,
         clientId: client.id,
         currency: "rub",

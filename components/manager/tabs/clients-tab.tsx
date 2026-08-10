@@ -8,7 +8,6 @@ import {
   Check,
   ChevronDown,
   ChevronLeft,
-  Container,
   Copy,
   Download,
   FileSpreadsheet,
@@ -58,7 +57,6 @@ import { EmptyState } from "@/components/desk/empty-state";
 import { QuoteDialog } from "@/components/manager/quote-dialog";
 import { PhotoLightbox } from "@/components/manager/photo-lightbox";
 import { ClientFilesPanel } from "@/components/manager/client-files-panel";
-import { ContainerShipmentDialog } from "@/components/manager/container-shipment-dialog";
 import { CreatePaymentDialog } from "@/components/manager/create-payment-dialog";
 import {
   QUOTE_STATUSES,
@@ -140,6 +138,7 @@ interface QuoteRecord {
   deliveryPricingMode: string;
   densityKgM3: string;
   createdAt: string;
+  updatedAt: string;
   manager: { id: string; name: string };
   client: { id: string; name: string; company: string | null };
   firstPhotoId: string | null;
@@ -459,6 +458,7 @@ function ClientQuotes({
   allManagers,
   teamManagers,
   canConfirmBuyout,
+  paymentAccounts,
   clientSelfSourcedConfirmed,
   clientCreatedByManagerId,
 }: {
@@ -475,6 +475,7 @@ function ClientQuotes({
   allManagers: { id: string; name: string }[] | null;
   teamManagers: { id: string; name: string }[] | null;
   canConfirmBuyout: boolean;
+  paymentAccounts: { id: string; name: string }[];
   clientSelfSourcedConfirmed?: boolean;
   clientCreatedByManagerId?: string | null;
 }) {
@@ -504,7 +505,6 @@ function ClientQuotes({
   // the whole selection at once, not one quote.
   const [bulkBuyoutInvoiceCurrency, setBulkBuyoutInvoiceCurrency] = useState<"rub" | "usd" | "usdt" | "cny" | null>(null);
   const [bulkBuyoutInvoiceError, setBulkBuyoutInvoiceError] = useState<string | null>(null);
-  const [containerDialogOpen, setContainerDialogOpen] = useState(false);
   const [createPaymentDialogOpen, setCreatePaymentDialogOpen] = useState(false);
   // The toolbar below used to be seven-plus separate pill buttons in a row
   // (unreadable once the client card moved into the narrower master-detail
@@ -549,7 +549,7 @@ function ClientQuotes({
   }, []);
   const [expandedBuyoutId, setExpandedBuyoutId] = useState<string | null>(null);
   const [buyoutDrafts, setBuyoutDrafts] = useState<
-    Record<string, { cny: string; rate: string; paymentRub: string; paymentRate: string }>
+    Record<string, { cny: string; rate: string; paymentRub: string; paymentRate: string; accountId: string }>
   >({});
   const [savingBuyoutId, setSavingBuyoutId] = useState<string | null>(null);
 
@@ -1172,13 +1172,14 @@ function ClientQuotes({
     }
   }
 
-  function getBuyoutDraft(quote: QuoteRecord): { cny: string; rate: string; paymentRub: string; paymentRate: string } {
+  function getBuyoutDraft(quote: QuoteRecord): { cny: string; rate: string; paymentRub: string; paymentRate: string; accountId: string } {
     return (
       buyoutDrafts[quote.id] ?? {
         cny: quote.actualBuyoutCny ?? "",
         rate: quote.actualBuyoutRateUsed ?? quote.cnyRateUsed,
         paymentRub: quote.actualClientPaymentRub ?? "",
         paymentRate: quote.actualClientPaymentRateUsed ?? quote.cnyRateUsed,
+        accountId: paymentAccounts[0]?.id ?? "",
       }
     );
   }
@@ -1193,6 +1194,7 @@ function ClientQuotes({
     const paymentRate = Number(draft.paymentRate);
     if (!Number.isFinite(cny) || cny <= 0 || !Number.isFinite(rate) || rate <= 0) return;
     if (!Number.isFinite(paymentRub) || paymentRub <= 0 || !Number.isFinite(paymentRate) || paymentRate <= 0) return;
+    if (!draft.accountId) return;
     setSavingBuyoutId(quoteId);
     try {
       const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-buyout`, {
@@ -1203,6 +1205,7 @@ function ClientQuotes({
           actualBuyoutRateUsed: rate,
           actualClientPaymentRub: paymentRub,
           actualClientPaymentRateUsed: paymentRate,
+          accountId: draft.accountId,
         }),
       });
       if (res.ok) await load();
@@ -1522,21 +1525,6 @@ function ClientQuotes({
               {bulkBusy === "duplicate" ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Copy className="h-3.5 w-3.5 shrink-0" />}
               Дублировать {selectedIds.length > 0 && `(${selectedIds.length})`}
             </button>
-            {!isGlobal && clientId && (
-              <button
-                type="button"
-                onClick={() => {
-                  setContainerDialogOpen(true);
-                  setActionsMenuOpen(false);
-                }}
-                disabled={selectedIds.length === 0}
-                title="Собрать выбранные просчёты в один контейнер ЖД доставки с пропорциональной ценой"
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Container className="h-3.5 w-3.5 shrink-0" />
-                Сформировать контейнер ЖД {selectedIds.length > 0 && `(${selectedIds.length})`}
-              </button>
-            )}
             {canConfirmBuyout && (
               <button
                 type="button"
@@ -1770,7 +1758,8 @@ function ClientQuotes({
                     )}
                   </span>
                   <span className="block truncate text-xs text-text-secondary">
-                    {formatDate(quote.createdAt)} ·{" "}
+                    {formatDate(quote.createdAt)}
+                    {quote.updatedAt !== quote.createdAt && <> · изменён {formatDate(quote.updatedAt)}</>} ·{" "}
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span className="cursor-help font-bold text-success underline decoration-success/40 decoration-dotted underline-offset-2">
@@ -2156,7 +2145,8 @@ function ClientQuotes({
                   Number.isFinite(draftPaymentRub) &&
                   draftPaymentRub > 0 &&
                   Number.isFinite(draftPaymentRate) &&
-                  draftPaymentRate > 0;
+                  draftPaymentRate > 0 &&
+                  Boolean(draft.accountId);
                 const draftSpentRub = draftValid ? draftCny * draftRate : null;
                 const draftProfitRub = draftSpentRub != null ? Number(quote.totalPriceRub) - draftSpentRub : null;
                 const confirmedSpentRub = quote.buyoutFactConfirmed
@@ -2191,6 +2181,21 @@ function ClientQuotes({
                       </div>
                     ) : canConfirmBuyout ? (
                       <div className="space-y-1.5 rounded-md bg-surface p-2.5">
+                        <Select
+                          value={draft.accountId}
+                          onValueChange={(v) => setBuyoutDrafts((current) => ({ ...current, [quote.id]: { ...draft, accountId: v } }))}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Счёт зачисления" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {paymentAccounts.map((a) => (
+                              <SelectItem key={a.id} value={a.id}>
+                                {a.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <div className="flex gap-2">
                           <input
                             type="number"
@@ -2493,25 +2498,6 @@ function ClientQuotes({
         </DialogContent>
       </Dialog>
 
-      {!isGlobal && clientId && (
-        <ContainerShipmentDialog
-          open={containerDialogOpen}
-          onOpenChange={setContainerDialogOpen}
-          clientId={clientId}
-          quotes={quotes
-            .filter((q) => selectedIds.includes(q.id))
-            .map((q) => ({
-              id: q.id,
-              displayId: q.displayId,
-              productName: q.productName,
-              totalVolumeM3: q.totalVolumeM3,
-              totalWeightKg: q.totalWeightKg,
-            }))}
-          isOwner={allManagers !== null}
-          onDone={() => setSelectedIds([])}
-        />
-      )}
-
       {canConfirmBuyout && (
         <CreatePaymentDialog
           open={createPaymentDialogOpen}
@@ -2582,6 +2568,9 @@ function ManagerClientsTab() {
   // Deliberately NOT the owner-only allManagers/api/managers above — that
   // one also gates quote-level reassignment, which stays owner-only.
   const [teamManagers, setTeamManagers] = useState<{ id: string; name: string }[] | null>(null);
+  // Для выбора счёта зачисления в "Подтвердить факт"/приходном ордере —
+  // тот же owner/senior gate, см. app/api/manager-payment-accounts.
+  const [paymentAccounts, setPaymentAccounts] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => {
     fetch("/api/manager-team-managers")
       .then((res) => (res.ok ? res.json() : null))
@@ -2589,6 +2578,9 @@ function ManagerClientsTab() {
         setCanConfirmBuyout(Boolean(data));
         setTeamManagers(data?.teamManagers ?? null);
       });
+    fetch("/api/manager-payment-accounts")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setPaymentAccounts(data?.accounts ?? []));
   }, []);
 
   async function handleTransfer(clientId: string, managerId: string) {
@@ -3050,7 +3042,13 @@ function ManagerClientsTab() {
                         client.archivedAt && "opacity-60",
                       )}
                     >
-                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                      <span
+                        className={cn(
+                          "mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold",
+                          client.selfSourcedClaimed ? "bg-success/10 text-success" : "bg-primary/10 text-primary",
+                        )}
+                        title={client.selfSourcedClaimed ? "Свой клиент" : "Клиент компании"}
+                      >
                         {client.name.trim().charAt(0).toUpperCase() || "?"}
                       </span>
                       <div className="min-w-0 flex-1">
@@ -3061,14 +3059,6 @@ function ManagerClientsTab() {
                           <div className="truncate text-[11px] text-text-secondary">{client.company}</div>
                         )}
                         <div className="mt-1 flex flex-wrap items-center gap-1">
-                          <span
-                            className={cn(
-                              "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
-                              client.selfSourcedClaimed ? "bg-success/10 text-success" : "bg-error/10 text-error",
-                            )}
-                          >
-                            {client.selfSourcedClaimed ? "свой клиент" : "клиент компании"}
-                          </span>
                           <span
                             className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold", CLIENT_STATUS_BADGE_CLASSES[client.status])}
                           >
@@ -3360,6 +3350,7 @@ function ManagerClientsTab() {
                 allManagers={allManagers}
                 teamManagers={teamManagers}
                 canConfirmBuyout={canConfirmBuyout}
+                paymentAccounts={paymentAccounts}
                 clientSelfSourcedConfirmed={selectedClient.selfSourcedConfirmed}
                 clientCreatedByManagerId={selectedClient.createdByManagerId}
                 onEdit={(quoteId) => {

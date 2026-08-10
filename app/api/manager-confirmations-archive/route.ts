@@ -166,7 +166,7 @@ export async function GET(req: NextRequest) {
       ? prisma.quote.findMany({
           where: {
             deletedAt: null,
-            buyoutCommissionPercentOverride: { not: null },
+            OR: [{ buyoutCommissionPercentOverride: { not: null } }, { buyoutCommissionRubOverride: { not: null } }],
             buyoutCommissionOverrideConfirmed: true,
             ...managerScopeFilter,
             ...(managerIdParam ? { managerId: managerIdParam } : {}),
@@ -179,6 +179,7 @@ export async function GET(req: NextRequest) {
             displayId: true,
             productName: true,
             buyoutCommissionPercentOverride: true,
+            buyoutCommissionRubOverride: true,
             buyoutCommissionOverrideConfirmedAt: true,
             buyoutCommissionOverrideConfirmedByManagerId: true,
             manager: { select: { id: true, name: true } },
@@ -306,7 +307,10 @@ export async function GET(req: NextRequest) {
       id: q.id,
       displayId: q.displayId,
       label: q.productName,
-      summary: `Комиссия: ${Number(q.buyoutCommissionPercentOverride).toFixed(2)}%`,
+      summary:
+        q.buyoutCommissionRubOverride !== null
+          ? `Комиссия: ${Math.round(Number(q.buyoutCommissionRubOverride)).toLocaleString("ru-RU")} ₽`
+          : `Комиссия: ${Number(q.buyoutCommissionPercentOverride).toFixed(2)}%`,
       confirmedAt: q.buyoutCommissionOverrideConfirmedAt!.toISOString(),
       confirmedByManagerName: q.buyoutCommissionOverrideConfirmedByManagerId
         ? (nameById.get(q.buyoutCommissionOverrideConfirmedByManagerId) ?? null)

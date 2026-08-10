@@ -60,12 +60,13 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { actualBuyoutCny, actualBuyoutRateUsed, actualClientPaymentRub, actualClientPaymentRateUsed } =
+  const { actualBuyoutCny, actualBuyoutRateUsed, actualClientPaymentRub, actualClientPaymentRateUsed, accountId: accountIdRaw } =
     (body as {
       actualBuyoutCny?: unknown;
       actualBuyoutRateUsed?: unknown;
       actualClientPaymentRub?: unknown;
       actualClientPaymentRateUsed?: unknown;
+      accountId?: unknown;
     }) ?? {};
   const cny = Number(actualBuyoutCny);
   const rate = Number(actualBuyoutRateUsed);
@@ -86,7 +87,18 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const selfSourcedBoost = quote.client.selfSourcedConfirmed && quote.client.createdByManagerId === quote.managerId;
 
   const category = await getOrCreateBuyoutIncomeCategory();
-  const defaultAccount = await getDefaultCashAccount();
+  // Explicit choice from the mini-form wins; falls back to the same self-
+  // healing default only if somehow not sent — see getDefaultCashAccount.
+  let resolvedAccountId: string;
+  if (typeof accountIdRaw === "string" && accountIdRaw) {
+    const account = await prisma.cashAccount.findUnique({ where: { id: accountIdRaw } });
+    if (!account) {
+      return Response.json({ error: "Счёт не найден." }, { status: 400 });
+    }
+    resolvedAccountId = account.id;
+  } else {
+    resolvedAccountId = (await getDefaultCashAccount()).id;
+  }
   const paymentAmountCny = paymentRub / paymentRate;
   // Реконсиляционный остаток — см. комментарий над PATCH выше. Считается от
   // ПОЛНОЙ суммы оплаты клиента (paymentRub), не от остатка ниже — скидка
@@ -119,6 +131,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       ? await prisma.cashOrder.update({
           where: { id: quote.clientPaymentCashOrderId },
           data: {
+            accountId: resolvedAccountId,
             categoryId: category.id,
             clientId: quote.client.id,
             currency: "rub",
@@ -132,7 +145,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
           data: {
             type: "income",
             date: new Date(),
-            accountId: defaultAccount.id,
+            accountId: resolvedAccountId,
             categoryId: category.id,
             clientId: quote.client.id,
             currency: "rub",

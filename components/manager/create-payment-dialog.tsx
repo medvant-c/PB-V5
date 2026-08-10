@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { parseLocaleNumber } from "@/lib/number";
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -52,6 +53,8 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
   const [client, setClient] = useState<{ name: string; company: string | null } | null>(null);
   const [quotes, setQuotes] = useState<RemainingQuote[]>([]);
   const [checkedCategories, setCheckedCategories] = useState<Record<string, boolean>>({});
+  const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([]);
+  const [accountId, setAccountId] = useState("");
   const [cnyRate, setCnyRate] = useState("");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [comment, setComment] = useState("");
@@ -67,8 +70,9 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
     Promise.all([
       fetch(`/api/manager-quotes/payment-remaining?quoteIds=${quoteIds.join(",")}`).then((res) => res.json()),
       fetch("/api/manager-tariffs").then((res) => (res.ok ? res.json() : null)),
+      fetch("/api/manager-payment-accounts").then((res) => (res.ok ? res.json() : null)),
     ])
-      .then(([remainingData, tariffsData]) => {
+      .then(([remainingData, tariffsData, accountsData]) => {
         if (remainingData.error) {
           setError(remainingData.error);
           return;
@@ -76,6 +80,9 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
         setClient(remainingData.client);
         setQuotes(remainingData.quotes ?? []);
         if (tariffsData?.settings?.cnyRateRub) setCnyRate(String(tariffsData.settings.cnyRateRub));
+        const fetchedAccounts = accountsData?.accounts ?? [];
+        setAccounts(fetchedAccounts);
+        setAccountId(fetchedAccounts[0]?.id ?? "");
       })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- quoteIds is an array literal from the caller, re-running on open is what matters
@@ -112,6 +119,10 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
       setError("Укажите курс юаня.");
       return;
     }
+    if (!accountId) {
+      setError("Укажите счёт, на который поступит оплата.");
+      return;
+    }
 
     setSaving(true);
     setError(null);
@@ -125,6 +136,7 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
           date: new Date(date).toISOString(),
           comment,
           allocations,
+          accountId,
         }),
       });
       if (!res.ok) {
@@ -201,6 +213,21 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
 
             <div className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2">
               <div className="space-y-1.5">
+                <Label>Счёт зачисления</Label>
+                <Select value={accountId} onValueChange={setAccountId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Выберите счёт" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accounts.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
                 <Label htmlFor="payment-cny-rate">Курс юаня, 1¥ = X₽</Label>
                 <Input
                   id="payment-cny-rate"
@@ -231,7 +258,7 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
                 <X className="h-4 w-4" /> Отмена
               </Button>
-              <Button type="button" onClick={handleSave} disabled={saving || totalRub <= 0}>
+              <Button type="button" onClick={handleSave} disabled={saving || totalRub <= 0 || !accountId}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Создать ордер"}
               </Button>
             </div>

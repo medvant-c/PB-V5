@@ -16,6 +16,7 @@ function ManagerAllQuotesTab() {
   const [allManagers, setAllManagers] = useState<{ id: string; name: string }[] | null>(null);
   const [teamManagers, setTeamManagers] = useState<{ id: string; name: string }[] | null>(null);
   const [canConfirmBuyout, setCanConfirmBuyout] = useState(false);
+  const [paymentAccounts, setPaymentAccounts] = useState<{ id: string; name: string }[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
@@ -32,6 +33,9 @@ function ManagerAllQuotesTab() {
         setCanConfirmBuyout(Boolean(data));
         setTeamManagers(data?.teamManagers ?? null);
       });
+    fetch("/api/manager-payment-accounts")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setPaymentAccounts(data?.accounts ?? []));
   }, []);
 
   return (
@@ -49,6 +53,7 @@ function ManagerAllQuotesTab() {
         allManagers={allManagers}
         teamManagers={teamManagers}
         canConfirmBuyout={canConfirmBuyout}
+        paymentAccounts={paymentAccounts}
         onChanged={() => setRefreshKey((k) => k + 1)}
         onEdit={(quoteId, client) => {
           setEditingQuoteId(quoteId);

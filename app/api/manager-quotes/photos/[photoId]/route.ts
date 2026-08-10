@@ -19,7 +19,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
   const { photoId } = await params;
   const record = await prisma.deskFile.findUnique({ where: { id: photoId } });
-  if (!record || record.tab !== "quotes" || !record.relatedId) {
+  if (!record || (record.tab !== "quotes" && record.tab !== "quote_wechat_qr") || !record.relatedId) {
     return Response.json({ error: "Файл не найден." }, { status: 404 });
   }
 

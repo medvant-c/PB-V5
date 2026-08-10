@@ -134,7 +134,12 @@ export async function GET(req: NextRequest) {
     // sign-off — proof it's a real agreed commission, not made up. See
     // PB-V5 chat 2026-07-31.
     prisma.quote.findMany({
-      where: { ...managerFilter, buyoutCommissionPercentOverride: { not: null }, buyoutCommissionOverrideConfirmed: false, deletedAt: null },
+      where: {
+        ...managerFilter,
+        OR: [{ buyoutCommissionPercentOverride: { not: null } }, { buyoutCommissionRubOverride: { not: null } }],
+        buyoutCommissionOverrideConfirmed: false,
+        deletedAt: null,
+      },
       orderBy: { createdAt: "asc" },
       select: {
         id: true,
@@ -143,6 +148,7 @@ export async function GET(req: NextRequest) {
         createdAt: true,
         buyoutCommissionPercent: true,
         buyoutCommissionPercentOverride: true,
+        buyoutCommissionRubOverride: true,
         manager: { select: { id: true, name: true } },
         client: { select: { name: true, company: true } },
       },

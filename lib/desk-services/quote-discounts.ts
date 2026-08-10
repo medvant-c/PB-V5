@@ -33,10 +33,22 @@ interface QuoteDiscountInput {
   cargoRateUsdOverride: number | null;
   deliveryPricingMode: "density" | "volume";
   buyoutCommissionPercentOverride: number | null;
+  buyoutCommissionRubOverride: number | null;
   searchServiceFeeRubOverride: number | null;
   customProductionFeeRubOverride: number | null;
   cnyRateRubOverride: number | null;
   usdRateRubOverride: number | null;
+  // "Только карго" (Quote.isCargoOnly) — totalRub collapses to
+  // cargoDeliveryRub alone; goods/China-delivery/search-fee/buyout-
+  // commission/производство под заказ are still computed and stored for
+  // record-keeping but never actually billed. An override on one of THOSE
+  // fields is real data on the row but has zero effect on what this
+  // specific client ends up paying — showing it here would fail the "open
+  // the quote and you'll see this discount reflected in what's charged"
+  // expectation, so those four are skipped entirely for a cargo-only quote.
+  // cargo_discount/cargo_rate (cargoDeliveryRub itself) and usd_rate (the
+  // $→₽ rate cargoDeliveryRub converts through) still genuinely apply.
+  isCargoOnly: boolean;
 }
 
 interface QuoteDiscountEntry {
@@ -55,7 +67,20 @@ function computeQuoteDiscounts(quote: QuoteDiscountInput): QuoteDiscountEntry[] 
     const basis = quote.deliveryPricingMode === "density" ? "кг" : "м³";
     entries.push({ type: "cargo_rate", label: QUOTE_DISCOUNT_TYPE_LABEL.cargo_rate, valueLabel: `$${quote.cargoRateUsdOverride}/${basis}` });
   }
-  if (quote.buyoutCommissionPercentOverride !== null) {
+  if (quote.usdRateRubOverride !== null) {
+    entries.push({ type: "usd_rate", label: QUOTE_DISCOUNT_TYPE_LABEL.usd_rate, valueLabel: `${quote.usdRateRubOverride} ₽` });
+  }
+
+  // Inert for a cargo-only quote — see isCargoOnly's comment above.
+  if (quote.isCargoOnly) return entries;
+
+  if (quote.buyoutCommissionRubOverride !== null) {
+    entries.push({
+      type: "buyout_commission",
+      label: QUOTE_DISCOUNT_TYPE_LABEL.buyout_commission,
+      valueLabel: `${Math.round(quote.buyoutCommissionRubOverride).toLocaleString("ru-RU")} ₽`,
+    });
+  } else if (quote.buyoutCommissionPercentOverride !== null) {
     entries.push({ type: "buyout_commission", label: QUOTE_DISCOUNT_TYPE_LABEL.buyout_commission, valueLabel: `${quote.buyoutCommissionPercentOverride}%` });
   }
   if (quote.searchServiceFeeRubOverride !== null) {
@@ -71,9 +96,6 @@ function computeQuoteDiscounts(quote: QuoteDiscountInput): QuoteDiscountEntry[] 
   }
   if (quote.cnyRateRubOverride !== null) {
     entries.push({ type: "cny_rate", label: QUOTE_DISCOUNT_TYPE_LABEL.cny_rate, valueLabel: `${quote.cnyRateRubOverride} ₽` });
-  }
-  if (quote.usdRateRubOverride !== null) {
-    entries.push({ type: "usd_rate", label: QUOTE_DISCOUNT_TYPE_LABEL.usd_rate, valueLabel: `${quote.usdRateRubOverride} ₽` });
   }
 
   return entries;

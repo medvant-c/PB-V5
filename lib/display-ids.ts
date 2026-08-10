@@ -36,12 +36,6 @@ async function nextQuoteDraftRequestDisplayId(): Promise<number> {
   return (last?.displayId ?? 0) + 1;
 }
 
-// Same max+1 pattern, for ЖД container shipments ("Контейнер №N").
-async function nextContainerShipmentDisplayId(): Promise<number> {
-  const last = await prisma.containerShipment.findFirst({ orderBy: { displayId: "desc" } });
-  return (last?.displayId ?? 0) + 1;
-}
-
 // Same max+1 pattern, for issued счета ("Счёт №N").
 async function nextIssuedInvoiceDisplayId(): Promise<number> {
   const last = await prisma.issuedInvoice.findFirst({ orderBy: { displayId: "desc" } });
@@ -75,7 +69,6 @@ export {
   nextQuoteDisplayId,
   nextFulfillmentOrderDisplayId,
   nextQuoteDraftRequestDisplayId,
-  nextContainerShipmentDisplayId,
   nextIssuedInvoiceDisplayId,
   nextServiceCode,
   DIRECTION_CODE_PREFIX,

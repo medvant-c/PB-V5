@@ -95,6 +95,16 @@ interface QuoteEngineInputs {
   // the *rate* lookup, not the basis decision. See Quote.cargoRateUsdOverride
   // in prisma/schema.prisma.
   cargoRateUsdOverride?: number;
+  // Manager-entered flat ₽ amount for the buyout commission — replaces the
+  // tier-lookup-derived buyoutCommissionRub entirely, for a one-off deal the
+  // % ladder doesn't fit. buyoutCommissionPercent is still populated (back-
+  // derived from this amount) purely for display/record-keeping — every
+  // other formula reads buyoutCommissionRub, not the percent. Mutually
+  // exclusive with buyoutCommissionTiers being collapsed by a percent
+  // override (see buyoutCommissionTiersForQuote in quote-request.ts) — the
+  // caller only ever sets one of the two. See Quote.buyoutCommissionRubOverride
+  // in prisma/schema.prisma.
+  buyoutCommissionRubOverride?: number;
   // "Только карго" — see Quote.isCargoOnly in prisma/schema.prisma. When
   // true, totalRub collapses to cargoDeliveryRub alone; every other line
   // (totalPriceRub, chinaDeliveryRub, searchServiceFeeRub,
@@ -284,13 +294,22 @@ function computeQuote(inputs: QuoteEngineInputs): QuoteEngineOutputs {
   // see BuyoutCommissionTariff. Throws rather than silently defaulting to
   // 0%, same "loud error beats a wrong number" rule as the density/volume
   // lookups above.
-  const buyoutCommissionPercent = lookupBuyoutCommissionRate(inputs.buyoutCommissionTiers, totalPriceRub);
-  if (buyoutCommissionPercent === null) {
-    throw new Error(
-      `Нет тарифа комиссии за выкуп для суммы закупа ${Math.round(totalPriceRub).toLocaleString("ru-RU")} ₽ — добавьте тариф во вкладке «Тарифы».`,
-    );
+  let buyoutCommissionPercent: number;
+  let buyoutCommissionRub: number;
+  if (inputs.buyoutCommissionRubOverride !== undefined) {
+    buyoutCommissionRub = inputs.buyoutCommissionRubOverride;
+    const commissionBasisRub = totalPriceRub + chinaDeliveryRub;
+    buyoutCommissionPercent = commissionBasisRub > 0 ? (buyoutCommissionRub / commissionBasisRub) * 100 : 0;
+  } else {
+    const matchedPercent = lookupBuyoutCommissionRate(inputs.buyoutCommissionTiers, totalPriceRub);
+    if (matchedPercent === null) {
+      throw new Error(
+        `Нет тарифа комиссии за выкуп для суммы закупа ${Math.round(totalPriceRub).toLocaleString("ru-RU")} ₽ — добавьте тариф во вкладке «Тарифы».`,
+      );
+    }
+    buyoutCommissionPercent = matchedPercent;
+    buyoutCommissionRub = (totalPriceRub + chinaDeliveryRub) * (buyoutCommissionPercent / 100);
   }
-  const buyoutCommissionRub = (totalPriceRub + chinaDeliveryRub) * (buyoutCommissionPercent / 100);
 
   // Grand total the client pays: the goods themselves, China-domestic
   // delivery, our search-service fee, the buyout commission, international

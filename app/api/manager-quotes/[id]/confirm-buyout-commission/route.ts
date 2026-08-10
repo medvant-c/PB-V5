@@ -10,8 +10,9 @@ interface RouteParams {
 const MAX_FILE_SIZE = 8 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
-// Owner/senior-only sign-off on a manager's manual buyout-commission %
-// override (Quote.buyoutCommissionPercentOverride) — same "usable now,
+// Owner/senior-only sign-off on a manager's manual buyout-commission
+// override — % (Quote.buyoutCommissionPercentOverride) or a flat ₽ amount
+// (Quote.buyoutCommissionRubOverride), mutually exclusive — same "usable now,
 // audited later" split as confirm-cny-rate/route.ts: no separate cost
 // input, this rate already IS what the client is charged. Confirming here
 // is proof-only (the screenshot). Re-confirmable, same as confirm-cny-rate.
@@ -32,7 +33,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   if (!quote || quote.deletedAt) {
     return Response.json({ error: "Просчёт не найден." }, { status: 404 });
   }
-  if (quote.buyoutCommissionPercentOverride === null) {
+  if (quote.buyoutCommissionPercentOverride === null && quote.buyoutCommissionRubOverride === null) {
     return Response.json({ error: "У этого просчёта нет ручной комиссии за выкуп." }, { status: 400 });
   }
 

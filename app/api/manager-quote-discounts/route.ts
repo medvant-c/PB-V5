@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
         { cargoDiscountUsd: { gt: 0 } },
         { cargoRateUsdOverride: { not: null } },
         { buyoutCommissionPercentOverride: { not: null } },
+        { buyoutCommissionRubOverride: { not: null } },
         { searchServiceFeeRubOverride: { not: null } },
         { customProductionFeeRubOverride: { not: null } },
         { cnyRateRubOverride: { not: null } },
@@ -37,9 +38,11 @@ export async function GET(req: NextRequest) {
       productName: true,
       createdAt: true,
       deliveryPricingMode: true,
+      isCargoOnly: true,
       cargoDiscountUsd: true,
       cargoRateUsdOverride: true,
       buyoutCommissionPercentOverride: true,
+      buyoutCommissionRubOverride: true,
       searchServiceFeeRubOverride: true,
       customProductionFeeRubOverride: true,
       cnyRateRubOverride: true,
@@ -55,10 +58,12 @@ export async function GET(req: NextRequest) {
       cargoRateUsdOverride: quote.cargoRateUsdOverride === null ? null : Number(quote.cargoRateUsdOverride),
       deliveryPricingMode: quote.deliveryPricingMode,
       buyoutCommissionPercentOverride: quote.buyoutCommissionPercentOverride === null ? null : Number(quote.buyoutCommissionPercentOverride),
+      buyoutCommissionRubOverride: quote.buyoutCommissionRubOverride === null ? null : Number(quote.buyoutCommissionRubOverride),
       searchServiceFeeRubOverride: quote.searchServiceFeeRubOverride === null ? null : Number(quote.searchServiceFeeRubOverride),
       customProductionFeeRubOverride: quote.customProductionFeeRubOverride === null ? null : Number(quote.customProductionFeeRubOverride),
       cnyRateRubOverride: quote.cnyRateRubOverride === null ? null : Number(quote.cnyRateRubOverride),
       usdRateRubOverride: quote.usdRateRubOverride === null ? null : Number(quote.usdRateRubOverride),
+      isCargoOnly: quote.isCargoOnly,
     });
 
     return entries.map((entry) => ({

@@ -83,7 +83,8 @@ interface PendingBuyoutCommission {
   productName: string;
   createdAt: string;
   buyoutCommissionPercent: string;
-  buyoutCommissionPercentOverride: string;
+  buyoutCommissionPercentOverride: string | null;
+  buyoutCommissionRubOverride: string | null;
   manager: { id: string; name: string };
   client: { name: string; company: string | null };
 }
@@ -1160,7 +1161,10 @@ function ManagerConfirmationsTab() {
                         </span>
                       </div>
                       <span className="text-xs font-medium text-warning">
-                        комиссия: {Number(quote.buyoutCommissionPercentOverride).toFixed(2)}%
+                        комиссия:{" "}
+                        {quote.buyoutCommissionRubOverride !== null
+                          ? `${Math.round(Number(quote.buyoutCommissionRubOverride)).toLocaleString("ru-RU")} ₽`
+                          : `${Number(quote.buyoutCommissionPercentOverride).toFixed(2)}%`}
                       </span>
                     </div>
 

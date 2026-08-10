@@ -310,6 +310,7 @@ export async function POST(req: NextRequest) {
       // A manual rate always starts unconfirmed — see
       // Quote.buyoutCommissionOverrideConfirmed in prisma/schema.prisma.
       buyoutCommissionPercentOverride: fields.buyoutCommissionPercentOverride ?? null,
+      buyoutCommissionRubOverride: fields.buyoutCommissionRubOverride ?? null,
       totalRub: computed.totalRub,
       cnyRateUsed: resolvedCnyRateRub,
       usdRateUsed: engineInputs.usdRateRub,
@@ -354,6 +355,31 @@ export async function POST(req: NextRequest) {
       });
     } catch (error) {
       console.error("Manager quote: photo upload failed", error);
+    }
+  }
+
+  // WeChat QR поставщика — тот же внутренний, не идущий в клиентскую выгрузку
+  // статус, что и productLink, только как картинка вместо ссылки (у части
+  // поставщиков нет прямой ссылки на товар, только их личный QR в WeChat).
+  // Один слот на просчёт, best-effort — та же логика, что и у фото выше. См.
+  // PB-V5 chat 2026-08-10.
+  const wechatQrPhoto = formData.get("wechatQrPhoto");
+  if (wechatQrPhoto instanceof File && SUPPORTED_IMAGE_TYPES.has(wechatQrPhoto.type) && wechatQrPhoto.size <= MAX_PHOTO_BYTES) {
+    try {
+      const buffer = Buffer.from(await wechatQrPhoto.arrayBuffer());
+      const stored = await storage.upload(buffer, wechatQrPhoto.name);
+      await prisma.deskFile.create({
+        data: {
+          tab: "quote_wechat_qr",
+          relatedId: quote.id,
+          storageKey: stored.key,
+          originalName: wechatQrPhoto.name,
+          mimeType: wechatQrPhoto.type,
+          size: stored.size,
+        },
+      });
+    } catch (error) {
+      console.error("Manager quote: WeChat QR upload failed", error);
     }
   }
 

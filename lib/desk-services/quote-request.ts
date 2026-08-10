@@ -102,6 +102,11 @@ interface ParsedQuoteFields {
   // above — the route resolves the final buyoutCommissionTiers to pass the
   // engine via buyoutCommissionTiersForQuote below.
   buyoutCommissionPercentOverride?: number;
+  // Manual flat ₽ amount for the buyout commission — see
+  // Quote.buyoutCommissionRubOverride in prisma/schema.prisma. Mutually
+  // exclusive with buyoutCommissionPercentOverride above (the form only
+  // ever sends one); undefined = no override, normal tariff-bracket lookup.
+  buyoutCommissionRubOverride?: number;
   // Manual overrides for the two 100%-margin service fees — see
   // Quote.searchServiceFeeRubOverride/customProductionFeeRubOverride in
   // prisma/schema.prisma. undefined = no override, normal tier lookup (the
@@ -171,6 +176,9 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
   if (deliveryPricingMode !== "density" && deliveryPricingMode !== "volume") {
     return { error: "Некорректный способ тарификации доставки." };
   }
+  if (formData.get("buyoutCommissionPercentOverride") && formData.get("buyoutCommissionRubOverride")) {
+    return { error: "Комиссию за выкуп можно задать вручную либо в %, либо в ₽ — не одновременно." };
+  }
 
   return {
     fields: {
@@ -206,6 +214,7 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
       cnyRateRubOverride: optionalNumber(formData.get("cnyRateRubOverride")),
       usdRateRubOverride: optionalNumber(formData.get("usdRateRubOverride")),
       buyoutCommissionPercentOverride: optionalNumber(formData.get("buyoutCommissionPercentOverride")),
+      buyoutCommissionRubOverride: optionalNumber(formData.get("buyoutCommissionRubOverride")),
       searchServiceFeeRubOverride: optionalNumber(formData.get("searchServiceFeeRubOverride")),
       customProductionFeeRubOverride: optionalNumber(formData.get("customProductionFeeRubOverride")),
       isCustomProduction: formData.get("isCustomProduction") === "true",
@@ -255,6 +264,7 @@ function buildEngineInputs(fields: ParsedQuoteFields, rates: QuoteRates): QuoteE
     volumeTariffs: rates.volumeTariffs,
     searchServiceFeeRub: rates.searchServiceFeeRub,
     buyoutCommissionTiers: rates.buyoutCommissionTiers,
+    buyoutCommissionRubOverride: fields.buyoutCommissionRubOverride,
     cnyRateRub: rates.cnyRateRub,
     usdRateRub: rates.usdRateRub,
     attachedServicesTotalRub: rates.attachedServicesTotalRub,
