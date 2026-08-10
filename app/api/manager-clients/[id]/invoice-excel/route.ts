@@ -3,6 +3,7 @@ import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canAccessManagerClient } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { renderInvoiceExcel, type InvoiceRow } from "@/lib/desk-services/invoice-excel";
+import { recordIssuedInvoice, uploadInvoiceFile } from "@/lib/desk-services/issued-invoices";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -42,6 +43,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     where: { id: { in: quoteIds }, clientId, deletedAt: null },
     orderBy: { createdAt: "asc" },
     select: {
+      id: true,
       displayId: true,
       productName: true,
       quoteType: true,
@@ -65,9 +67,23 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     customProductionFeeRub: Number(quote.customProductionFeeRub),
   }));
 
-  const buffer = await renderInvoiceExcel({ client: { name: client.name, phone: client.phone }, rows });
+  const { buffer, totalRub } = await renderInvoiceExcel({ client: { name: client.name, phone: client.phone }, rows });
 
   const fileName = `Счёт на услуги — ${client.name}.xlsx`;
+
+  const { storageKey } = await uploadInvoiceFile(buffer, fileName);
+  await recordIssuedInvoice({
+    type: "services",
+    currency: "rub",
+    clientId,
+    managerId: session.managerId,
+    amountTotal: totalRub,
+    quoteIds: quotes.map((q) => q.id),
+    storageKey,
+    fileName,
+    mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

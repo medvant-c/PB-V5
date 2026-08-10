@@ -4,6 +4,7 @@ import { canAccessManagerQuote } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { renderBuyoutInvoicePdf, type BuyoutInvoiceCurrency } from "@/lib/desk-services/buyout-invoice-pdf";
 import { buildBuyoutInvoiceAmounts, sumAlreadyPaidRubByCategory } from "@/lib/desk-services/buyout-invoice-calc";
+import { recordIssuedInvoice, uploadInvoiceFile } from "@/lib/desk-services/issued-invoices";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -101,6 +102,20 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
   const CURRENCY_FILE_SUFFIX: Record<BuyoutInvoiceCurrency, string> = { rub: "₽", usd: "$", usdt: "USDT", cny: "¥" };
   const fileName = `Счёт на выкуп — №${quote.displayId} (${CURRENCY_FILE_SUFFIX[currency]}).pdf`;
+
+  const { storageKey } = await uploadInvoiceFile(buffer, fileName);
+  await recordIssuedInvoice({
+    type: "buyout",
+    currency,
+    clientId: quote.clientId,
+    managerId: session.managerId,
+    amountTotal: totalAmount,
+    quoteIds: [quote.id],
+    storageKey,
+    fileName,
+    mimeType: "application/pdf",
+  });
+
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/pdf",

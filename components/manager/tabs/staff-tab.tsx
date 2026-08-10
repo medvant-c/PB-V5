@@ -33,6 +33,8 @@ interface ManagerRecord {
   canViewProfitReport: boolean;
   canViewTrash: boolean;
   canViewCargoCost: boolean;
+  canViewInvoices: boolean;
+  canViewDiscounts: boolean;
   supervisorId: string | null;
   supervisor: { name: string } | null;
   createdAt: string;
@@ -51,6 +53,8 @@ const PERMISSION_FIELDS: { key: keyof ManagerRecord; label: string; hint: string
   { key: "canViewProfitReport", label: "Отчёт о прибыли", hint: "Видит премии других менеджеров и доли инвесторов" },
   { key: "canViewTrash", label: "Корзина", hint: "Смотреть и восстанавливать удалённые просчёты" },
   { key: "canViewCargoCost", label: "Себестоимость карго", hint: "Реальная закупочная цена и маржа по карго" },
+  { key: "canViewInvoices", label: "Выставленные счета", hint: "Весь журнал выставленных счетов компании, не только свои" },
+  { key: "canViewDiscounts", label: "Скидки по клиентам", hint: "Отчёт по всем скидкам всех менеджеров, не только своим" },
 ];
 
 const ROLE_LABEL: Record<ManagerRecord["role"], string> = {

@@ -40,7 +40,9 @@ interface InvoiceRow {
 // по дням) — a manager generates this after doing the calculation work
 // itself, before any goods have actually been bought. See PB-V5 chat
 // 2026-07-29, production-fee row added 2026-07-30.
-async function renderInvoiceExcel(props: { client: { name: string; phone: string | null }; rows: InvoiceRow[] }): Promise<Buffer> {
+async function renderInvoiceExcel(
+  props: { client: { name: string; phone: string | null }; rows: InvoiceRow[] },
+): Promise<{ buffer: Buffer; totalRub: number }> {
   const { client, rows } = props;
   const workbook = new ExcelJS.Workbook();
   workbook.creator = "Panda Bridge";
@@ -108,7 +110,7 @@ async function renderInvoiceExcel(props: { client: { name: string; phone: string
   });
 
   const buffer = await workbook.xlsx.writeBuffer();
-  return Buffer.from(buffer);
+  return { buffer: Buffer.from(buffer), totalRub };
 }
 
 export { renderInvoiceExcel };

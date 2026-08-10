@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { renderBuyoutInvoiceListPdf, type BuyoutInvoiceListRow } from "@/lib/desk-services/buyout-invoice-list-pdf";
 import type { BuyoutInvoiceCurrency } from "@/lib/desk-services/buyout-invoice-pdf";
 import { buildBuyoutInvoiceRowAmounts, sumAlreadyPaidRubByCategory } from "@/lib/desk-services/buyout-invoice-calc";
+import { recordIssuedInvoice, uploadInvoiceFile } from "@/lib/desk-services/issued-invoices";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -72,7 +73,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: "Просчёты не найдены." }, { status: 404 });
   }
 
-  const allRows: BuyoutInvoiceListRow[] = await Promise.all(
+  const allRows: (BuyoutInvoiceListRow & { quoteId: string })[] = await Promise.all(
     quotes.map(async (quote) => {
       const [attachedServiceRecords, paymentAllocations] = await Promise.all([
         prisma.quoteAttachedService.findMany({ where: { quoteId: quote.id }, orderBy: { createdAt: "asc" } }),
@@ -102,6 +103,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       );
 
       return {
+        quoteId: quote.id,
         displayId: quote.displayId,
         productName: quote.productName,
         clientName: client.name,
@@ -119,6 +121,20 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const buffer = await renderBuyoutInvoiceListPdf({ client: { name: client.name, company: client.company }, rows, currency });
 
   const fileName = `Счета на выкуп списком — ${client.name} (${rows.length}, ${CURRENCY_FILE_SUFFIX[currency]}).pdf`;
+
+  const { storageKey } = await uploadInvoiceFile(buffer, fileName);
+  await recordIssuedInvoice({
+    type: "buyout",
+    currency,
+    clientId,
+    managerId: session.managerId,
+    amountTotal: rows.reduce((sum, row) => sum + row.totalAmount, 0),
+    quoteIds: rows.map((row) => row.quoteId),
+    storageKey,
+    fileName,
+    mimeType: "application/pdf",
+  });
+
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/pdf",

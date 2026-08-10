@@ -220,6 +220,7 @@ model Client {
   quoteDraftRequests QuoteDraftRequest[]
   dailyPlanItems DailyPlanItem[]
   containerShipments ContainerShipment[]
+  issuedInvoices IssuedInvoice[]
 
   @@index([createdByManagerId])
 }
@@ -303,6 +304,13 @@ model Manager {
   // needs to manage their own team's real profitability without full owner
   // access.
   canViewCargoCost Boolean @default(false)
+  // "Выставленные счета" tab — company-wide log of every счёт на выкуп/
+  // услуги ever generated (see IssuedInvoice), not just this manager's own.
+  canViewInvoices Boolean @default(false)
+  // "Скидки по клиентам" tab — company-wide report of every discount/
+  // individual-rate override across all managers' quotes (cargo, buyout
+  // commission, search fee, производство под заказ, ¥/$ rate).
+  canViewDiscounts Boolean @default(false)
   // Self-relation for the "старший менеджер" hierarchy: a manager attached
   // to a senior manager via supervisorId shows up in that senior's scope
   // (lib/manager-scope.ts) without changing who created their own clients.
@@ -333,6 +341,7 @@ model Manager {
   quoteDraftRequests QuoteDraftRequest[]
   dailyPlanItems DailyPlanItem[]
   containerShipments ContainerShipment[]
+  issuedInvoices IssuedInvoice[]
 }
 
 // Which tier of the "Поиск товара" service a quote is billed under — the
@@ -1071,6 +1080,7 @@ model Quote {
   fulfillmentOrders FulfillmentOrder[]
   containerShipmentItems ContainerShipmentItem[]
   paymentAllocations QuotePaymentAllocation[]
+  issuedInvoiceLinks IssuedInvoiceQuote[]
 
   @@index([clientId])
   @@index([managerId])
@@ -1249,6 +1259,83 @@ model ProductCardExport {
   mimeType     String
   size         Int
   createdAt    DateTime @default(now())
+}
+
+// "Счёт на выкуп" (RUB/USD/USDT/CNY) or "Счёт на услуги" (RUB, Excel) —
+// every time a manager actually generates one of these documents (single
+// quote, per-client bundle, or the global "Все просчёты" bundle in
+// app/api/manager-quotes/buyout-invoice-pdf-bundle), a row is written here
+// alongside streaming the file to the manager, so "Выставленные счета" can
+// show a durable company-wide log instead of these being pure fire-and-
+// forget downloads. The global bundle can span several clients at once —
+// that route splits it into one row PER CLIENT (see recordIssuedInvoice in
+// lib/desk-services/issued-invoices.ts) so clientId here is always a single
+// real client, all rows from one such generation sharing the same
+// storageKey (they're slices of the one combined PDF that was produced).
+// Deliberately NOT a payment tracker — "оплачено сколько" already lives in
+// QuotePaymentAllocation/the Отчёты по дням cash ledger; duplicating that
+// here would just create a second, driftable truth. See PB-V5 chat
+// 2026-08-10.
+enum IssuedInvoiceType {
+  buyout
+  services
+}
+
+enum IssuedInvoiceCurrency {
+  rub
+  usd
+  usdt
+  cny
+}
+
+model IssuedInvoice {
+  id        String                @id @default(cuid())
+  // Assigned in app code (lib/display-ids.ts), same max+1 convention as
+  // every other displayId in this schema.
+  displayId Int                   @unique
+  type      IssuedInvoiceType
+  currency  IssuedInvoiceCurrency
+
+  clientId  String
+  client    Client                @relation(fields: [clientId], references: [id])
+  managerId String
+  manager   Manager               @relation(fields: [managerId], references: [id])
+
+  amountTotal Decimal
+  fileName    String
+  storageKey  String
+  mimeType    String
+
+  // Free-text note the manager can attach/edit afterwards (e.g. "клиент
+  // попросил перевыставить"), and a soft-cancel for a счёт issued by
+  // mistake — same soft-delete spirit as Quote.deletedAt, keeps the row
+  // (and the audit trail) instead of erasing it.
+  note        String    @default("")
+  cancelled   Boolean   @default(false)
+  cancelledAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  quotes IssuedInvoiceQuote[]
+
+  @@index([clientId])
+  @@index([managerId])
+  @@index([createdAt])
+}
+
+// Join table — one счёт can cover several просчётов (a bundle), and in
+// principle the same просчёт could appear on more than one счёт over time
+// (re-issued after a correction), so this is a proper many-to-many table
+// rather than a single quoteId column on IssuedInvoice.
+model IssuedInvoiceQuote {
+  id        String        @id @default(cuid())
+  invoiceId String
+  invoice   IssuedInvoice @relation(fields: [invoiceId], references: [id])
+  quoteId   String
+  quote     Quote         @relation(fields: [quoteId], references: [id])
+
+  @@index([invoiceId])
+  @@index([quoteId])
 }
 
 // Owner's manual daily cash ledger ("Отчёты по дням") — a real-money

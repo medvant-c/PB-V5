@@ -33,6 +33,8 @@ export async function GET(req: NextRequest) {
       canViewProfitReport: true,
       canViewTrash: true,
       canViewCargoCost: true,
+      canViewInvoices: true,
+      canViewDiscounts: true,
       supervisorId: true,
       supervisor: { select: { name: true } },
       createdAt: true,

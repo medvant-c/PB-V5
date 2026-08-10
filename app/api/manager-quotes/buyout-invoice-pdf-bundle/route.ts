@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { renderBuyoutInvoiceListPdf, type BuyoutInvoiceListRow } from "@/lib/desk-services/buyout-invoice-list-pdf";
 import type { BuyoutInvoiceCurrency } from "@/lib/desk-services/buyout-invoice-pdf";
 import { buildBuyoutInvoiceRowAmounts, sumAlreadyPaidRubByCategory } from "@/lib/desk-services/buyout-invoice-calc";
+import { recordIssuedInvoice, uploadInvoiceFile } from "@/lib/desk-services/issued-invoices";
 
 const CURRENCY_FILE_SUFFIX: Record<BuyoutInvoiceCurrency, string> = { rub: "₽", usd: "$", usdt: "USDT", cny: "¥" };
 
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Просчёты не найдены." }, { status: 404 });
   }
 
-  const allRows: BuyoutInvoiceListRow[] = await Promise.all(
+  const allRows: (BuyoutInvoiceListRow & { quoteId: string; clientId: string })[] = await Promise.all(
     quotes.map(async (quote) => {
       const [attachedServiceRecords, paymentAllocations] = await Promise.all([
         prisma.quoteAttachedService.findMany({ where: { quoteId: quote.id }, orderBy: { createdAt: "asc" } }),
@@ -100,6 +101,8 @@ export async function POST(req: NextRequest) {
       );
 
       return {
+        quoteId: quote.id,
+        clientId: quote.clientId,
         displayId: quote.displayId,
         productName: quote.productName,
         clientName: quote.client.name,
@@ -120,6 +123,31 @@ export async function POST(req: NextRequest) {
   const buffer = await renderBuyoutInvoiceListPdf({ client: null, rows, currency });
 
   const fileName = `Счета на выкуп списком (${rows.length}, ${CURRENCY_FILE_SUFFIX[currency]}).pdf`;
+
+  // Selection can span several clients — write one IssuedInvoice row PER
+  // CLIENT (see prisma/schema.prisma's comment on IssuedInvoice) against the
+  // one combined PDF, uploaded once and shared across all of them.
+  const { storageKey } = await uploadInvoiceFile(buffer, fileName);
+  const rowsByClient = new Map<string, typeof rows>();
+  for (const row of rows) {
+    const existing = rowsByClient.get(row.clientId);
+    if (existing) existing.push(row);
+    else rowsByClient.set(row.clientId, [row]);
+  }
+  for (const [rowClientId, clientRows] of rowsByClient) {
+    await recordIssuedInvoice({
+      type: "buyout",
+      currency,
+      clientId: rowClientId,
+      managerId: session.managerId,
+      amountTotal: clientRows.reduce((sum, row) => sum + row.totalAmount, 0),
+      quoteIds: clientRows.map((row) => row.quoteId),
+      storageKey,
+      fileName,
+      mimeType: "application/pdf",
+    });
+  }
+
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": "application/pdf",

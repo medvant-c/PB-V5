@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Briefcase, CheckSquare, Database, FileBarChart, FileText, Home, LogOut, Menu, Package, Settings, Tag, Trash2, UserCog, Users, UsersRound, Wallet, X } from "lucide-react";
+import { Briefcase, CheckSquare, Database, FileBarChart, FileText, Home, LogOut, Menu, Package, Percent, Receipt, Settings, Tag, Trash2, UserCog, Users, UsersRound, Wallet, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ManagerClientsTab } from "@/components/manager/tabs/clients-tab";
@@ -16,6 +16,8 @@ import { ManagerCashTab } from "@/components/manager/tabs/cash-tab";
 import { ManagerFulfillmentTab } from "@/components/manager/tabs/fulfillment-tab";
 import { ManagerSettingsTab } from "@/components/manager/tabs/settings-tab";
 import { ManagerProfitReportTab } from "@/components/manager/tabs/profit-report-tab";
+import { ManagerIssuedInvoicesTab } from "@/components/manager/tabs/issued-invoices-tab";
+import { ManagerClientDiscountsTab } from "@/components/manager/tabs/client-discounts-tab";
 import { ManagerDashboard } from "@/components/manager/manager-dashboard";
 import { DailyPlanPanel } from "@/components/manager/daily-plan-panel";
 import { DailyPlanReviewModal } from "@/components/manager/daily-plan-review-modal";
@@ -41,6 +43,8 @@ interface ManagerWorkspaceProps {
     canViewCash: boolean;
     canViewProfitReport: boolean;
     canViewTrash: boolean;
+    canViewInvoices: boolean;
+    canViewDiscounts: boolean;
   };
 }
 
@@ -81,6 +85,8 @@ const ALL_SECTIONS = [
   { id: "price-list", label: "Прайс-лист", icon: Tag, Component: ManagerPriceListTab, ownerOnly: true, permissionKey: "canViewPriceList", seniorOrOwnerOnly: false, hiddenFromOutsource: false },
   { id: "cash", label: "Касса", icon: Wallet, Component: ManagerCashTab, ownerOnly: true, permissionKey: "canViewCash", seniorOrOwnerOnly: false, hiddenFromOutsource: false },
   { id: "profit-report", label: "Отчёт о прибыли", icon: FileBarChart, Component: ManagerProfitReportTab, ownerOnly: true, permissionKey: "canViewProfitReport", seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "issued-invoices", label: "Выставленные счета", icon: Receipt, Component: ManagerIssuedInvoicesTab, ownerOnly: true, permissionKey: "canViewInvoices", seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  { id: "client-discounts", label: "Скидки по клиентам", icon: Percent, Component: ManagerClientDiscountsTab, ownerOnly: true, permissionKey: "canViewDiscounts", seniorOrOwnerOnly: false, hiddenFromOutsource: false },
   { id: "database", label: "База данных", icon: Database, Component: ManagerDatabaseTab, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: true },
   // Deliberately NOT individually grantable, unlike the tabs above —
   // creating/deleting/promoting other staff accounts (up to and including

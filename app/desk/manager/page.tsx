@@ -29,6 +29,8 @@ export default async function ManagerCabinetPage() {
       canViewCash: true,
       canViewProfitReport: true,
       canViewTrash: true,
+      canViewInvoices: true,
+      canViewDiscounts: true,
     },
   });
   if (!manager || !manager.active) {
@@ -62,6 +64,8 @@ export default async function ManagerCabinetPage() {
         canViewCash: isOwner || manager.canViewCash,
         canViewProfitReport: isOwner || manager.canViewProfitReport,
         canViewTrash: isOwner || manager.canViewTrash,
+        canViewInvoices: isOwner || manager.canViewInvoices,
+        canViewDiscounts: isOwner || manager.canViewDiscounts,
       }}
     />
   );

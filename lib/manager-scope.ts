@@ -103,7 +103,7 @@ async function canEditTariffs(session: ManagerSession): Promise<boolean> {
 // 6th copy-pasted function.
 async function hasManagerPermission(
   session: ManagerSession,
-  field: "canViewPriceList" | "canViewCash" | "canViewProfitReport" | "canViewTrash" | "canViewCargoCost",
+  field: "canViewPriceList" | "canViewCash" | "canViewProfitReport" | "canViewTrash" | "canViewCargoCost" | "canViewInvoices" | "canViewDiscounts",
 ): Promise<boolean> {
   if (session.role === "owner") return true;
   const manager = await prisma.manager.findUnique({ where: { id: session.managerId }, select: { [field]: true } });
@@ -136,6 +136,16 @@ async function canViewCargoCost(session: ManagerSession): Promise<boolean> {
   return hasManagerPermission(session, "canViewCargoCost");
 }
 
+// "Выставленные счета" tab — see Manager.canViewInvoices.
+async function canViewInvoices(session: ManagerSession): Promise<boolean> {
+  return hasManagerPermission(session, "canViewInvoices");
+}
+
+// "Скидки по клиентам" tab — see Manager.canViewDiscounts.
+async function canViewDiscounts(session: ManagerSession): Promise<boolean> {
+  return hasManagerPermission(session, "canViewDiscounts");
+}
+
 export {
   getVisibleManagerIds,
   getTeamManagers,
@@ -148,4 +158,6 @@ export {
   canViewProfitReport,
   canViewTrash,
   canViewCargoCost,
+  canViewInvoices,
+  canViewDiscounts,
 };

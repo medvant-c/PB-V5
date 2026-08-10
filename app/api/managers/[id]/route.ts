@@ -32,6 +32,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     canViewProfitReport,
     canViewTrash,
     canViewCargoCost,
+    canViewInvoices,
+    canViewDiscounts,
     role,
     supervisorId,
   } =
@@ -43,6 +45,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       canViewProfitReport?: unknown;
       canViewTrash?: unknown;
       canViewCargoCost?: unknown;
+      canViewInvoices?: unknown;
+      canViewDiscounts?: unknown;
       role?: unknown;
       supervisorId?: unknown;
     }) ?? {};
@@ -64,6 +68,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   if (typeof canViewProfitReport === "boolean") data.canViewProfitReport = canViewProfitReport;
   if (typeof canViewTrash === "boolean") data.canViewTrash = canViewTrash;
   if (typeof canViewCargoCost === "boolean") data.canViewCargoCost = canViewCargoCost;
+  if (typeof canViewInvoices === "boolean") data.canViewInvoices = canViewInvoices;
+  if (typeof canViewDiscounts === "boolean") data.canViewDiscounts = canViewDiscounts;
   if (typeof role === "string") {
     if (!VALID_ROLES.includes(role)) return Response.json({ error: "Некорректная роль." }, { status: 400 });
     data.role = role;
