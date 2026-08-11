@@ -563,7 +563,6 @@ function ManagerCashTab() {
   const [transferSaving, setTransferSaving] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
   const [transfers, setTransfers] = useState<CashTransferRecord[]>([]);
-  const [showTransferHistory, setShowTransferHistory] = useState(false);
 
   const loadTransfers = useCallback(async () => {
     const res = await fetch(`/api/manager-cash-transfers?month=${month}`);
@@ -574,6 +573,25 @@ function ManagerCashTab() {
   useEffect(() => {
     loadTransfers();
   }, [loadTransfers]);
+
+  // Перевод раньше был виден только в отдельной свёрнутой "Истории
+  // переводов" ниже основной ленты — легко было решить, что перевод вообще
+  // никуда не записался, если не знать, что эта секция там есть. Теперь
+  // одна общая лента, отсортированная по дате: перевод попадает в неё же
+  // строкой (не приход/расход — деньги остаются внутри компании, просто
+  // между Счёт'ами), отфильтрованной так же по выбранному счёту (перевод
+  // виден, если счёт — участник хотя бы с одной стороны). См. PB-V5 chat
+  // 2026-08-11.
+  type CashLedgerRow =
+    | { kind: "order"; id: string; date: string; order: CashOrderRecord }
+    | { kind: "transfer"; id: string; date: string; transfer: CashTransferRecord };
+  const ledgerRows = useMemo<CashLedgerRow[]>(() => {
+    const orderRows: CashLedgerRow[] = orders.map((o) => ({ kind: "order", id: o.id, date: o.date, order: o }));
+    const transferRows: CashLedgerRow[] = transfers
+      .filter((t) => filterAccountId === "all" || t.fromAccount.id === filterAccountId || t.toAccount.id === filterAccountId)
+      .map((t) => ({ kind: "transfer", id: t.id, date: t.date, transfer: t }));
+    return [...orderRows, ...transferRows].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [orders, transfers, filterAccountId]);
 
   function openTransferDialog() {
     setTransferDraft({
@@ -869,7 +887,7 @@ function ManagerCashTab() {
 
       {loading ? (
         <p className="text-sm text-text-secondary">Загрузка…</p>
-      ) : orders.length === 0 ? (
+      ) : ledgerRows.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border p-4 text-sm text-text-secondary">Операций за этот период пока нет.</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border">
@@ -888,42 +906,82 @@ function ManagerCashTab() {
               </tr>
             </thead>
             <tbody>
-              {orders.map((order) => (
-                <tr key={order.id} className="border-b border-border last:border-0">
+              {ledgerRows.map((row) =>
+                row.kind === "transfer" ? (
+                  <tr key={`transfer-${row.id}`} className="border-b border-border last:border-0">
+                    <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">
+                      {new Date(row.transfer.date).toLocaleDateString("ru-RU")}
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Перевод</span>
+                    </td>
+                    <td className="px-3 py-1.5 text-text-secondary">
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                        {row.transfer.fromAccount.name}
+                        <ArrowLeftRight className="h-3 w-3 shrink-0" />
+                        {row.transfer.toAccount.name}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5 text-text-secondary">Перевод между счетами</td>
+                    <td className="px-3 py-1.5 text-text-secondary">—</td>
+                    <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">
+                      {money(Number(row.transfer.amount))} {CURRENCY_LABEL[row.transfer.currency]}
+                    </td>
+                    <td className="px-3 py-1.5 whitespace-nowrap font-medium text-text">¥ {money(Number(row.transfer.amountCny))}</td>
+                    <td className="max-w-50 truncate px-3 py-1.5 text-text-secondary" title={row.transfer.comment}>
+                      {row.transfer.comment}
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTransfer(row.transfer.id)}
+                          className="text-text-secondary hover:text-error"
+                          aria-label="Удалить перевод"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                <tr key={`order-${row.id}`} className="border-b border-border last:border-0">
                   <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">
-                    {new Date(order.date).toLocaleDateString("ru-RU")}
+                    {new Date(row.order.date).toLocaleDateString("ru-RU")}
                   </td>
                   <td className="px-3 py-1.5">
                     <span
                       className={cn(
                         "rounded-full px-2 py-0.5 text-xs font-medium",
-                        order.type === "income" ? "bg-success/10 text-success" : "bg-error/10 text-error",
+                        row.order.type === "income" ? "bg-success/10 text-success" : "bg-error/10 text-error",
                       )}
                     >
-                      {TYPE_LABEL[order.type]}
+                      {TYPE_LABEL[row.order.type]}
                     </span>
                   </td>
-                  <td className="px-3 py-1.5 text-text-secondary">{order.account.name}</td>
-                  <td className="px-3 py-1.5 text-text">{order.category.name}</td>
+                  <td className="px-3 py-1.5 text-text-secondary">{row.order.account.name}</td>
+                  <td className="px-3 py-1.5 text-text">{row.order.category.name}</td>
                   <td className="px-3 py-1.5 text-text-secondary">
-                    {order.client?.name ?? "—"}
-                    {order.quote && <span className="block text-xs text-text-secondary/70">№{order.quote.displayId} — {order.quote.productName}</span>}
+                    {row.order.client?.name ?? "—"}
+                    {row.order.quote && (
+                      <span className="block text-xs text-text-secondary/70">№{row.order.quote.displayId} — {row.order.quote.productName}</span>
+                    )}
                   </td>
                   <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">
-                    {money(Number(order.amount))} {CURRENCY_LABEL[order.currency]}
+                    {money(Number(row.order.amount))} {CURRENCY_LABEL[row.order.currency]}
                   </td>
-                  <td className="px-3 py-1.5 whitespace-nowrap font-medium text-text">¥ {money(Number(order.amountCny))}</td>
-                  <td className="max-w-50 truncate px-3 py-1.5 text-text-secondary" title={order.comment}>
-                    {order.comment}
+                  <td className="px-3 py-1.5 whitespace-nowrap font-medium text-text">¥ {money(Number(row.order.amountCny))}</td>
+                  <td className="max-w-50 truncate px-3 py-1.5 text-text-secondary" title={row.order.comment}>
+                    {row.order.comment}
                   </td>
                   <td className="px-3 py-1.5">
                     <div className="flex items-center justify-end gap-2">
-                      <button type="button" onClick={() => openEditDialog(order)} className="text-text-secondary hover:text-text" aria-label="Редактировать">
+                      <button type="button" onClick={() => openEditDialog(row.order)} className="text-text-secondary hover:text-text" aria-label="Редактировать">
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleDeleteOrder(order.id)}
+                        onClick={() => handleDeleteOrder(row.order.id)}
                         className="text-text-secondary hover:text-error"
                         aria-label="Удалить"
                       >
@@ -935,61 +993,6 @@ function ManagerCashTab() {
               ))}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {transfers.length > 0 && (
-        <div className="border-t border-border pt-4">
-          <button
-            type="button"
-            onClick={() => setShowTransferHistory((v) => !v)}
-            className="text-xs font-semibold text-text-secondary hover:text-text"
-          >
-            {showTransferHistory ? "Скрыть историю переводов" : `История переводов (${transfers.length})`}
-          </button>
-          {showTransferHistory && (
-            <div className="mt-3 overflow-x-auto rounded-lg border border-border">
-              <table className="w-full min-w-2xl border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-bg text-left text-xs text-text-secondary">
-                    <th className="px-3 py-1.5 font-medium">Дата</th>
-                    <th className="px-3 py-1.5 font-medium">Со счёта</th>
-                    <th className="px-3 py-1.5 font-medium">На счёт</th>
-                    <th className="px-3 py-1.5 font-medium">Сумма</th>
-                    <th className="px-3 py-1.5 font-medium">Сумма, ¥</th>
-                    <th className="px-3 py-1.5 font-medium">Комментарий</th>
-                    <th className="px-3 py-1.5 font-medium" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {transfers.map((t) => (
-                    <tr key={t.id} className="border-b border-border last:border-0">
-                      <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">{new Date(t.date).toLocaleDateString("ru-RU")}</td>
-                      <td className="px-3 py-1.5 text-text">{t.fromAccount.name}</td>
-                      <td className="px-3 py-1.5 text-text">{t.toAccount.name}</td>
-                      <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">
-                        {money(Number(t.amount))} {CURRENCY_LABEL[t.currency]}
-                      </td>
-                      <td className="px-3 py-1.5 whitespace-nowrap font-medium text-text">¥ {money(Number(t.amountCny))}</td>
-                      <td className="max-w-50 truncate px-3 py-1.5 text-text-secondary" title={t.comment}>
-                        {t.comment}
-                      </td>
-                      <td className="px-3 py-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteTransfer(t.id)}
-                          className="text-text-secondary hover:text-error"
-                          aria-label="Удалить перевод"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       )}
 
