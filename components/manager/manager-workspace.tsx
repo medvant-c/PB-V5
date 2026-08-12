@@ -143,10 +143,11 @@ function ManagerWorkspace({ name, role, impersonatedByName, permissions }: Manag
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Badge on the "Подтверждения" nav tab — sum of every pending queue
-  // ManagerConfirmationsTab itself lists (buyout facts, self-sourced
-  // claims, manual cargo/¥/$ rates, manual buyout commission, and
-  // unassigned self-registered clients), so it's visible without opening
-  // the tab. Owner/senior only (that's who sees the tab at all — see
+  // ManagerConfirmationsTab itself lists (self-sourced claims, unassigned
+  // self-registered clients, USDT-курс), so it's visible without opening
+  // the tab. Ручные ставки/факт выкупа больше не часть этой очереди — см.
+  // /api/manager-confirmations, план mellow-forging-kay.md, PB-V5 chat
+  // 2026-08-11. Owner/senior only (that's who sees the tab at all — see
   // seniorOrOwnerOnly below; unassignedClients is itself owner-only and
   // just comes back empty for a senior), refetched whenever the active tab
   // changes so acting in Подтверждения and switching away clears/updates
@@ -157,28 +158,10 @@ function ManagerWorkspace({ name, role, impersonatedByName, permissions }: Manag
     fetch("/api/manager-confirmations")
       .then((res) => res.json())
       .then((data) => {
-        const buyouts = data.pendingBuyouts?.length ?? 0;
         const clients = data.pendingClients?.length ?? 0;
-        const cargoRates = data.pendingCargoRates?.length ?? 0;
-        const cnyRates = data.pendingCnyRates?.length ?? 0;
-        const usdRates = data.pendingUsdRates?.length ?? 0;
-        const buyoutCommissions = data.pendingBuyoutCommissions?.length ?? 0;
-        const searchFees = data.pendingSearchFees?.length ?? 0;
-        const customProductionFees = data.pendingCustomProductionFees?.length ?? 0;
         const unassignedClients = data.pendingUnassignedClients?.length ?? 0;
         const usdtRateConfirmation = data.pendingUsdtRateConfirmation ? 1 : 0;
-        setPendingConfirmationsCount(
-          buyouts +
-            clients +
-            cargoRates +
-            cnyRates +
-            usdRates +
-            buyoutCommissions +
-            searchFees +
-            customProductionFees +
-            unassignedClients +
-            usdtRateConfirmation,
-        );
+        setPendingConfirmationsCount(clients + unassignedClients + usdtRateConfirmation);
       })
       .catch(() => {});
   }, [role, activeSection]);

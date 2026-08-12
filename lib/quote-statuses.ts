@@ -37,6 +37,26 @@ const QUOTE_STATUS_LABEL: Record<QuoteStatus, string> = {
 // constant rather than a magic number at the call site.
 const STALE_IN_PROGRESS_MS = 24 * 60 * 60 * 1000;
 
+// Реальная прибыль по факту денег в Кассе (вместо плана из просчёта)
+// включается по СТАТУСУ, не по полноте оплаты — как только менеджер
+// перевёл сделку в этот статус, это значит "товар реально куплен и уже
+// едет", вне зависимости от того, пришла ли оплата от клиента целиком
+// (частичная оплата — например, аванс под производство под заказ — не
+// повод ждать: report просто покажет реальные, пусть ещё неполные, цифры
+// из Кассы). До этого статуса — план из просчёта. Один источник правды —
+// используется в дашборде, отчёте о прибыли и отчёте за период (lib/
+// desk-services/quote-profit.ts, profit-report.ts, period-report.ts,
+// app/api/manager-dashboard/route.ts). См. PB-V5 chat 2026-08-11.
+const BUYOUT_REALIZED_STATUSES: QuoteStatus[] = [
+  "in_transit_to_warehouse",
+  "delivered_to_warehouse",
+  "sent_to_client",
+  "handed_to_client",
+];
+// Та же идея для блока Карго — реализуется, как только карго реально
+// отправлено клиенту (а не когда план по перевозке составлен).
+const CARGO_REALIZED_STATUSES: QuoteStatus[] = ["sent_to_client", "handed_to_client"];
+
 function isQuoteStatus(value: string): value is QuoteStatus {
   return (QUOTE_STATUSES as readonly string[]).includes(value);
 }
@@ -86,6 +106,8 @@ export {
   QUOTE_STATUS_BADGE_CLASSES,
   QUOTE_STATUS_DOT_COLOR,
   STALE_IN_PROGRESS_MS,
+  BUYOUT_REALIZED_STATUSES,
+  CARGO_REALIZED_STATUSES,
   isQuoteStatus,
 };
 export type { QuoteStatus };

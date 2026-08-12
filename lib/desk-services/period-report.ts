@@ -12,11 +12,16 @@ import {
   investorCargoShareRub,
   isPremiumEligiblePaymentCategory,
   isProscetPaymentCategory,
+  isSelfSourcedFor,
   sumAlreadyPaidPremium,
   sumAlreadyPaidProfitRub,
+  computeRealBuyoutProfit,
   type InvestorConfig,
   type QuoteProfitFields,
 } from "@/lib/desk-services/quote-profit";
+import { loadCnyRateHistory, cnyRateRubAsOf } from "@/lib/desk-services/historical-cny-rate";
+import { BUYOUT_REALIZED_STATUSES } from "@/lib/quote-statuses";
+import { fetchQuoteRealFinancials, emptyQuoteRealFinancials } from "@/lib/desk-services/quote-real-financials";
 
 // "Реальные деньги за период" — в отличие от app/api/manager-profit-report
 // (which asks "сколько заработаем НА ЭТИХ сделках, если/когда они
@@ -237,6 +242,61 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
     });
   }
 
+  // --- 2b. Новая схема (реальные деньги в Кассе вместо buyoutFactConfirmed)
+  // — событие "выкуп реализован" для сделок, ещё НЕ подтверждённых по
+  // старой схеме: "реализован" решает СТАТУС сделки (BUYOUT_REALIZED_
+  // STATUSES — "в доставке на склад" и далее), не полнота оплаты — как
+  // только менеджер перевёл сделку в этот статус, товар уже реально куплен.
+  // Событие датируется statusChangedAt (той же логикой, что и старое карго-
+  // событие #3 ниже) — момент перехода в этот статус. Остаток профита/
+  // премии — за вычетом того, что уже вошло в событие #1 выше (buyout_
+  // commission/attached_services, 100% маржа, кредитуется по мере оплаты)
+  // — та же анти-задвоение логика, что и у события #2, но БЕЗ клэмпа в 0
+  // (реальный убыток по товару/доставке — честная отрицательная прибыль,
+  // не 0, см. план mellow-forging-kay.md). См. PB-V5 chat 2026-08-11.
+  const openBuyoutQuotes = await prisma.quote.findMany({
+    where: {
+      buyoutFactConfirmed: false,
+      deletedAt: null,
+      isCargoOnly: false,
+      status: { in: BUYOUT_REALIZED_STATUSES },
+      statusChangedAt: { gte: from, lt: to },
+    },
+    select: {
+      id: true,
+      managerId: true,
+      buyoutSelfSourcedBoost: true,
+      client: { select: { id: true, selfSourcedConfirmed: true, createdByManagerId: true, vladShareRatePercentOverride: true } },
+      paymentAllocations: { select: { category: true, amountRub: true, premiumRub: true } },
+    },
+  });
+  if (openBuyoutQuotes.length > 0) {
+    const openQuoteIds = openBuyoutQuotes.map((q) => q.id);
+    const openFinancials = await fetchQuoteRealFinancials(openQuoteIds);
+
+    for (const q of openBuyoutQuotes) {
+      const financials = openFinancials.get(q.id) ?? emptyQuoteRealFinancials();
+      const real = computeRealBuyoutProfit({ allocations: q.paymentAllocations, expenseRub: financials.buyoutExpenseRub });
+
+      const alreadyPaidProfit = sumAlreadyPaidProfitRub(q.paymentAllocations);
+      const alreadyPaidPremium = sumAlreadyPaidPremium(q.paymentAllocations);
+      const isBoosted = isSelfSourcedFor(q.client, q.managerId);
+      const buyoutRate = isBoosted ? premiumRates.selfSourcedBuyoutDiscountRatePercent : premiumRates.normalRatePercent;
+      const residualProfitRub = real.profitRub - alreadyPaidProfit.buyoutRub;
+      const fullPremiumRub = Math.max(0, real.profitRub) * (buyoutRate / 100);
+      const residualPremiumRub = Math.max(0, fullPremiumRub - alreadyPaidPremium.buyoutRub);
+
+      events.push({
+        managerId: q.managerId,
+        client: q.client,
+        profitRub: residualProfitRub,
+        managerPremiumRub: residualPremiumRub,
+        cargo: null,
+        breakdown: { proscetRub: 0, buyoutRub: residualProfitRub, discountRub: 0, cargoRub: 0 },
+      });
+    }
+  }
+
   // --- 3. Cargo events: карго margin + карго premium, fixed the moment
   // cargoBonusRatePercent gets set (always at handed_to_client, see
   // status/route.ts) — a separate timeline from confirm-buyout entirely. ---
@@ -382,24 +442,10 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
   // the report happens to be viewed) made "уже выплачено"/"остаток к
   // выплате" drift up and down purely from FX movement, with nothing
   // actually paid or earned changing — a report for a past period must
-  // read the same next month as it does today. TariffSettings rows are
-  // append-only/versioned over time (not a singleton), so this picks
-  // whichever rate was actually in effect on the order's own date. See
-  // PB-V5 chat 2026-08-10.
-  const tariffHistory = await prisma.tariffSettings.findMany({
-    orderBy: { createdAt: "asc" },
-    select: { cnyRateRub: true, createdAt: true },
-  });
-  function cnyRateRubAsOf(date: Date): number | null {
-    let rate: number | null = null;
-    for (const t of tariffHistory) {
-      if (t.createdAt > date) break;
-      rate = Number(t.cnyRateRub);
-    }
-    // The order predates every TariffSettings row on file — fall back to
-    // the earliest known rate rather than showing nothing.
-    return rate ?? (tariffHistory.length > 0 ? Number(tariffHistory[0].cnyRateRub) : null);
-  }
+  // read the same next month as it does today. See lib/desk-services/
+  // historical-cny-rate.ts (extracted so quote-real-financials.ts can
+  // reuse the exact same lookup). See PB-V5 chat 2026-08-10/2026-08-11.
+  const tariffHistory = await loadCnyRateHistory();
 
   const alreadyPaidRubByManagerId = new Map<string, number>();
   const alreadyPaidRubByInvestorId = new Map<string, number>();
@@ -412,7 +458,7 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
     if (order.currency === "rub") {
       amountRub = Number(order.amount);
     } else {
-      const rate = cnyRateRubAsOf(order.date);
+      const rate = cnyRateRubAsOf(tariffHistory, order.date);
       if (rate === null) continue;
       amountRub = Number(order.amountCny) * rate;
     }

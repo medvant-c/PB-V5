@@ -334,22 +334,12 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   const [cargoCategoryKey, setCargoCategoryKey] = useState(BLANK_FORM.cargoCategoryKey);
   const [cargoDiscountUsd, setCargoDiscountUsd] = useState(BLANK_FORM.cargoDiscountUsd);
   const [cargoRateUsdOverride, setCargoRateUsdOverride] = useState(BLANK_FORM.cargoRateUsdOverride);
-  // Read-only info once a manual rate has been approved (see Quote.
-  // cargoRateOverrideConfirmed) — the manager can still change the rate
-  // itself (that resets confirmation server-side), just can't be the one
-  // who marks it confirmed. Only meaningful while editing.
-  const [cargoRateOverrideConfirmed, setCargoRateOverrideConfirmed] = useState(false);
   const [cnyRateRubOverride, setCnyRateRubOverride] = useState(BLANK_FORM.cnyRateRubOverride);
-  const [cnyRateOverrideConfirmed, setCnyRateOverrideConfirmed] = useState(false);
   const [usdRateRubOverride, setUsdRateRubOverride] = useState(BLANK_FORM.usdRateRubOverride);
-  const [usdRateOverrideConfirmed, setUsdRateOverrideConfirmed] = useState(false);
   const [buyoutCommissionPercentOverride, setBuyoutCommissionPercentOverride] = useState(BLANK_FORM.buyoutCommissionPercentOverride);
   const [buyoutCommissionRubOverride, setBuyoutCommissionRubOverride] = useState(BLANK_FORM.buyoutCommissionRubOverride);
-  const [buyoutCommissionOverrideConfirmed, setBuyoutCommissionOverrideConfirmed] = useState(false);
   const [searchServiceFeeRubOverride, setSearchServiceFeeRubOverride] = useState(BLANK_FORM.searchServiceFeeRubOverride);
-  const [searchServiceFeeOverrideConfirmed, setSearchServiceFeeOverrideConfirmed] = useState(false);
   const [customProductionFeeRubOverride, setCustomProductionFeeRubOverride] = useState(BLANK_FORM.customProductionFeeRubOverride);
-  const [customProductionFeeOverrideConfirmed, setCustomProductionFeeOverrideConfirmed] = useState(false);
 
   const [catalog, setCatalog] = useState<ServiceCatalogItemRecord[]>([]);
   const [attachedServices, setAttachedServices] = useState<AttachedServiceState[]>([]);
@@ -453,18 +443,12 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
       setCargoCategoryKey(BLANK_FORM.cargoCategoryKey);
       setCargoDiscountUsd(BLANK_FORM.cargoDiscountUsd);
       setCargoRateUsdOverride(BLANK_FORM.cargoRateUsdOverride);
-      setCargoRateOverrideConfirmed(false);
       setCnyRateRubOverride(BLANK_FORM.cnyRateRubOverride);
-      setCnyRateOverrideConfirmed(false);
       setUsdRateRubOverride(BLANK_FORM.usdRateRubOverride);
-      setUsdRateOverrideConfirmed(false);
       setBuyoutCommissionPercentOverride(BLANK_FORM.buyoutCommissionPercentOverride);
       setBuyoutCommissionRubOverride(BLANK_FORM.buyoutCommissionRubOverride);
-      setBuyoutCommissionOverrideConfirmed(false);
       setSearchServiceFeeRubOverride(BLANK_FORM.searchServiceFeeRubOverride);
-      setSearchServiceFeeOverrideConfirmed(false);
       setCustomProductionFeeRubOverride(BLANK_FORM.customProductionFeeRubOverride);
-      setCustomProductionFeeOverrideConfirmed(false);
       setFrozenRates(null);
       setQuoteDates(null);
       setExistingPhotos([]);
@@ -513,18 +497,12 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           setCargoCategoryKey(q.cargoCategoryKey ?? "");
           setCargoDiscountUsd(Number(q.cargoDiscountUsd) > 0 ? q.cargoDiscountUsd : "");
           setCargoRateUsdOverride(q.cargoRateUsdOverride ?? "");
-          setCargoRateOverrideConfirmed(q.cargoRateOverrideConfirmed);
           setCnyRateRubOverride(q.cnyRateRubOverride ?? "");
-          setCnyRateOverrideConfirmed(q.cnyRateOverrideConfirmed);
           setUsdRateRubOverride(q.usdRateRubOverride ?? "");
-          setUsdRateOverrideConfirmed(q.usdRateOverrideConfirmed);
           setBuyoutCommissionPercentOverride(q.buyoutCommissionPercentOverride ?? "");
           setBuyoutCommissionRubOverride(q.buyoutCommissionRubOverride ?? "");
-          setBuyoutCommissionOverrideConfirmed(q.buyoutCommissionOverrideConfirmed);
           setSearchServiceFeeRubOverride(q.searchServiceFeeRubOverride ?? "");
-          setSearchServiceFeeOverrideConfirmed(q.searchServiceFeeOverrideConfirmed);
           setCustomProductionFeeRubOverride(q.customProductionFeeRubOverride ?? "");
-          setCustomProductionFeeOverrideConfirmed(q.customProductionFeeOverrideConfirmed);
           setFrozenRates({
             cnyRateRub: Number(q.cnyRateUsed),
             usdRateRub: Number(q.usdRateUsed),
@@ -1487,9 +1465,9 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               </div>
             )}
 
-            <div className="space-y-3 rounded-xl border border-warning/30 bg-warning/5 p-3">
-              <div className="text-xs font-semibold text-warning">
-                ⚠️ Ручная настройка тарифов — требуется подтверждение руководителя
+            <div className="space-y-3 rounded-xl border border-border bg-bg p-3">
+              <div className="text-xs font-semibold text-text-secondary">
+                Ручная настройка тарифов (переопределяет значения из тарифов для этого просчёта)
               </div>
 
               <div className="space-y-1.5">
@@ -1502,18 +1480,6 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                   value={cnyRateRubOverride}
                   onChange={(e) => setCnyRateRubOverride(e.target.value)}
                 />
-                {cnyRateRubOverride.trim() &&
-                  (isEditing ? (
-                    <p className={cn("text-xs", cnyRateOverrideConfirmed ? "text-success" : "text-warning")}>
-                      {cnyRateOverrideConfirmed
-                        ? "✓ Курс подтверждён руководителем/старшим менеджером."
-                        : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — курс уже применяется в просчёте."}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-warning">
-                      После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
-                    </p>
-                  ))}
               </div>
 
               <div className="space-y-1.5">
@@ -1526,18 +1492,6 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                   value={usdRateRubOverride}
                   onChange={(e) => setUsdRateRubOverride(e.target.value)}
                 />
-                {usdRateRubOverride.trim() &&
-                  (isEditing ? (
-                    <p className={cn("text-xs", usdRateOverrideConfirmed ? "text-success" : "text-warning")}>
-                      {usdRateOverrideConfirmed
-                        ? "✓ Курс подтверждён руководителем/старшим менеджером."
-                        : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — курс уже применяется в просчёте."}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-warning">
-                      После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
-                    </p>
-                  ))}
               </div>
 
               <div className="space-y-1.5">
@@ -1553,18 +1507,6 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                   value={cargoRateUsdOverride}
                   onChange={(e) => setCargoRateUsdOverride(e.target.value)}
                 />
-                {cargoRateUsdOverride.trim() &&
-                  (isEditing ? (
-                    <p className={cn("text-xs", cargoRateOverrideConfirmed ? "text-success" : "text-warning")}>
-                      {cargoRateOverrideConfirmed
-                        ? "✓ Ставка подтверждена руководителем/старшим менеджером."
-                        : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — до этого прибыль по карго считается приблизительно."}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-warning">
-                      После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
-                    </p>
-                  ))}
               </div>
 
               <div className="space-y-1.5">
@@ -1598,18 +1540,6 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                     className="flex-1"
                   />
                 </div>
-                {(buyoutCommissionPercentOverride.trim() || buyoutCommissionRubOverride.trim()) &&
-                  (isEditing ? (
-                    <p className={cn("text-xs", buyoutCommissionOverrideConfirmed ? "text-success" : "text-warning")}>
-                      {buyoutCommissionOverrideConfirmed
-                        ? "✓ Комиссия подтверждена руководителем/старшим менеджером."
-                        : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — комиссия уже применяется в просчёте."}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-warning">
-                      После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
-                    </p>
-                  ))}
               </div>
 
               <div className="space-y-1.5">
@@ -1633,18 +1563,6 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                     Бесплатно
                   </Button>
                 </div>
-                {searchServiceFeeRubOverride.trim() &&
-                  (isEditing ? (
-                    <p className={cn("text-xs", searchServiceFeeOverrideConfirmed ? "text-success" : "text-warning")}>
-                      {searchServiceFeeOverrideConfirmed
-                        ? "✓ Сумма подтверждена руководителем/старшим менеджером."
-                        : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — сумма уже применяется в просчёте."}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-warning">
-                      После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
-                    </p>
-                  ))}
               </div>
 
               <div className="space-y-1.5">
@@ -1657,18 +1575,6 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                   value={customProductionFeeRubOverride}
                   onChange={(e) => setCustomProductionFeeRubOverride(e.target.value)}
                 />
-                {customProductionFeeRubOverride.trim() &&
-                  (isEditing ? (
-                    <p className={cn("text-xs", customProductionFeeOverrideConfirmed ? "text-success" : "text-warning")}>
-                      {customProductionFeeOverrideConfirmed
-                        ? "✓ Сумма подтверждена руководителем/старшим менеджером."
-                        : "Ждёт подтверждения руководителем/старшим менеджером (вкладка «Подтверждения») — сумма уже применяется в просчёте."}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-warning">
-                      После сохранения попадёт на подтверждение руководителю/старшему менеджеру (вкладка «Подтверждения»).
-                    </p>
-                  ))}
               </div>
             </div>
 

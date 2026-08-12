@@ -1,27 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Archive, Banknote, CheckCircle2, ChevronDown, Coins, DollarSign, Loader2, Paperclip, Percent, Ruler, UserCheck, UserPlus, Wallet } from "lucide-react";
+import { Archive, Banknote, CheckCircle2, ChevronDown, Loader2, Paperclip, UserCheck, UserPlus } from "lucide-react";
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-
-interface PendingBuyout {
-  id: string;
-  displayId: number;
-  productName: string;
-  status: string;
-  statusChangedAt: string;
-  totalPriceCny: string;
-  totalRub: string;
-  searchServiceFeeRub: string;
-  customProductionFeeRub: string;
-  buyoutCommissionRub: string;
-  cnyRateUsed: string;
-  manager: { id: string; name: string };
-  client: { name: string; company: string | null };
-}
 
 interface PendingClient {
   id: string;
@@ -43,74 +27,6 @@ interface PendingUnassignedClient {
   createdAt: string;
 }
 
-interface PendingCargoRate {
-  id: string;
-  displayId: number;
-  productName: string;
-  createdAt: string;
-  cargoRateUsd: string;
-  cargoRateUsdOverride: string;
-  deliveryPricingMode: string;
-  manager: { id: string; name: string };
-  client: { name: string; company: string | null };
-}
-
-interface PendingCnyRate {
-  id: string;
-  displayId: number;
-  productName: string;
-  createdAt: string;
-  cnyRateUsed: string;
-  cnyRateRubOverride: string;
-  manager: { id: string; name: string };
-  client: { name: string; company: string | null };
-}
-
-interface PendingUsdRate {
-  id: string;
-  displayId: number;
-  productName: string;
-  createdAt: string;
-  usdRateUsed: string;
-  usdRateRubOverride: string;
-  manager: { id: string; name: string };
-  client: { name: string; company: string | null };
-}
-
-interface PendingBuyoutCommission {
-  id: string;
-  displayId: number;
-  productName: string;
-  createdAt: string;
-  buyoutCommissionPercent: string;
-  buyoutCommissionPercentOverride: string | null;
-  buyoutCommissionRubOverride: string | null;
-  manager: { id: string; name: string };
-  client: { name: string; company: string | null };
-}
-
-interface PendingSearchFee {
-  id: string;
-  displayId: number;
-  productName: string;
-  createdAt: string;
-  searchServiceFeeRub: string;
-  searchServiceFeeRubOverride: string;
-  manager: { id: string; name: string };
-  client: { name: string; company: string | null };
-}
-
-interface PendingCustomProductionFee {
-  id: string;
-  displayId: number;
-  productName: string;
-  createdAt: string;
-  customProductionFeeRub: string;
-  customProductionFeeRubOverride: string;
-  manager: { id: string; name: string };
-  client: { name: string; company: string | null };
-}
-
 // Single shared TariffSettings.usdtRateCny, not per-quote — see
 // app/api/manager-tariffs/confirm-usdt-rate/route.ts.
 interface PendingUsdtRateConfirmation {
@@ -122,46 +38,22 @@ function formatDate(value: string): string {
   return new Date(value).toLocaleDateString("ru-RU");
 }
 
-// Waited longest first — same "don't let it go stale" instinct as the
-// in_progress banner in clients-tab.tsx, just applied to a queue instead of
-// a single row's own age.
-function daysWaiting(value: string): number {
-  return Math.floor((Date.now() - new Date(value).getTime()) / (24 * 60 * 60 * 1000));
-}
-
-// Some mobile keyboards (Russian locale) insert a comma as the decimal
-// separator into a type="number" input instead of a period — Number()
-// silently returns NaN for "12,8", which then fails validation with no
-// visible explanation. Normalized at every read site, not just on submit.
-function parseNum(value: string): number {
-  return Number(value.replace(",", "."));
-}
-
-// Live client-side mirror of the server formula in confirm-buyout/route.ts —
-// purely a preview so the person confirming sees «Скидка» update as they
-// type, before it's actually computed and stored server-side on submit.
-function previewDiscountCny(
-  quote: PendingBuyout,
-  draft: { cny: string; rate: string; rub: string; rateRub: string },
-): number | null {
-  const buyoutCny = parseNum(draft.cny);
-  const paymentRub = parseNum(draft.rub);
-  const paymentRate = parseNum(draft.rateRub);
-  if (!Number.isFinite(buyoutCny) || buyoutCny <= 0) return null;
-  if (!Number.isFinite(paymentRub) || paymentRub <= 0 || !Number.isFinite(paymentRate) || paymentRate <= 0) return null;
-  const paymentAmountCny = paymentRub / paymentRate;
-  const servicesAndCommissionCny =
-    (Number(quote.searchServiceFeeRub) + Number(quote.buyoutCommissionRub) + Number(quote.customProductionFeeRub)) /
-    Number(quote.cnyRateUsed);
-  return paymentAmountCny - servicesAndCommissionCny - buyoutCny;
-}
-
 interface ClientOption {
   id: string;
   name: string;
   company: string | null;
 }
 
+// 2026-08-11: очередь и архив свелись к двум действующим типам ("чей
+// клиент" и USDT-курс) — прибыль/премия больше не доверяют введённым вручную
+// цифрам (выкуп факт, ручные ставки карго/¥/$/комиссии), а реальным деньгам
+// в Кассе (см. lib/desk-services/quote-profit.ts, план
+// mellow-forging-kay.md). "buyout"/"cargo_rate"/"cny_rate"/"usd_rate"/
+// "buyout_commission" остаются в типе и архиве только как история уже
+// принятых РАНЬШЕ решений — новые записи этих типов больше не появляются,
+// но старые остаются доступны для аудита. Соответствующие confirm-*/route.ts
+// роуты и /api/manager-confirmations-archive/revert не удалены — проще
+// откатить, если что.
 type ArchiveEntryType = "buyout" | "cargo_rate" | "cny_rate" | "usd_rate" | "buyout_commission" | "self_sourced_client";
 
 interface ArchiveEntry {
@@ -186,21 +78,15 @@ const ARCHIVE_TYPE_LABEL: Record<ArchiveEntryType, string> = {
   self_sourced_client: "Личный клиент",
 };
 
-// Combined archive of every already-confirmed item (buyout facts, manual
-// cargo rates, manual ¥→₽ rates, self-sourced clients) — the "already
-// handled" counterpart to the pending queue above, filterable by
-// type/manager/client/date so a руководитель can audit anything already
-// confirmed without reopening every client's quote list one by one.
-// Collapsed by default (closed <details>-style section) since it's a
-// browse/audit tool, not something checked every visit the way the
-// pending queue is. One list for every confirmation type, not four
-// separate archives — see PB-V5 chat 2026-07-30 ("зачем велосипед
-// изобретать — туда же переноси все подтверждения любые списком").
-// "Редактировать" and "Удалить" are the same underlying action here: revert
-// the confirmation back to pending, where it can be corrected and
-// re-confirmed through the exact same form that confirmed it originally
-// (or just left there, which is effectively deletion) — no separate edit
-// UI to build and keep in sync.
+// Combined archive of every already-confirmed item — теперь в основном
+// история (см. комментарий на ArchiveEntryType выше), но "Личный клиент"
+// продолжает пополняться. Collapsed by default (closed <details>-style
+// section) since it's a browse/audit tool, not something checked every
+// visit the way the pending queue is. "Редактировать" and "Удалить" are
+// the same underlying action here: revert the confirmation back to
+// pending, where it can be corrected and re-confirmed through the exact
+// same form that confirmed it originally (or just left there, which is
+// effectively deletion) — no separate edit UI to build and keep in sync.
 function ConfirmationsArchive({ onReverted }: { onReverted: () => void }) {
   const [open, setOpen] = useState(false);
   const [entries, setEntries] = useState<ArchiveEntry[]>([]);
@@ -396,14 +282,7 @@ function ConfirmationsArchive({ onReverted }: { onReverted: () => void }) {
 }
 
 function ManagerConfirmationsTab() {
-  const [pendingBuyouts, setPendingBuyouts] = useState<PendingBuyout[]>([]);
   const [pendingClients, setPendingClients] = useState<PendingClient[]>([]);
-  const [pendingCargoRates, setPendingCargoRates] = useState<PendingCargoRate[]>([]);
-  const [pendingCnyRates, setPendingCnyRates] = useState<PendingCnyRate[]>([]);
-  const [pendingUsdRates, setPendingUsdRates] = useState<PendingUsdRate[]>([]);
-  const [pendingBuyoutCommissions, setPendingBuyoutCommissions] = useState<PendingBuyoutCommission[]>([]);
-  const [pendingSearchFees, setPendingSearchFees] = useState<PendingSearchFee[]>([]);
-  const [pendingCustomProductionFees, setPendingCustomProductionFees] = useState<PendingCustomProductionFee[]>([]);
   // Owner-only (see /api/manager-confirmations) — empty for senior/manager
   // sessions without any extra gating needed here, since the API itself
   // never sends anything for them.
@@ -413,33 +292,8 @@ function ManagerConfirmationsTab() {
   const [assignError, setAssignError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [drafts, setDrafts] = useState<Record<string, { cny: string; rate: string; rub: string; rateRub: string }>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const [cargoRateDrafts, setCargoRateDrafts] = useState<Record<string, { cost: string; file: File | null }>>({});
-  const [busyCargoRateId, setBusyCargoRateId] = useState<string | null>(null);
-  const [cargoRateError, setCargoRateError] = useState<string | null>(null);
-
-  const [cnyRateFiles, setCnyRateFiles] = useState<Record<string, File | null>>({});
-  const [busyCnyRateId, setBusyCnyRateId] = useState<string | null>(null);
-  const [cnyRateError, setCnyRateError] = useState<string | null>(null);
-
-  const [usdRateFiles, setUsdRateFiles] = useState<Record<string, File | null>>({});
-  const [busyUsdRateId, setBusyUsdRateId] = useState<string | null>(null);
-  const [usdRateError, setUsdRateError] = useState<string | null>(null);
-
-  const [buyoutCommissionFiles, setBuyoutCommissionFiles] = useState<Record<string, File | null>>({});
-  const [busyBuyoutCommissionId, setBusyBuyoutCommissionId] = useState<string | null>(null);
-  const [buyoutCommissionError, setBuyoutCommissionError] = useState<string | null>(null);
-
-  const [searchFeeFiles, setSearchFeeFiles] = useState<Record<string, File | null>>({});
-  const [busySearchFeeId, setBusySearchFeeId] = useState<string | null>(null);
-  const [searchFeeError, setSearchFeeError] = useState<string | null>(null);
-
-  const [customProductionFeeFiles, setCustomProductionFeeFiles] = useState<Record<string, File | null>>({});
-  const [busyCustomProductionFeeId, setBusyCustomProductionFeeId] = useState<string | null>(null);
-  const [customProductionFeeError, setCustomProductionFeeError] = useState<string | null>(null);
 
   const [pendingUsdtRateConfirmation, setPendingUsdtRateConfirmation] = useState<PendingUsdtRateConfirmation | null>(null);
   const [busyUsdtRateConfirm, setBusyUsdtRateConfirm] = useState(false);
@@ -450,14 +304,7 @@ function ManagerConfirmationsTab() {
     return fetch("/api/manager-confirmations")
       .then((res) => res.json())
       .then((data) => {
-        setPendingBuyouts(data.pendingBuyouts ?? []);
         setPendingClients(data.pendingClients ?? []);
-        setPendingCargoRates(data.pendingCargoRates ?? []);
-        setPendingCnyRates(data.pendingCnyRates ?? []);
-        setPendingUsdRates(data.pendingUsdRates ?? []);
-        setPendingBuyoutCommissions(data.pendingBuyoutCommissions ?? []);
-        setPendingSearchFees(data.pendingSearchFees ?? []);
-        setPendingCustomProductionFees(data.pendingCustomProductionFees ?? []);
         setPendingUnassignedClients(data.pendingUnassignedClients ?? []);
         setPendingUsdtRateConfirmation(data.pendingUsdtRateConfirmation ?? null);
         setTeamManagers(data.teamManagers ?? []);
@@ -506,205 +353,9 @@ function ManagerConfirmationsTab() {
     }
   }
 
-  async function handleConfirmCargoRate(quoteId: string) {
-    const draft = cargoRateDrafts[quoteId];
-    const cost = parseNum(draft?.cost ?? "");
-    if (!Number.isFinite(cost) || cost < 0) {
-      setCargoRateError("Укажите цену закупки за 1 кг/м³.");
-      return;
-    }
-    setBusyCargoRateId(quoteId);
-    setCargoRateError(null);
-    try {
-      const formData = new FormData();
-      formData.append("cargoRateOverrideCostUsd", String(cost));
-      if (draft?.file) formData.append("file", draft.file);
-      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-cargo-rate`, { method: "PATCH", body: formData });
-      if (res.ok) {
-        setCargoRateDrafts((current) => {
-          const { [quoteId]: _omit, ...rest } = current;
-          void _omit;
-          return rest;
-        });
-        await load();
-      } else {
-        const data = await res.json();
-        setCargoRateError(data.error ?? "Не удалось подтвердить ставку.");
-      }
-    } finally {
-      setBusyCargoRateId(null);
-    }
-  }
-
-  async function handleConfirmCnyRate(quoteId: string) {
-    const file = cnyRateFiles[quoteId];
-    setBusyCnyRateId(quoteId);
-    setCnyRateError(null);
-    try {
-      const formData = new FormData();
-      if (file) formData.append("file", file);
-      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-cny-rate`, { method: "PATCH", body: formData });
-      if (res.ok) {
-        setCnyRateFiles((current) => {
-          const { [quoteId]: _omit, ...rest } = current;
-          void _omit;
-          return rest;
-        });
-        await load();
-      } else {
-        const data = await res.json();
-        setCnyRateError(data.error ?? "Не удалось подтвердить курс.");
-      }
-    } finally {
-      setBusyCnyRateId(null);
-    }
-  }
-
-  async function handleConfirmUsdRate(quoteId: string) {
-    const file = usdRateFiles[quoteId];
-    setBusyUsdRateId(quoteId);
-    setUsdRateError(null);
-    try {
-      const formData = new FormData();
-      if (file) formData.append("file", file);
-      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-usd-rate`, { method: "PATCH", body: formData });
-      if (res.ok) {
-        setUsdRateFiles((current) => {
-          const { [quoteId]: _omit, ...rest } = current;
-          void _omit;
-          return rest;
-        });
-        await load();
-      } else {
-        const data = await res.json();
-        setUsdRateError(data.error ?? "Не удалось подтвердить курс.");
-      }
-    } finally {
-      setBusyUsdRateId(null);
-    }
-  }
-
-  async function handleConfirmBuyoutCommission(quoteId: string) {
-    const file = buyoutCommissionFiles[quoteId];
-    setBusyBuyoutCommissionId(quoteId);
-    setBuyoutCommissionError(null);
-    try {
-      const formData = new FormData();
-      if (file) formData.append("file", file);
-      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-buyout-commission`, { method: "PATCH", body: formData });
-      if (res.ok) {
-        setBuyoutCommissionFiles((current) => {
-          const { [quoteId]: _omit, ...rest } = current;
-          void _omit;
-          return rest;
-        });
-        await load();
-      } else {
-        const data = await res.json();
-        setBuyoutCommissionError(data.error ?? "Не удалось подтвердить комиссию.");
-      }
-    } finally {
-      setBusyBuyoutCommissionId(null);
-    }
-  }
-
-  async function handleConfirmSearchFee(quoteId: string) {
-    const file = searchFeeFiles[quoteId];
-    setBusySearchFeeId(quoteId);
-    setSearchFeeError(null);
-    try {
-      const formData = new FormData();
-      if (file) formData.append("file", file);
-      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-search-fee`, { method: "PATCH", body: formData });
-      if (res.ok) {
-        setSearchFeeFiles((current) => {
-          const { [quoteId]: _omit, ...rest } = current;
-          void _omit;
-          return rest;
-        });
-        await load();
-      } else {
-        const data = await res.json();
-        setSearchFeeError(data.error ?? "Не удалось подтвердить стоимость услуги поиска.");
-      }
-    } finally {
-      setBusySearchFeeId(null);
-    }
-  }
-
-  async function handleConfirmCustomProductionFee(quoteId: string) {
-    const file = customProductionFeeFiles[quoteId];
-    setBusyCustomProductionFeeId(quoteId);
-    setCustomProductionFeeError(null);
-    try {
-      const formData = new FormData();
-      if (file) formData.append("file", file);
-      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-custom-production-fee`, { method: "PATCH", body: formData });
-      if (res.ok) {
-        setCustomProductionFeeFiles((current) => {
-          const { [quoteId]: _omit, ...rest } = current;
-          void _omit;
-          return rest;
-        });
-        await load();
-      } else {
-        const data = await res.json();
-        setCustomProductionFeeError(data.error ?? "Не удалось подтвердить стоимость производства под заказ.");
-      }
-    } finally {
-      setBusyCustomProductionFeeId(null);
-    }
-  }
-
   useEffect(() => {
     load();
   }, []);
-
-  async function handleConfirmBuyout(quoteId: string) {
-    const draft = drafts[quoteId] ?? { cny: "", rate: "", rub: "", rateRub: "" };
-    const cny = parseNum(draft.cny);
-    const rate = parseNum(draft.rate);
-    const rub = parseNum(draft.rub);
-    const rateRub = parseNum(draft.rateRub);
-    if (!Number.isFinite(cny) || cny <= 0) {
-      setError("Заполните «Выкуп факт».");
-      return;
-    }
-    if (!Number.isFinite(rate) || rate <= 0) {
-      setError("Заполните курс ¥→₽ рядом с «Выкуп факт».");
-      return;
-    }
-    if (!Number.isFinite(rub) || rub <= 0) {
-      setError("Заполните «Оплата от клиента».");
-      return;
-    }
-    if (!Number.isFinite(rateRub) || rateRub <= 0) {
-      setError("Заполните курс ¥→₽ рядом с «Оплата от клиента».");
-      return;
-    }
-    setBusyId(quoteId);
-    setError(null);
-    try {
-      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-buyout`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          actualBuyoutCny: cny,
-          actualBuyoutRateUsed: rate,
-          actualClientPaymentRub: rub,
-          actualClientPaymentRateUsed: rateRub,
-        }),
-      });
-      if (res.ok) {
-        await load();
-      } else {
-        const data = await res.json();
-        setError(data.error ?? "Не удалось подтвердить факт по выкупу.");
-      }
-    } finally {
-      setBusyId(null);
-    }
-  }
 
   async function handleConfirmClient(clientId: string) {
     setBusyId(clientId);
@@ -741,32 +392,23 @@ function ManagerConfirmationsTab() {
 
   if (loading) return <p className="text-sm text-text-secondary">Загрузка…</p>;
 
-  const isEmpty =
-    pendingBuyouts.length === 0 &&
-    pendingClients.length === 0 &&
-    pendingCargoRates.length === 0 &&
-    pendingCnyRates.length === 0 &&
-    pendingUsdRates.length === 0 &&
-    pendingBuyoutCommissions.length === 0 &&
-    pendingSearchFees.length === 0 &&
-    pendingCustomProductionFees.length === 0 &&
-    pendingUnassignedClients.length === 0 &&
-    !pendingUsdtRateConfirmation;
+  const isEmpty = pendingClients.length === 0 && pendingUnassignedClients.length === 0 && !pendingUsdtRateConfirmation;
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-sm font-bold text-text">Очередь подтверждений</h2>
         <p className="mt-1 text-xs text-text-secondary">
-          Факты, которые менеджеры внесли или заявили, но которые ещё должен проверить и подтвердить старший
-          менеджер или руководитель, прежде чем они попадут в реальную прибыль и премию.
+          Заявки на личных клиентов и курс USDT, которые ещё должен проверить и подтвердить старший менеджер или
+          руководитель. Прибыль и премия по сделкам больше не зависят от этой очереди — они считаются по реальным
+          деньгам в Кассе.
         </p>
       </div>
 
       {error && <p className="text-xs text-error">{error}</p>}
 
       {isEmpty ? (
-        <EmptyState icon={CheckCircle2} message="Очередь пуста — все факты и заявки на личных клиентов подтверждены." />
+        <EmptyState icon={CheckCircle2} message="Очередь пуста — все заявки на личных клиентов подтверждены." />
       ) : (
         <>
           {pendingUnassignedClients.length > 0 && (
@@ -816,247 +458,6 @@ function ManagerConfirmationsTab() {
             </div>
           )}
 
-          {pendingBuyouts.length > 0 && (
-            <div>
-              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
-                <Wallet className="h-3.5 w-3.5" /> Факт по выкупу ({pendingBuyouts.length})
-              </h3>
-              <p className="mt-1 text-xs text-text-secondary">
-                Поступление от клиента автоматически добавится приходным ордером в «Кассу».
-              </p>
-              <ul className="mt-2 space-y-2">
-                {pendingBuyouts.map((quote) => {
-                  // Курс по умолчанию — снапшот с самого просчёта (quote.cnyRateUsed),
-                  // а не пустое поле: пока курс не отличался от планового, менеджеру
-                  // не нужно ничего вводить руками, только поправить при расхождении.
-                  const draft = drafts[quote.id] ?? { cny: "", rate: quote.cnyRateUsed, rub: "", rateRub: quote.cnyRateUsed };
-                  const days = daysWaiting(quote.statusChangedAt);
-                  const servicesAndCommissionCny =
-                    (Number(quote.searchServiceFeeRub) + Number(quote.buyoutCommissionRub) + Number(quote.customProductionFeeRub)) /
-                    Number(quote.cnyRateUsed);
-                  const discountPreview = previewDiscountCny(quote, draft);
-                  return (
-                    <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <span className="font-medium text-text">
-                            №{quote.displayId} · {quote.productName}
-                          </span>
-                          <span className="ml-2 text-xs text-text-secondary">
-                            {quote.client.name}
-                            {quote.client.company ? ` · ${quote.client.company}` : ""} · менеджер {quote.manager.name}
-                          </span>
-                        </div>
-                        <span className={days >= 3 ? "text-xs font-medium text-error" : "text-xs text-text-secondary"}>
-                          ждёт {days} {days === 1 ? "день" : "дн."}
-                        </span>
-                      </div>
-
-                      <div className="mt-2 space-y-1.5">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="w-44 shrink-0 text-xs text-text-secondary">Выкуп план (авто):</span>
-                          <span className="w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text-secondary">
-                            {quote.totalPriceCny}¥
-                          </span>
-                          <span className="w-44 shrink-0 text-xs text-text-secondary">Выкуп факт (вручную):</span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            placeholder="¥ потрачено"
-                            value={draft.cny}
-                            onChange={(e) => setDrafts((current) => ({ ...current, [quote.id]: { ...draft, cny: e.target.value } }))}
-                            className="w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
-                          />
-                          <input
-                            type="number"
-                            step="0.01"
-                            placeholder="курс ¥→₽"
-                            value={draft.rate}
-                            onChange={(e) => setDrafts((current) => ({ ...current, [quote.id]: { ...draft, rate: e.target.value } }))}
-                            className="w-28 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
-                          />
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="w-44 shrink-0 text-xs text-text-secondary">Услуги, комиссия и произв-во (авто):</span>
-                          <span className="w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text-secondary">
-                            {servicesAndCommissionCny.toFixed(2)}¥
-                          </span>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="w-44 shrink-0 text-xs text-text-secondary">Оплата от клиента (вручную):</span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            placeholder="₽ получено"
-                            value={draft.rub}
-                            onChange={(e) => setDrafts((current) => ({ ...current, [quote.id]: { ...draft, rub: e.target.value } }))}
-                            className="w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
-                          />
-                          <input
-                            type="number"
-                            step="0.01"
-                            placeholder="1¥ = ?₽"
-                            value={draft.rateRub}
-                            onChange={(e) => setDrafts((current) => ({ ...current, [quote.id]: { ...draft, rateRub: e.target.value } }))}
-                            className="w-28 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
-                          />
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="w-44 shrink-0 text-xs text-text-secondary">Скидка (авто):</span>
-                          <span
-                            className={
-                              discountPreview === null
-                                ? "w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text-secondary"
-                                : "w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm font-semibold text-success"
-                            }
-                          >
-                            {discountPreview === null ? "—" : `${discountPreview.toFixed(2)}¥`}
-                          </span>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => handleConfirmBuyout(quote.id)}
-                          disabled={busyId === quote.id}
-                          className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
-                        >
-                          {busyId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                          Подтвердить
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
-
-          {pendingCargoRates.length > 0 && (
-            <div>
-              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
-                <Ruler className="h-3.5 w-3.5" /> Ручные ставки карго ({pendingCargoRates.length})
-              </h3>
-              <p className="mt-1 text-xs text-text-secondary">
-                Менеджер вписал ставку карго вручную, не из тарифов. Укажите реальную цену закупки за 1 кг/м³
-                (скриншот переписки с поставщиком — необязательно, но поможет при проверке).
-              </p>
-              {cargoRateError && <p className="mt-1 text-xs text-error">{cargoRateError}</p>}
-              <ul className="mt-2 space-y-2">
-                {pendingCargoRates.map((quote) => {
-                  const draft = cargoRateDrafts[quote.id] ?? { cost: "", file: null };
-                  const unit = quote.deliveryPricingMode === "density" ? "кг" : "м³";
-                  return (
-                    <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <span className="font-medium text-text">
-                            №{quote.displayId} · {quote.productName}
-                          </span>
-                          <span className="ml-2 text-xs text-text-secondary">
-                            {quote.client.name}
-                            {quote.client.company ? ` · ${quote.client.company}` : ""} · менеджер {quote.manager.name}
-                          </span>
-                        </div>
-                        <span className="text-xs font-medium text-warning">
-                          ставка: ${Number(quote.cargoRateUsdOverride).toFixed(2)}/{unit}
-                        </span>
-                      </div>
-
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <span className="w-52 shrink-0 text-xs text-text-secondary">Цена закупки, $/{unit}:</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          placeholder="0.00"
-                          value={draft.cost}
-                          onChange={(e) => setCargoRateDrafts((c) => ({ ...c, [quote.id]: { ...draft, cost: e.target.value } }))}
-                          className="w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                      </div>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                        <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки (необязательно):</span>
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp,image/gif"
-                          onChange={(e) =>
-                            setCargoRateDrafts((c) => ({ ...c, [quote.id]: { ...draft, file: e.target.files?.[0] ?? null } }))
-                          }
-                          className="text-xs text-text-secondary"
-                        />
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleConfirmCargoRate(quote.id)}
-                        disabled={busyCargoRateId === quote.id}
-                        className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
-                      >
-                        {busyCargoRateId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                        Подтвердить
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
-
-          {pendingCnyRates.length > 0 && (
-            <div>
-              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
-                <Coins className="h-3.5 w-3.5" /> Ручной курс юаня ({pendingCnyRates.length})
-              </h3>
-              <p className="mt-1 text-xs text-text-secondary">
-                Менеджер вписал курс ¥→₽ вручную, не из тарифов. Скриншот переписки, подтверждающий, что это
-                реальный согласованный курс, — необязательно, но поможет при проверке.
-              </p>
-              {cnyRateError && <p className="mt-1 text-xs text-error">{cnyRateError}</p>}
-              <ul className="mt-2 space-y-2">
-                {pendingCnyRates.map((quote) => (
-                  <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <span className="font-medium text-text">
-                          №{quote.displayId} · {quote.productName}
-                        </span>
-                        <span className="ml-2 text-xs text-text-secondary">
-                          {quote.client.name}
-                          {quote.client.company ? ` · ${quote.client.company}` : ""} · менеджер {quote.manager.name}
-                        </span>
-                      </div>
-                      <span className="text-xs font-medium text-warning">
-                        курс: 1¥ = {Number(quote.cnyRateRubOverride).toFixed(2)}₽
-                      </span>
-                    </div>
-
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки (необязательно):</span>
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp,image/gif"
-                        onChange={(e) => setCnyRateFiles((c) => ({ ...c, [quote.id]: e.target.files?.[0] ?? null }))}
-                        className="text-xs text-text-secondary"
-                      />
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmCnyRate(quote.id)}
-                      disabled={busyCnyRateId === quote.id}
-                      className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
-                    >
-                      {busyCnyRateId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                      Подтвердить
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
           {pendingUsdtRateConfirmation && (
             <div>
               <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
@@ -1081,221 +482,6 @@ function ManagerConfirmationsTab() {
                   Подтвердить
                 </button>
               </div>
-            </div>
-          )}
-
-          {pendingUsdRates.length > 0 && (
-            <div>
-              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
-                <DollarSign className="h-3.5 w-3.5" /> Ручной курс доллара ({pendingUsdRates.length})
-              </h3>
-              <p className="mt-1 text-xs text-text-secondary">
-                Менеджер вписал курс $→₽ вручную, не из тарифов. Скриншот переписки, подтверждающий, что это
-                реальный согласованный курс, — необязательно, но поможет при проверке.
-              </p>
-              {usdRateError && <p className="mt-1 text-xs text-error">{usdRateError}</p>}
-              <ul className="mt-2 space-y-2">
-                {pendingUsdRates.map((quote) => (
-                  <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <span className="font-medium text-text">
-                          №{quote.displayId} · {quote.productName}
-                        </span>
-                        <span className="ml-2 text-xs text-text-secondary">
-                          {quote.client.name}
-                          {quote.client.company ? ` · ${quote.client.company}` : ""} · менеджер {quote.manager.name}
-                        </span>
-                      </div>
-                      <span className="text-xs font-medium text-warning">
-                        курс: 1$ = {Number(quote.usdRateRubOverride).toFixed(2)}₽
-                      </span>
-                    </div>
-
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки (необязательно):</span>
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp,image/gif"
-                        onChange={(e) => setUsdRateFiles((c) => ({ ...c, [quote.id]: e.target.files?.[0] ?? null }))}
-                        className="text-xs text-text-secondary"
-                      />
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmUsdRate(quote.id)}
-                      disabled={busyUsdRateId === quote.id}
-                      className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
-                    >
-                      {busyUsdRateId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                      Подтвердить
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {pendingBuyoutCommissions.length > 0 && (
-            <div>
-              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
-                <Percent className="h-3.5 w-3.5" /> Ручная комиссия за выкуп ({pendingBuyoutCommissions.length})
-              </h3>
-              <p className="mt-1 text-xs text-text-secondary">
-                Менеджер вписал комиссию за выкуп вручную, не из тарифов. Скриншот переписки, подтверждающий, что это
-                реально согласованная комиссия, — необязательно, но поможет при проверке.
-              </p>
-              {buyoutCommissionError && <p className="mt-1 text-xs text-error">{buyoutCommissionError}</p>}
-              <ul className="mt-2 space-y-2">
-                {pendingBuyoutCommissions.map((quote) => (
-                  <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <span className="font-medium text-text">
-                          №{quote.displayId} · {quote.productName}
-                        </span>
-                        <span className="ml-2 text-xs text-text-secondary">
-                          {quote.client.name}
-                          {quote.client.company ? ` · ${quote.client.company}` : ""} · менеджер {quote.manager.name}
-                        </span>
-                      </div>
-                      <span className="text-xs font-medium text-warning">
-                        комиссия:{" "}
-                        {quote.buyoutCommissionRubOverride !== null
-                          ? `${Math.round(Number(quote.buyoutCommissionRubOverride)).toLocaleString("ru-RU")} ₽`
-                          : `${Number(quote.buyoutCommissionPercentOverride).toFixed(2)}%`}
-                      </span>
-                    </div>
-
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки (необязательно):</span>
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp,image/gif"
-                        onChange={(e) => setBuyoutCommissionFiles((c) => ({ ...c, [quote.id]: e.target.files?.[0] ?? null }))}
-                        className="text-xs text-text-secondary"
-                      />
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmBuyoutCommission(quote.id)}
-                      disabled={busyBuyoutCommissionId === quote.id}
-                      className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
-                    >
-                      {busyBuyoutCommissionId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                      Подтвердить
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {pendingSearchFees.length > 0 && (
-            <div>
-              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
-                <DollarSign className="h-3.5 w-3.5" /> Ручная стоимость услуги поиска ({pendingSearchFees.length})
-              </h3>
-              <p className="mt-1 text-xs text-text-secondary">
-                Менеджер вписал стоимость услуги поиска вручную, не из тарифов (0 ₽ — вручную бесплатно). Скриншот
-                переписки — необязательно, но поможет при проверке.
-              </p>
-              {searchFeeError && <p className="mt-1 text-xs text-error">{searchFeeError}</p>}
-              <ul className="mt-2 space-y-2">
-                {pendingSearchFees.map((quote) => (
-                  <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <span className="font-medium text-text">
-                          №{quote.displayId} · {quote.productName}
-                        </span>
-                        <span className="ml-2 text-xs text-text-secondary">
-                          {quote.client.name}
-                          {quote.client.company ? ` · ${quote.client.company}` : ""} · менеджер {quote.manager.name}
-                        </span>
-                      </div>
-                      <span className="text-xs font-medium text-warning">
-                        стоимость: {Number(quote.searchServiceFeeRubOverride) === 0 ? "бесплатно" : `${Math.round(Number(quote.searchServiceFeeRubOverride)).toLocaleString("ru-RU")} ₽`}
-                      </span>
-                    </div>
-
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки (необязательно):</span>
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp,image/gif"
-                        onChange={(e) => setSearchFeeFiles((c) => ({ ...c, [quote.id]: e.target.files?.[0] ?? null }))}
-                        className="text-xs text-text-secondary"
-                      />
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmSearchFee(quote.id)}
-                      disabled={busySearchFeeId === quote.id}
-                      className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
-                    >
-                      {busySearchFeeId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                      Подтвердить
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {pendingCustomProductionFees.length > 0 && (
-            <div>
-              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary">
-                <Banknote className="h-3.5 w-3.5" /> Ручная стоимость производства под заказ ({pendingCustomProductionFees.length})
-              </h3>
-              <p className="mt-1 text-xs text-text-secondary">
-                Менеджер вписал стоимость производства под заказ вручную, не из тарифов. Скриншот переписки —
-                необязательно, но поможет при проверке.
-              </p>
-              {customProductionFeeError && <p className="mt-1 text-xs text-error">{customProductionFeeError}</p>}
-              <ul className="mt-2 space-y-2">
-                {pendingCustomProductionFees.map((quote) => (
-                  <li key={quote.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <span className="font-medium text-text">
-                          №{quote.displayId} · {quote.productName}
-                        </span>
-                        <span className="ml-2 text-xs text-text-secondary">
-                          {quote.client.name}
-                          {quote.client.company ? ` · ${quote.client.company}` : ""} · менеджер {quote.manager.name}
-                        </span>
-                      </div>
-                      <span className="text-xs font-medium text-warning">
-                        стоимость: {Math.round(Number(quote.customProductionFeeRubOverride)).toLocaleString("ru-RU")} ₽
-                      </span>
-                    </div>
-
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className="w-52 shrink-0 text-xs text-text-secondary">Скриншот переписки (необязательно):</span>
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp,image/gif"
-                        onChange={(e) => setCustomProductionFeeFiles((c) => ({ ...c, [quote.id]: e.target.files?.[0] ?? null }))}
-                        className="text-xs text-text-secondary"
-                      />
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmCustomProductionFee(quote.id)}
-                      disabled={busyCustomProductionFeeId === quote.id}
-                      className="mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:opacity-50"
-                    >
-                      {busyCustomProductionFeeId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                      Подтвердить
-                    </button>
-                  </li>
-                ))}
-              </ul>
             </div>
           )}
 

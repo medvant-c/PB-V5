@@ -70,9 +70,10 @@ function fmt(value: number): string {
 interface ProfitReportPdfRow {
   displayId: number;
   productName: string;
-  confirmed: boolean;
   totalRub: number;
-  rawTotalRub: number;
+  totalProfitRub: number;
+  buyout: { incomeRub: number; expenseRub: number; profitRub: number; realized: boolean };
+  cargo: { incomeRub: number; expenseRub: number; profitRub: number; realized: boolean };
   client: { name: string; company: string | null };
   manager: { name: string };
 }
@@ -80,10 +81,11 @@ interface ProfitReportPdfRow {
 interface ProfitReportPdfTotals {
   totalRevenueRub: number;
   totalProfitRub: number;
-  totalProscetRub: number;
-  totalBuyoutRub: number;
-  totalDiscountRub: number;
-  totalFxProfitRub: number;
+  totalBuyoutIncomeRub: number;
+  totalBuyoutExpenseRub: number;
+  totalBuyoutProfitRub: number;
+  totalCargoIncomeRub: number;
+  totalCargoExpenseRub: number;
   totalCargoProfitRub: number;
   profitPoolRub: number;
   managerPremiumRub: number;
@@ -131,11 +133,13 @@ function ProfitReportPdfDocument({ rows, totals }: ProfitReportPdfProps) {
               <Text style={[styles.cell, styles.cellText, styles.colProduct]}>{row.productName}</Text>
               <Text style={[styles.cell, styles.cellText, styles.colManager]}>{row.manager.name}</Text>
               <View style={[styles.cell, styles.colStatus]}>
-                <Text style={row.confirmed ? styles.statusFact : styles.statusEstimate}>{row.confirmed ? "Факт" : "Оценка"}</Text>
+                <Text style={row.buyout.realized ? styles.statusFact : styles.statusEstimate}>
+                  {row.buyout.realized ? "Факт" : "План"}
+                </Text>
               </View>
               <Text style={[styles.cell, styles.cellText, styles.colTotal]}>{fmt(row.totalRub)}</Text>
-              <Text style={[styles.cell, styles.cellText, styles.colProfit, row.rawTotalRub >= 0 ? styles.profitPositive : styles.profitNegative]}>
-                {fmt(row.rawTotalRub)}
+              <Text style={[styles.cell, styles.cellText, styles.colProfit, row.totalProfitRub >= 0 ? styles.profitPositive : styles.profitNegative]}>
+                {fmt(row.totalProfitRub)}
               </Text>
             </View>
           ))}
@@ -148,30 +152,38 @@ function ProfitReportPdfDocument({ rows, totals }: ProfitReportPdfProps) {
             <Text style={styles.summaryValue}>{fmt(totals.totalRevenueRub)} ₽</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Прибыль компании (Просчёт + Выкуп + Скидка + Курсовая разница + Карго)</Text>
+            <Text style={styles.summaryLabel}>Прибыль компании (Выкуп + Карго)</Text>
             <Text style={styles.summaryValue}>{fmt(totals.totalProfitRub)} ₽</Text>
           </View>
 
           <View style={styles.splitBox}>
-            <Text style={styles.splitTitle}>Из чего складывается прибыль компании</Text>
+            <Text style={styles.splitTitle}>Выкуп</Text>
             <View style={styles.splitRow}>
-              <Text style={styles.splitLabel}>Просчёт (услуга поиска + производство под заказ)</Text>
-              <Text style={styles.splitValue}>{fmt(totals.totalProscetRub)} ₽</Text>
+              <Text style={styles.splitLabel}>Поступило</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalBuyoutIncomeRub)} ₽</Text>
             </View>
             <View style={styles.splitRow}>
-              <Text style={styles.splitLabel}>Выкуп (комиссия + разница план/факт)</Text>
-              <Text style={styles.splitValue}>{fmt(totals.totalBuyoutRub)} ₽</Text>
+              <Text style={styles.splitLabel}>Потратили</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalBuyoutExpenseRub)} ₽</Text>
             </View>
             <View style={styles.splitRow}>
-              <Text style={styles.splitLabel}>Скидка поставщика</Text>
-              <Text style={styles.splitValue}>{fmt(totals.totalDiscountRub)} ₽</Text>
+              <Text style={styles.splitLabel}>Прибыль</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalBuyoutProfitRub)} ₽</Text>
+            </View>
+          </View>
+
+          <View style={styles.splitBox}>
+            <Text style={styles.splitTitle}>Карго</Text>
+            <View style={styles.splitRow}>
+              <Text style={styles.splitLabel}>Поступило</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalCargoIncomeRub)} ₽</Text>
             </View>
             <View style={styles.splitRow}>
-              <Text style={styles.splitLabel}>Курсовая разница</Text>
-              <Text style={styles.splitValue}>{fmt(totals.totalFxProfitRub)} ₽</Text>
+              <Text style={styles.splitLabel}>Потратили</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalCargoExpenseRub)} ₽</Text>
             </View>
             <View style={styles.splitRow}>
-              <Text style={styles.splitLabel}>Карго-маржа</Text>
+              <Text style={styles.splitLabel}>Прибыль</Text>
               <Text style={styles.splitValue}>{fmt(totals.totalCargoProfitRub)} ₽</Text>
             </View>
           </View>

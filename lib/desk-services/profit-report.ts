@@ -2,7 +2,6 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { getSystemSettings } from "@/lib/system-settings";
 import {
-  cargoProfitRub,
   computeQuoteShares,
   estimatedFxProfitRub,
   estimatedSourceProfits,
@@ -12,10 +11,14 @@ import {
   fxProfitRub,
   isSelfSourcedFor,
   sumAlreadyPaidPremium,
+  computeRealBuyoutProfit,
+  computePlannedBuyoutProfit,
   type CnyProfitTiers,
   type InvestorConfig,
   type QuoteProfitFields,
 } from "@/lib/desk-services/quote-profit";
+import { fetchQuoteRealFinancials, emptyQuoteRealFinancials, type QuoteRealFinancials } from "@/lib/desk-services/quote-real-financials";
+import { BUYOUT_REALIZED_STATUSES, CARGO_REALIZED_STATUSES } from "@/lib/quote-statuses";
 
 // Shared by both app/api/manager-profit-report/route.ts (on-screen JSON) and
 // app/api/manager-profit-report/pdf/route.ts (downloaded PDF) — kept out of
@@ -77,8 +80,10 @@ const PROFIT_SELECT = {
   // See sumAlreadyPaidPremium in quote-profit.ts — premium already
   // credited via "Счёт на выкуп" partial payments, subtracted here so this
   // report never double-counts it once the quote reaches
-  // buyoutFactConfirmed. See PB-V5 chat 2026-08-04.
-  paymentAllocations: { select: { category: true, premiumRub: true } },
+  // buyoutFactConfirmed. See PB-V5 chat 2026-08-04. amountRub — нужен ещё
+  // computeRealBuyoutProfit/sumAlreadyPaidProfitRub (реальные деньги вместо
+  // ручного подтверждения, см. PB-V5 chat 2026-08-11).
+  paymentAllocations: { select: { category: true, premiumRub: true, amountRub: true } },
 } as const;
 
 type ProfitQuote = NonNullable<Awaited<ReturnType<typeof fetchProfitQuotes>>>[number];
@@ -93,13 +98,14 @@ interface PremiumRates {
   selfSourcedBuyoutDiscountRatePercent: number;
 }
 
-// One quote's full breakdown — every line the aggregate dashboard totals
-// are built from, just kept per-deal instead of summed away, plus this
-// quote's own contribution to every percent_of_profit/flat_per_cargo_kg
-// investor's cut and the manager's premium so the per-quote rows and the
-// batch totals below always reconcile exactly. remainder_share investors
-// aren't computed here — that split only makes sense on the aggregate
-// remainder pool (see buildProfitReport below), not per-row.
+// One quote's full breakdown — приход/расход/прибыль по двум блокам
+// (Выкуп/Карго), никакой детализации по источникам (просчёт/скидка/
+// курсовая) — по прямому указанию пользователя убрать её из отчёта, см.
+// PB-V5 chat 2026-08-11. Плюс этой сделки в долю каждого percent_of_
+// profit/flat_per_cargo_kg инвестора и в премию менеджера, чтобы
+// построчные данные и батч-итоги ниже всегда сходились. remainder_share
+// инвесторы здесь не считаются — этот сплит имеет смысл только на
+// агрегированном остатке (см. buildProfitReport ниже), не построчно.
 function computeQuoteBreakdown(
   q: ProfitQuote,
   cargoRates: { usdPerKg: number; usdPerM3: number },
@@ -107,68 +113,93 @@ function computeQuoteBreakdown(
   investors: InvestorConfig[],
   cnyProfitTiers: CnyProfitTiers,
   attachedServicesTotalRub: number,
+  financials: QuoteRealFinancials,
 ) {
   const fields: QuoteProfitFields = q;
-  const { proscetRub, buyoutRub, discountRub } = q.buyoutFactConfirmed ? factualSourceProfits(fields) : estimatedSourceProfits(fields);
-  // Real spread once a buyout is confirmed; before that, the known
-  // per-¥ margin from Тарифы (see estimatedFxProfitRub in
-  // lib/desk-services/quote-profit.ts) instead of silently showing 0.
-  const fx = q.buyoutFactConfirmed ? fxProfitRub(fields) : estimatedFxProfitRub(q, attachedServicesTotalRub, cnyProfitTiers);
-  const cargo = cargoProfitRub(fields);
-  // Company-facing total still shows both pools combined (services + cargo,
-  // whether or not cargo has shipped yet) — "сколько мы заработаем на этой
-  // сделке" is a forward projection, that hasn't changed. What HAS changed
-  // (see computeQuoteShares in quote-profit.ts) is that managerPremiumRub/
-  // investorShares below only draw from cargo once it's actually realized —
-  // a real cash payout suggestion must never assume money that hasn't
-  // shipped yet. See PB-V5 chat 2026-08-06.
-  const rawTotalRub = proscetRub + buyoutRub + discountRub + fx + cargo;
-
-  // See sumAlreadyPaidPremium in quote-profit.ts — premium already credited
-  // via "Счёт на выкуп" partial payments before this quote reached
-  // buyoutFactConfirmed (or, if it's still open, before now).
   const alreadyPaidPremium = sumAlreadyPaidPremium(q.paymentAllocations);
+  const isBoosted = isSelfSourcedFor(q.client, q.managerId);
+  const proscetRate = isBoosted ? premiumRates.selfSourcedProscetRatePercent : premiumRates.normalRatePercent;
+  const buyoutRate = isBoosted ? premiumRates.selfSourcedBuyoutDiscountRatePercent : premiumRates.normalRatePercent;
+
+  // --- Блок "Выкуп" ---
+  // Уже подтверждённые по старой схеме (buyoutFactConfirmed: true) —
+  // прежняя формула без изменений (задним числом не пересчитываем, см.
+  // план mellow-forging-kay.md), просто выражена в приход/расход форме:
+  // расход = реально потраченное (actualBuyoutCny×actualBuyoutRateUsed),
+  // приход = расход + прежняя формула прибыли (проскет+выкуп+скидка+fx).
+  //
+  // Иначе — статус решает "факт или план" (BUYOUT_REALIZED_STATUSES, не
+  // полнота оплаты — как только менеджер перевёл сделку в "в доставке на
+  // склад", товар уже реально куплен, даже если оплата от клиента ещё не
+  // вся собрана, например аванс под производство под заказ). Факт: приход
+  // = вся сумма реально поступивших QuotePaymentAllocation (любая
+  // категория — просчёт больше не выделяется отдельной строкой), расход =
+  // реальные расходные CashOrder ("Закупка товара"+"Доставка по Китаю").
+  // План: приход = по ставкам просчёта, расход = по ставкам просчёта минус
+  // известная типовая наценка за ¥ (estimatedFxProfitRub из Тарифов).
+  const buyoutBought = BUYOUT_REALIZED_STATUSES.includes(q.status);
+  let buyoutIncomeRub: number;
+  let buyoutExpenseRub: number;
   let managerServicesPremiumRub: number;
   if (q.buyoutFactConfirmed) {
-    managerServicesPremiumRub = factualManagerPremiumRub(
-      { proscetRub, buyoutRub, discountRub },
-      Boolean(q.buyoutSelfSourcedBoost),
-      premiumRates,
-      alreadyPaidPremium,
-    );
+    const sourceProfits = factualSourceProfits(fields);
+    const fx = fxProfitRub(fields);
+    const profitRub = sourceProfits.proscetRub + sourceProfits.buyoutRub + sourceProfits.discountRub + fx;
+    buyoutExpenseRub = Number(q.actualBuyoutCny) * Number(q.actualBuyoutRateUsed);
+    buyoutIncomeRub = profitRub + buyoutExpenseRub;
+    managerServicesPremiumRub = factualManagerPremiumRub(sourceProfits, Boolean(q.buyoutSelfSourcedBoost), premiumRates, alreadyPaidPremium);
+  } else if (buyoutBought) {
+    buyoutIncomeRub = q.paymentAllocations.reduce((sum, a) => sum + Number(a.amountRub), 0);
+    buyoutExpenseRub = financials.buyoutExpenseRub;
+    const real = computeRealBuyoutProfit({ allocations: q.paymentAllocations, expenseRub: financials.buyoutExpenseRub });
+    managerServicesPremiumRub = alreadyPaidPremium.proscetRub + Math.max(0, real.profitRub) * (buyoutRate / 100);
   } else {
-    const isBoosted = isSelfSourcedFor(q.client, q.managerId);
-    const proscetRate = isBoosted ? premiumRates.selfSourcedProscetRatePercent : premiumRates.normalRatePercent;
-    const buyoutRate = isBoosted ? premiumRates.selfSourcedBuyoutDiscountRatePercent : premiumRates.normalRatePercent;
-    const fullProscetPotentialRub = Math.max(0, proscetRub) * (proscetRate / 100);
-    const fullBuyoutPotentialRub = Math.max(0, buyoutRub) * (buyoutRate / 100);
+    const estimated = estimatedSourceProfits(fields);
+    const fx = estimatedFxProfitRub(q, attachedServicesTotalRub, cnyProfitTiers);
+    const planned = computePlannedBuyoutProfit(q, attachedServicesTotalRub, fx);
+    buyoutIncomeRub = planned.incomeRub + estimated.proscetRub;
+    buyoutExpenseRub = planned.expenseRub;
+    const fullProscetPotentialRub = Math.max(0, estimated.proscetRub) * (proscetRate / 100);
+    const fullBuyoutPotentialRub = Math.max(0, estimated.buyoutRub) * (buyoutRate / 100);
     managerServicesPremiumRub =
       alreadyPaidPremium.proscetRub +
       alreadyPaidPremium.buyoutRub +
       Math.max(0, fullProscetPotentialRub - alreadyPaidPremium.proscetRub) +
       Math.max(0, fullBuyoutPotentialRub - alreadyPaidPremium.buyoutRub);
   }
-  // Cargo bonus/shares only count once cargoBonusRatePercent has locked in
-  // (handed_to_client) — before that, cargo margin doesn't participate in
-  // ANY payout suggestion yet, per explicit instruction (a quote can be
-  // buyoutFactConfirmed while cargo hasn't shipped, and that margin isn't
-  // real income until it does). See PB-V5 chat 2026-08-06.
-  // cargoBonusRatePercent is set (to 0 OR a real rate) the moment cargo
-  // hands off to the client — значение зафиксировано на тот момент и само
-  // решает, сколько (если вообще) менеджер получает; не перепроверяем
-  // self-sourced-статус клиента живьём (иначе разойдётся с уже
-  // замороженным значением при более позднем изменении статуса клиента).
-  // Не влияет на то, считается ли карго реализованным для Юры/Влада/
-  // remainder — company-lead клиент тоже даёт им реальный доход, просто не
-  // менеджеру. See status/route.ts for where this gets set.
-  const cargoRealized = q.cargoBonusRatePercent !== null;
-  const managerCargoBonusRub = cargoRealized ? flatCargoBonusRub(q, cargoRates, Number(q.cargoBonusRatePercent)) : 0;
+  const buyoutProfitRub = buyoutIncomeRub - buyoutExpenseRub;
+
+  // --- Блок "Карго" ---
+  // cargoBonusRatePercent уже зафиксирован (сделка дошла до "выдано
+  // клиенту" по старой схеме) ИЛИ статус ещё не дошёл до "отправлен
+  // клиенту" — план по ставкам просчёта (cargoDeliveryRub/cargoCostRub,
+  // тот же приход/расход, что cargoProfitRub всегда неявно считал).
+  // Иначе — факт из Кассы. См. PB-V5 chat 2026-08-11.
+  const cargoLocked = q.cargoBonusRatePercent !== null && q.cargoBonusRatePercent !== undefined;
+  const cargoSent = CARGO_REALIZED_STATUSES.includes(q.status);
+  let cargoIncomeRub: number;
+  let cargoExpenseRub: number;
+  if (cargoLocked || !cargoSent) {
+    cargoIncomeRub = Number(q.cargoDeliveryRub);
+    cargoExpenseRub = Number(q.cargoCostRub);
+  } else {
+    cargoIncomeRub = financials.cargoIncomeRub;
+    cargoExpenseRub = financials.cargoExpenseRub;
+  }
+  const cargoProfitRubValue = cargoIncomeRub - cargoExpenseRub;
+  // Доля МЕНЕДЖЕРА (managerCargoBonusRub) по-прежнему решается только
+  // cargoBonusRatePercent ("выдано клиенту") — отдельный вопрос, не
+  // трогаем; распределение долей инвесторов (cargoRealized) — статусом
+  // "отправлен клиенту" наравне со всем остальным. См. PB-V5 chat
+  // 2026-08-11.
+  const cargoRealized = cargoLocked || cargoSent;
+  const managerCargoBonusRub = cargoLocked ? flatCargoBonusRub(q, cargoRates, Number(q.cargoBonusRatePercent)) : 0;
 
   const { managerPremiumRub, investorSharesById } = computeQuoteShares(
-    proscetRub + buyoutRub + discountRub + fx,
+    buyoutProfitRub,
     managerServicesPremiumRub,
     cargoRealized,
-    cargo,
+    cargoProfitRubValue,
     managerCargoBonusRub,
     q,
     investors,
@@ -185,19 +216,6 @@ function computeQuoteBreakdown(
     shareRub: investorSharesById.get(inv.id) ?? 0,
   }));
 
-  // Raw inputs behind every figure above, for the on-screen "детали"
-  // expansion — so an owner can check a suspicious number (e.g. an
-  // inflated cargo margin from a not-yet-confirmed manual rate) without
-  // asking someone to look it up in the database. Cargo rates are
-  // per-unit on whichever basis this quote actually prices cargo on (see
-  // flatCargoBonusRub in quote-profit.ts for the same density/volume
-  // basis rule) — cargoCostUsd itself is a total, divided back down to
-  // match cargoRateUsd's own per-unit shape. See PB-V5 chat 2026-08-01.
-  const cargoBasisIsWeight = q.deliveryPricingMode === "density" && Number(q.densityKgM3) >= 100;
-  const cargoBasisQty = cargoBasisIsWeight ? Number(q.totalWeightKg) : Number(q.totalVolumeM3);
-  const cargoCostRateUsd = cargoBasisQty > 0 ? Number(q.cargoCostUsd) / cargoBasisQty : 0;
-  const fxProfitPerYuanRub = q.buyoutFactConfirmed && Number(q.actualBuyoutCny) > 0 ? fx / Number(q.actualBuyoutCny) : null;
-
   return {
     id: q.id,
     displayId: q.displayId,
@@ -207,24 +225,10 @@ function computeQuoteBreakdown(
     manager: q.manager,
     client: q.client,
     totalRub: Number(q.totalRub),
-    confirmed: q.buyoutFactConfirmed,
-    proscetRub,
-    buyoutRub,
-    discountRub,
-    fxProfitRub: fx,
-    cargoProfitRub: cargo,
-    rawTotalRub,
+    buyout: { incomeRub: buyoutIncomeRub, expenseRub: buyoutExpenseRub, profitRub: buyoutProfitRub, realized: q.buyoutFactConfirmed || buyoutBought },
+    cargo: { incomeRub: cargoIncomeRub, expenseRub: cargoExpenseRub, profitRub: cargoProfitRubValue, realized: cargoRealized },
+    totalProfitRub: buyoutProfitRub + cargoProfitRubValue,
     investorShares,
-    buyoutCommissionPercent: Number(q.buyoutCommissionPercent),
-    cnyRateUsed: Number(q.cnyRateUsed),
-    actualBuyoutRateUsed: q.buyoutFactConfirmed ? Number(q.actualBuyoutRateUsed) : null,
-    usdRateUsed: Number(q.usdRateUsed),
-    cargoSellRateUsd: Number(q.cargoRateUsd),
-    cargoCostRateUsd,
-    cargoBasisUnit: cargoBasisIsWeight ? ("kg" as const) : ("m3" as const),
-    totalWeightKg: Number(q.totalWeightKg),
-    totalVolumeM3: Number(q.totalVolumeM3),
-    fxProfitPerYuanRub,
     managerPremiumRub,
   };
 }
@@ -276,22 +280,32 @@ async function loadRatesAndQuotes(quoteIds: string[]) {
     _sum: { priceRub: true },
   });
   const attachedServicesByQuoteId = new Map(attachedServiceSums.map((s) => [s.quoteId, Number(s._sum.priceRub ?? 0)]));
+  const quoteRealFinancials = await fetchQuoteRealFinancials(quotes.map((q) => q.id));
 
-  return { quotes, cargoRates, premiumRates, investors, cnyProfitTiers, attachedServicesByQuoteId };
+  return { quotes, cargoRates, premiumRates, investors, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials };
 }
 
 // The single entry point both routes call — guarantees the on-screen report
 // and the downloaded PDF can never show different numbers for the same
 // selection.
 async function buildProfitReport(quoteIds: string[]) {
-  const { quotes, cargoRates, premiumRates, investors, cnyProfitTiers, attachedServicesByQuoteId } = await loadRatesAndQuotes(quoteIds);
+  const { quotes, cargoRates, premiumRates, investors, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials } =
+    await loadRatesAndQuotes(quoteIds);
   const rows = quotes.map((q) =>
-    computeQuoteBreakdown(q, cargoRates, premiumRates, investors, cnyProfitTiers, attachedServicesByQuoteId.get(q.id) ?? 0),
+    computeQuoteBreakdown(
+      q,
+      cargoRates,
+      premiumRates,
+      investors,
+      cnyProfitTiers,
+      attachedServicesByQuoteId.get(q.id) ?? 0,
+      quoteRealFinancials.get(q.id) ?? emptyQuoteRealFinancials(),
+    ),
   );
 
   const totalRevenueRub = rows.reduce((sum, r) => sum + r.totalRub, 0);
-  const totalProfitRub = rows.reduce((sum, r) => sum + r.rawTotalRub, 0);
-  const profitPoolRub = rows.reduce((sum, r) => sum + Math.max(0, r.rawTotalRub), 0);
+  const totalProfitRub = rows.reduce((sum, r) => sum + r.totalProfitRub, 0);
+  const profitPoolRub = rows.reduce((sum, r) => sum + Math.max(0, r.totalProfitRub), 0);
   const managerPremiumRub = rows.reduce((sum, r) => sum + r.managerPremiumRub, 0);
 
   // Every investor's cut — percent_of_profit, flat_per_cargo_kg, AND
@@ -310,16 +324,16 @@ async function buildProfitReport(quoteIds: string[]) {
     shareRub: rows.reduce((sum, r) => sum + (r.investorShares.find((s) => s.id === inv.id)?.shareRub ?? 0), 0),
   }));
 
-  // Per-source breakdown of totalProfitRub above — so "Прибыль компании"
-  // doesn't stay one opaque number, same "show what it's made of" instinct
-  // as pipelineGoodsRub/pipelineCargoRub etc. in app/api/manager-dashboard/
-  // route.ts. Always reconciles exactly to totalProfitRub by construction
-  // (each row's rawTotalRub is defined as the sum of these five fields).
-  const totalProscetRub = rows.reduce((sum, r) => sum + r.proscetRub, 0);
-  const totalBuyoutRub = rows.reduce((sum, r) => sum + r.buyoutRub, 0);
-  const totalDiscountRub = rows.reduce((sum, r) => sum + r.discountRub, 0);
-  const totalFxProfitRub = rows.reduce((sum, r) => sum + r.fxProfitRub, 0);
-  const totalCargoProfitRub = rows.reduce((sum, r) => sum + r.cargoProfitRub, 0);
+  // Приход/расход/прибыль по блокам — просуммировано по всей выборке;
+  // всегда сходится с totalProfitRub по построению (buyout.profitRub +
+  // cargo.profitRub = totalProfitRub на каждой строке). См. PB-V5 chat
+  // 2026-08-11.
+  const totalBuyoutIncomeRub = rows.reduce((sum, r) => sum + r.buyout.incomeRub, 0);
+  const totalBuyoutExpenseRub = rows.reduce((sum, r) => sum + r.buyout.expenseRub, 0);
+  const totalBuyoutProfitRub = rows.reduce((sum, r) => sum + r.buyout.profitRub, 0);
+  const totalCargoIncomeRub = rows.reduce((sum, r) => sum + r.cargo.incomeRub, 0);
+  const totalCargoExpenseRub = rows.reduce((sum, r) => sum + r.cargo.expenseRub, 0);
+  const totalCargoProfitRub = rows.reduce((sum, r) => sum + r.cargo.profitRub, 0);
 
   // investorShares was only needed above to sum into the totals-level
   // investorShares array — the per-quote table doesn't display it (same as
@@ -336,10 +350,11 @@ async function buildProfitReport(quoteIds: string[]) {
     totals: {
       totalRevenueRub,
       totalProfitRub,
-      totalProscetRub,
-      totalBuyoutRub,
-      totalDiscountRub,
-      totalFxProfitRub,
+      totalBuyoutIncomeRub,
+      totalBuyoutExpenseRub,
+      totalBuyoutProfitRub,
+      totalCargoIncomeRub,
+      totalCargoExpenseRub,
       totalCargoProfitRub,
       profitPoolRub,
       managerPremiumRub,

@@ -1,4 +1,5 @@
 import "server-only";
+import { sumAlreadyPaidRubByCategory } from "@/lib/desk-services/buyout-invoice-calc";
 
 // Pure per-quote profit math — extracted from app/api/manager-dashboard/
 // route.ts so this exact formula has exactly one implementation, shared by
@@ -353,6 +354,114 @@ function factualManagerPremiumRub(
   );
 }
 
+// --- Реальная прибыль по факту денег в Кассе (не по введённым вручную
+// цифрам с подтверждением, и не по полноте оплаты) — см. PB-V5 chat
+// 2026-08-11. Заменяет factualSourceProfits/estimatedSourceProfits ТОЛЬКО
+// для сделок, ещё не подтверждённых по старой схеме (buyoutFactConfirmed:
+// false) — уже подтверждённые продолжают использовать прежнюю формулу без
+// изменений (см. вызывающий код в app/api/manager-dashboard/route.ts и
+// др.).
+//
+// Что решает "реализован ли блок" (показывать реальные цифры из Кассы,
+// или план из просчёта) — СТАТУС сделки (см. BUYOUT_REALIZED_STATUSES/
+// CARGO_REALIZED_STATUSES в lib/quote-statuses.ts), а НЕ полнота оплаты.
+// Как только менеджер перевёл сделку в статус "в доставке на склад" (для
+// Выкупа) или "отправлен клиенту" (для Карго) — это значит товар/карго
+// реально куплены и уже в пути, поэтому отчёт показывает реальные, пусть
+// ещё не полностью собранные (например, при частичной предоплате
+// производства под заказ — остаток продолжит поступать позже) цифры из
+// Кассы, а не ждёт полного покрытия счёта. Эти функции сами это решение
+// не принимают — только считают приход/расход по тому, что реально
+// проведено в Кассе; вызывающий код сам решает, какой из двух наборов
+// (план/факт) показывать, исходя из статуса.
+//
+// Курсовая разница и "скидка поставщика" больше не считаются отдельными
+// строками — они уже растворены в разнице "сколько реально пришло" минус
+// "сколько реально потрачено" (расходный ордер записывается в той валюте
+// и по тому курсу, по которому реально платили), и вся эта разница теперь
+// участвует в премии менеджера наравне с остальной прибылью блока —
+// явное решение, см. PB-V5 chat 2026-08-11 (раньше курсовая разница шла
+// только Владу/инвесторам, доля менеджера была строго 0%).
+interface RealBlockResult {
+  incomeRub: number;
+  expenseRub: number;
+  profitRub: number;
+}
+
+interface RealBuyoutInputs {
+  // QuotePaymentAllocation этого просчёта — тот же список, что уже
+  // используют sumAlreadyPaidPremium/sumAlreadyPaidProfitRub выше.
+  allocations: { category: string; amountRub: unknown }[];
+  // Сумма реальных расходных CashOrder этого просчёта по статьям "Закупка
+  // товара"/"Доставка по Китаю", уже переведённая в ₽ (см.
+  // lib/desk-services/quote-real-financials.ts).
+  expenseRub: number;
+}
+
+// Приход — те же 4 категории "Счёта на выкуп", что НЕ являются Просчётом
+// (goods/china_delivery/buyout_commission/attached_services); search_
+// service/custom_production сюда не входят — это отдельный, уже
+// самодостаточный (100% маржа, без себестоимости) блок Просчёт, его эта
+// функция не трогает.
+function computeRealBuyoutProfit(q: RealBuyoutInputs): RealBlockResult {
+  const alreadyPaid = sumAlreadyPaidRubByCategory(q.allocations);
+  const incomeRub = alreadyPaid.goods + alreadyPaid.chinaDelivery + alreadyPaid.buyoutCommission + alreadyPaid.attachedServices;
+  return { incomeRub, expenseRub: q.expenseRub, profitRub: incomeRub - q.expenseRub };
+}
+
+interface RealCargoInputs {
+  // Сумма реальных приходных CashOrder этого просчёта по статье "Приход
+  // карго" (карго и раньше выставлялось отдельным счётом от "Счёта на
+  // выкуп" — см. buyout-invoice-calc.ts), уже в ₽.
+  incomeRub: number;
+  // Сумма реальных расходных CashOrder по статье "Расход по карго", уже в ₽.
+  expenseRub: number;
+}
+
+function computeRealCargoProfit(q: RealCargoInputs): RealBlockResult {
+  return { incomeRub: q.incomeRub, expenseRub: q.expenseRub, profitRub: q.incomeRub - q.expenseRub };
+}
+
+interface PlannedBuyoutInputs {
+  totalPriceRub: unknown;
+  chinaDeliveryRub: unknown;
+  buyoutCommissionRub: unknown;
+  isCargoOnly: boolean;
+}
+
+// План (до статуса "в доставке на склад") — сколько по плану заплатит
+// клиент (весь "Счёт на выкуп") минус сколько по плану уйдёт на закупку и
+// доставку. Расход по товару/доставке берём как их плановую цену МИНУС
+// известную типовую наценку за ¥ (estimatedFxProfitRub, задаётся
+// руководителем в Тарифы) — если наценка не задана (0), это то же самое,
+// что и раньше: себестоимость по плану = цена по плану (маржа неизвестна
+// до реальной закупки). buyoutCommissionRub/attachedServicesTotalRub —
+// 100% маржа, без себестоимости, как и в факте. См. PB-V5 chat 2026-08-11.
+function computePlannedBuyoutProfit(
+  q: PlannedBuyoutInputs,
+  attachedServicesTotalRub: number,
+  estimatedFxProfitRub: number,
+): RealBlockResult {
+  if (q.isCargoOnly) return { incomeRub: 0, expenseRub: 0, profitRub: 0 };
+  const incomeRub = Number(q.totalPriceRub) + Number(q.chinaDeliveryRub) + Number(q.buyoutCommissionRub) + attachedServicesTotalRub;
+  const expenseRub = Number(q.totalPriceRub) + Number(q.chinaDeliveryRub) - estimatedFxProfitRub;
+  return { incomeRub, expenseRub, profitRub: incomeRub - expenseRub };
+}
+
+interface PlannedCargoInputs {
+  cargoDeliveryRub: unknown;
+  cargoCostRub: unknown;
+}
+
+// План (до статуса "отправлен клиенту") — ставка покупателя (что клиент
+// платит за карго) минус ставка закупки (себестоимость, снапшот на
+// просчёте — см. Quote.cargoCostRub).
+function computePlannedCargoProfit(q: PlannedCargoInputs): RealBlockResult {
+  const incomeRub = Number(q.cargoDeliveryRub);
+  const expenseRub = Number(q.cargoCostRub);
+  return { incomeRub, expenseRub, profitRub: incomeRub - expenseRub };
+}
+
 // A "flat_per_cargo_kg"-type investor (e.g. Юра) — flat $/kg on delivered
 // cargo weight, on every cargo delivery regardless of self-sourced status
 // (unlike a manager's own flatCargoBonusRub above, which is self-sourced-
@@ -510,6 +619,10 @@ export {
   computePaymentAllocationPremiumRub,
   distributePoolRub,
   computeQuoteShares,
+  computeRealBuyoutProfit,
+  computeRealCargoProfit,
+  computePlannedBuyoutProfit,
+  computePlannedCargoProfit,
 };
 export type {
   QuoteProfitFields,
@@ -521,4 +634,9 @@ export type {
   InvestorConfig,
   ManagerPremiumRates,
   AlreadyPaidPremium,
+  RealBlockResult,
+  RealBuyoutInputs,
+  RealCargoInputs,
+  PlannedBuyoutInputs,
+  PlannedCargoInputs,
 };

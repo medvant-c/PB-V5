@@ -3,7 +3,7 @@ import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { getVisibleManagerIds } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { getSystemSettings } from "@/lib/system-settings";
-import { QUOTE_STATUSES, type QuoteStatus } from "@/lib/quote-statuses";
+import { QUOTE_STATUSES, BUYOUT_REALIZED_STATUSES, CARGO_REALIZED_STATUSES, type QuoteStatus } from "@/lib/quote-statuses";
 import {
   effectiveInvestorRatePercent,
   estimatedSourceProfits,
@@ -18,23 +18,23 @@ import {
   computeQuoteShares,
   sumAlreadyPaidPremium,
   sumAlreadyPaidProfitRub,
+  computeRealBuyoutProfit,
+  computeRealCargoProfit,
   type CnyProfitTiers,
   type InvestorConfig,
 } from "@/lib/desk-services/quote-profit";
 import { buildPeriodReport } from "@/lib/desk-services/period-report";
+import { fetchQuoteRealFinancials, emptyQuoteRealFinancials, type QuoteRealFinancials } from "@/lib/desk-services/quote-real-financials";
 
 // Statuses that imply the buyout has actually happened — client's money
 // has already covered the goods, China delivery, buyout commission, and
 // search-service fee, and the manager has bought the goods (moved the
 // quote past "ждём оплату"). Cargo delivery to the client hasn't happened
 // yet at this stage, so "выкуплено" below deliberately excludes it —
-// that's what the separate "выдано клиенту" metric is for.
-const BOUGHT_STATUSES: QuoteStatus[] = [
-  "in_transit_to_warehouse",
-  "delivered_to_warehouse",
-  "sent_to_client",
-  "handed_to_client",
-];
+// that's what the separate "выдано клиенту" metric is for. Same set that
+// now also decides "real vs planned" profit display — see
+// BUYOUT_REALIZED_STATUSES in lib/quote-statuses.ts.
+const BOUGHT_STATUSES: QuoteStatus[] = BUYOUT_REALIZED_STATUSES;
 // Still-open pipeline — everything except a dead end (rejected) or an
 // already-completed deal (handed_to_client) — used for the "if everything
 // in progress gets bought" revenue projection ("В работе").
@@ -135,6 +135,7 @@ function summarize(
   premiumRates: PremiumRates,
   cnyProfitTiers: CnyProfitTiers,
   attachedServicesByQuoteId: Map<string, number>,
+  quoteRealFinancials: Map<string, QuoteRealFinancials>,
 ) {
   const statusCounts: Record<string, number> = {};
   for (const status of QUOTE_STATUSES) statusCounts[status] = 0;
@@ -229,33 +230,43 @@ function summarize(
         alreadyPaidPremium,
       );
     } else {
-      const { proscetRub, buyoutRub } = estimatedSourceProfits(q);
-      // Not yet confirmed but already partially paid via "Счёт на выкуп" —
-      // that slice of ₽ profit is real (search_service/custom_production/
-      // buyout_commission/attached_services are 100% margin the moment the
-      // money arrives, see sumAlreadyPaidProfitRub's own comment), so it
-      // counts as FACTUAL profit right now instead of waiting for
-      // confirm-buyout, mirroring how alreadyPaidPremium already works for
-      // premium just below. See PB-V5 chat 2026-08-05.
+      // Просчёт не тронут переделкой на реальные деньги — 100% маржа, уже
+      // кредитуется по факту прихода частями (search_service/
+      // custom_production). См. PB-V5 chat 2026-08-05.
+      const { proscetRub } = estimatedSourceProfits(q);
       const alreadyPaidProfit = sumAlreadyPaidProfitRub(q.paymentAllocations);
       factualProscetRub += alreadyPaidProfit.proscetRub;
-      factualBuyoutRub += alreadyPaidProfit.buyoutRub;
       potentialProscetRub += Math.max(0, proscetRub - alreadyPaidProfit.proscetRub);
-      potentialBuyoutRub += Math.max(0, buyoutRub - alreadyPaidProfit.buyoutRub);
-      potentialFxProfitRub += estimatedFxProfitRub(q, attachedServicesByQuoteId.get(q.id) ?? 0, cnyProfitTiers);
       const isBoosted = isSelfSourcedFor(q.client, q.managerId);
       const proscetRate = isBoosted ? premiumRates.selfSourcedProscetRatePercent : premiumRates.normalRatePercent;
       const buyoutRate = isBoosted ? premiumRates.selfSourcedBuyoutDiscountRatePercent : premiumRates.normalRatePercent;
       const fullProscetPotentialRub = Math.max(0, proscetRub) * (proscetRate / 100);
-      const fullBuyoutPotentialRub = Math.max(0, buyoutRub) * (buyoutRate / 100);
-      // Not yet confirmed but already partially paid — that slice is real,
-      // credited premium, so it counts as FACTUAL here even though the
-      // quote overall is still "potential", and is subtracted out of the
-      // potential bucket so the two never overlap.
-      factualPremiumRub += alreadyPaidPremium.proscetRub + alreadyPaidPremium.buyoutRub;
-      potentialPremiumRub +=
-        Math.max(0, fullProscetPotentialRub - alreadyPaidPremium.proscetRub) +
-        Math.max(0, fullBuyoutPotentialRub - alreadyPaidPremium.buyoutRub);
+      factualPremiumRub += alreadyPaidPremium.proscetRub;
+      potentialPremiumRub += Math.max(0, fullProscetPotentialRub - alreadyPaidPremium.proscetRub);
+
+      // Выкуп — реальные деньги в Кассе вместо ручного "Подтвердить факт"
+      // (см. computeRealBuyoutProfit в lib/desk-services/quote-profit.ts и
+      // план mellow-forging-kay.md). "Факт" включается СТАТУСОМ сделки
+      // (BUYOUT_REALIZED_STATUSES — "в доставке на склад" и далее), не
+      // полнотой оплаты: как только менеджер перевёл сделку в этот статус,
+      // товар уже реально куплен, и отчёт показывает реальные (пусть и
+      // ещё не полностью собранные — например, аванс под производство под
+      // заказ) цифры из Кассы, а не ждёт полного покрытия счёта. До этого
+      // статуса — план из просчёта. См. PB-V5 chat 2026-08-11.
+      const financials = quoteRealFinancials.get(q.id) ?? emptyQuoteRealFinancials();
+      if (BUYOUT_REALIZED_STATUSES.includes(q.status)) {
+        const real = computeRealBuyoutProfit({ allocations: q.paymentAllocations, expenseRub: financials.buyoutExpenseRub });
+        factualBuyoutRub += real.profitRub;
+        factualPremiumRub += Math.max(0, real.profitRub) * (buyoutRate / 100);
+      } else {
+        const { buyoutRub: estimatedBuyoutRub } = estimatedSourceProfits(q);
+        factualBuyoutRub += alreadyPaidProfit.buyoutRub;
+        potentialBuyoutRub += Math.max(0, estimatedBuyoutRub - alreadyPaidProfit.buyoutRub);
+        potentialFxProfitRub += estimatedFxProfitRub(q, attachedServicesByQuoteId.get(q.id) ?? 0, cnyProfitTiers);
+        const fullBuyoutPotentialRub = Math.max(0, estimatedBuyoutRub) * (buyoutRate / 100);
+        factualPremiumRub += alreadyPaidPremium.buyoutRub;
+        potentialPremiumRub += Math.max(0, fullBuyoutPotentialRub - alreadyPaidPremium.buyoutRub);
+      }
     }
 
     // Карго — gated on cargoBonusRatePercent being locked in, which only
@@ -266,9 +277,23 @@ function summarize(
     // руководитель может вручную поднять/понизить именно эту ставку по
     // конкретной сделке (см. cargo-bonus-rate/route.ts) — она теперь реально
     // масштабирует сумму бонуса, а не просто включает/выключает его.
+    // Доля МЕНЕДЖЕРА (flatCargoBonusRub) по-прежнему решается
+    // cargoBonusRatePercent — отдельный вопрос "дают ли бонус вообще", не
+    // то, как считается сама прибыль компании по блоку (см. план
+    // mellow-forging-kay.md). Прибыль компании — реальные деньги из Кассы
+    // СО СТАТУСА "отправлен клиенту" (CARGO_REALIZED_STATUSES), не с
+    // полной оплаты — до этого план по ставкам просчёта. Уже переданные
+    // клиенту (cargoBonusRatePercent зафиксирован) — старая формула без
+    // изменений, чтобы не пересчитывать задним числом уже решённые сделки.
+    // См. PB-V5 chat 2026-08-11.
     if (q.cargoBonusRatePercent !== null && q.cargoBonusRatePercent !== undefined) {
       factualCargoProfitRub += cargoProfitRub(q);
       factualCargoBonusRub += flatCargoBonusRub(q, cargoRates, Number(q.cargoBonusRatePercent));
+    } else if (CARGO_REALIZED_STATUSES.includes(q.status)) {
+      const cargoFinancials = quoteRealFinancials.get(q.id) ?? emptyQuoteRealFinancials();
+      const realCargo = computeRealCargoProfit({ incomeRub: cargoFinancials.cargoIncomeRub, expenseRub: cargoFinancials.cargoExpenseRub });
+      factualCargoProfitRub += realCargo.profitRub;
+      potentialCargoBonusRub += isSelfSourcedFor(q.client, q.managerId) ? flatCargoBonusRub(q, cargoRates) : 0;
     } else {
       potentialCargoProfitRub += cargoProfitRub(q);
       potentialCargoBonusRub += isSelfSourcedFor(q.client, q.managerId) ? flatCargoBonusRub(q, cargoRates) : 0;
@@ -392,6 +417,12 @@ export async function GET(req: NextRequest) {
   });
   const attachedServicesByQuoteId = new Map(attachedServiceSums.map((s) => [s.quoteId, Number(s._sum.priceRub ?? 0)]));
 
+  // Реальные расходные/приходные CashOrder по блокам Выкуп/Карго — один
+  // батч-запрос на весь набор просчётов (см. lib/desk-services/
+  // quote-real-financials.ts), используется в summarize() ниже вместо
+  // ручного ввода/подтверждения. См. PB-V5 chat 2026-08-11.
+  const quoteRealFinancials = await fetchQuoteRealFinancials(quotes.map((q) => q.id));
+
   // "Готовые просчёты" — how many quotes each manager marked complete
   // (first reached pending_approval) today/this week/this month, per PB-V5
   // chat 2026-07-28. Monday-indexed week, calendar month — completedAt is
@@ -450,7 +481,7 @@ export async function GET(req: NextRequest) {
   }
 
   const overall = withFulfillmentPremium(
-    summarize(quotes, cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId),
+    summarize(quotes, cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials),
     "all",
   );
 
@@ -479,7 +510,7 @@ export async function GET(req: NextRequest) {
     const dashboardTo = new Date(dashboardToParam);
     if (!Number.isNaN(dashboardFrom.getTime()) && !Number.isNaN(dashboardTo.getTime())) {
       const periodQuotes = quotes.filter((q) => q.createdAt >= dashboardFrom && q.createdAt < dashboardTo);
-      periodOverall = summarize(periodQuotes, cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId);
+      periodOverall = summarize(periodQuotes, cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials);
       if (session.role === "owner") {
         periodExpectedIncomeRub =
           periodOverall.potentialProscetRub + periodOverall.potentialBuyoutRub + periodOverall.potentialCargoProfitRub + periodOverall.potentialFxProfitRub - periodOverall.estimatedPremiumRub;
@@ -518,7 +549,7 @@ export async function GET(req: NextRequest) {
       managerId: m.id,
       managerName: m.name,
       ...withFulfillmentPremium(
-        summarize(byManager.get(m.id) ?? [], cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId),
+        summarize(byManager.get(m.id) ?? [], cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials),
         m.id,
       ),
       completedToday: countCompletedSince(m.id, startOfDay),
@@ -637,6 +668,69 @@ export async function GET(req: NextRequest) {
       const managerCargoBonusRub = cargoRealized ? flatCargoBonusRub(q, cargoRates, Number(q.cargoBonusRatePercent)) : 0;
       const { investorSharesById: perQuoteShares } = computeQuoteShares(
         sourceProfits.proscetRub + sourceProfits.buyoutRub + sourceProfits.discountRub + fx,
+        managerServicesPremiumRub,
+        cargoRealized,
+        cargo,
+        managerCargoBonusRub,
+        q,
+        investors,
+        q.client,
+      );
+      for (const [id, amountRub] of perQuoteShares) addInvestorShare(id, amountRub);
+    }
+
+    // То же самое, но для сделок на новой схеме (реальные деньги в Кассе
+    // вместо buyoutFactConfirmed) — см. computeRealBuyoutProfit/
+    // computeRealCargoProfit выше и план mellow-forging-kay.md. Просчёт
+    // распределяется инвесторам по мере реального прихода (та же сумма,
+    // что summarize() уже засчитывает менеджеру в факт); Выкуп — реализован
+    // СТАТУСОМ (BUYOUT_REALIZED_STATUSES), не полнотой оплаты — см.
+    // комментарий в summarize() выше. См. PB-V5 chat 2026-08-11.
+    for (const q of quotes.filter((quote) => !quote.buyoutFactConfirmed)) {
+      const financials = quoteRealFinancials.get(q.id) ?? emptyQuoteRealFinancials();
+      const alreadyPaidProfit = sumAlreadyPaidProfitRub(q.paymentAllocations);
+      const alreadyPaidPremium = sumAlreadyPaidPremium(q.paymentAllocations);
+      const isBoosted = isSelfSourcedFor(q.client, q.managerId);
+      const buyoutRate = isBoosted ? premiumRates.selfSourcedBuyoutDiscountRatePercent : premiumRates.normalRatePercent;
+
+      const buyoutRealized = BUYOUT_REALIZED_STATUSES.includes(q.status);
+      const real = buyoutRealized
+        ? computeRealBuyoutProfit({ allocations: q.paymentAllocations, expenseRub: financials.buyoutExpenseRub })
+        : null;
+      const servicesProfitRub = alreadyPaidProfit.proscetRub + (real ? real.profitRub : 0);
+      // Ровно та же премия, что summarize() уже засчитывает менеджеру в
+      // factualPremiumRub для этого просчёта (alreadyPaidPremium.proscetRub
+      // уже заморожена по нужной ставке в момент оплаты, см.
+      // computePaymentAllocationPremiumRub).
+      const managerServicesPremiumRub =
+        alreadyPaidPremium.proscetRub + (real ? Math.max(0, real.profitRub) * (buyoutRate / 100) : alreadyPaidPremium.buyoutRub);
+
+      // Карго — cargoBonusRatePercent уже зафиксирован (сделка успела дойти
+      // до "выдано клиенту" по старой схеме до того, как этот просчёт
+      // перешёл на новую) — старая формула без изменений, та же логика, что
+      // и в summarize() выше; иначе — реальные деньги, реализуется статусом
+      // "отправлен клиенту" (CARGO_REALIZED_STATUSES).
+      let cargoRealized: boolean;
+      let cargo: number;
+      let managerCargoBonusRub: number;
+      if (q.cargoBonusRatePercent !== null && q.cargoBonusRatePercent !== undefined) {
+        cargoRealized = true;
+        cargo = cargoProfitRub(q);
+        managerCargoBonusRub = flatCargoBonusRub(q, cargoRates, Number(q.cargoBonusRatePercent));
+      } else if (CARGO_REALIZED_STATUSES.includes(q.status)) {
+        const realCargo = computeRealCargoProfit({ incomeRub: financials.cargoIncomeRub, expenseRub: financials.cargoExpenseRub });
+        cargoRealized = true;
+        cargo = realCargo.profitRub;
+        managerCargoBonusRub = 0; // бонус менеджеру даётся только при "выдано клиенту", ещё не наступило
+      } else {
+        cargoRealized = false;
+        cargo = 0;
+        managerCargoBonusRub = 0;
+      }
+
+      if (servicesProfitRub === 0 && !cargoRealized) continue;
+      const { investorSharesById: perQuoteShares } = computeQuoteShares(
+        servicesProfitRub,
         managerServicesPremiumRub,
         cargoRealized,
         cargo,

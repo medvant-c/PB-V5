@@ -548,10 +548,27 @@ function ClientQuotes({
       .catch(() => setOutsourceQuoteLabels(null));
   }, []);
   const [expandedBuyoutId, setExpandedBuyoutId] = useState<string | null>(null);
-  const [buyoutDrafts, setBuyoutDrafts] = useState<
-    Record<string, { cny: string; rate: string; paymentRub: string; paymentRate: string; accountId: string }>
+  // Расходный ордер с карточки просчёта (закупка товара/доставка по
+  // Китаю/расход по карго, ¥, на выбранный счёт) — заменяет собой ручной
+  // ввод "потрачено ¥ + курс" из старой формы "Подтвердить факт". См.
+  // app/api/manager-quotes/[id]/expense-order/route.ts, план
+  // mellow-forging-kay.md, PB-V5 chat 2026-08-11.
+  const [expenseDrafts, setExpenseDrafts] = useState<
+    Record<string, { goodsCny: string; chinaCny: string; cargoCny: string; accountId: string }>
   >({});
   const [savingBuyoutId, setSavingBuyoutId] = useState<string | null>(null);
+  // Прогресс реальной оплаты блоков Выкуп/Карго — подгружается лениво при
+  // раскрытии панели (см. app/api/manager-quotes/[id]/expense-order GET).
+  const [paymentProgress, setPaymentProgress] = useState<
+    Record<
+      string,
+      {
+        buyout: { paidRub: number; owedRub: number; expenseRub: number; realized: boolean };
+        cargo: { paidRub: number; owedRub: number; expenseRub: number; realized: boolean };
+      }
+    >
+  >({});
+  const [loadingProgressId, setLoadingProgressId] = useState<string | null>(null);
 
   // Owner-only manual override of one quote's cargo bonus % — see
   // app/api/manager-quotes/[id]/cargo-bonus-rate/route.ts.
@@ -1172,43 +1189,59 @@ function ClientQuotes({
     }
   }
 
-  function getBuyoutDraft(quote: QuoteRecord): { cny: string; rate: string; paymentRub: string; paymentRate: string; accountId: string } {
+  function getExpenseDraft(quote: QuoteRecord): { goodsCny: string; chinaCny: string; cargoCny: string; accountId: string } {
     return (
-      buyoutDrafts[quote.id] ?? {
-        cny: quote.actualBuyoutCny ?? "",
-        rate: quote.actualBuyoutRateUsed ?? quote.cnyRateUsed,
-        paymentRub: quote.actualClientPaymentRub ?? "",
-        paymentRate: quote.actualClientPaymentRateUsed ?? quote.cnyRateUsed,
+      expenseDrafts[quote.id] ?? {
+        goodsCny: "",
+        chinaCny: "",
+        cargoCny: "",
         accountId: paymentAccounts[0]?.id ?? "",
       }
     );
   }
 
-  async function handleConfirmBuyout(quoteId: string) {
+  async function loadPaymentProgress(quoteId: string) {
+    setLoadingProgressId(quoteId);
+    try {
+      const res = await fetch(`/api/manager-quotes/${quoteId}/expense-order`);
+      if (res.ok) {
+        const data = await res.json();
+        setPaymentProgress((current) => ({ ...current, [quoteId]: data }));
+      }
+    } finally {
+      setLoadingProgressId(null);
+    }
+  }
+
+  async function handleSubmitExpenseOrder(quoteId: string) {
     const quote = quotes.find((q) => q.id === quoteId);
     if (!quote) return;
-    const draft = getBuyoutDraft(quote);
-    const cny = Number(draft.cny);
-    const rate = Number(draft.rate);
-    const paymentRub = Number(draft.paymentRub);
-    const paymentRate = Number(draft.paymentRate);
-    if (!Number.isFinite(cny) || cny <= 0 || !Number.isFinite(rate) || rate <= 0) return;
-    if (!Number.isFinite(paymentRub) || paymentRub <= 0 || !Number.isFinite(paymentRate) || paymentRate <= 0) return;
+    const draft = getExpenseDraft(quote);
     if (!draft.accountId) return;
+    const goodsAmountCny = Number(draft.goodsCny);
+    const chinaDeliveryAmountCny = Number(draft.chinaCny);
+    const cargoAmountCny = Number(draft.cargoCny);
+    const hasAny =
+      (Number.isFinite(goodsAmountCny) && goodsAmountCny > 0) ||
+      (Number.isFinite(chinaDeliveryAmountCny) && chinaDeliveryAmountCny > 0) ||
+      (Number.isFinite(cargoAmountCny) && cargoAmountCny > 0);
+    if (!hasAny) return;
     setSavingBuyoutId(quoteId);
     try {
-      const res = await fetch(`/api/manager-quotes/${quoteId}/confirm-buyout`, {
-        method: "PATCH",
+      const res = await fetch(`/api/manager-quotes/${quoteId}/expense-order`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          actualBuyoutCny: cny,
-          actualBuyoutRateUsed: rate,
-          actualClientPaymentRub: paymentRub,
-          actualClientPaymentRateUsed: paymentRate,
           accountId: draft.accountId,
+          goodsAmountCny,
+          chinaDeliveryAmountCny,
+          cargoAmountCny,
         }),
       });
-      if (res.ok) await load();
+      if (res.ok) {
+        setExpenseDrafts((current) => ({ ...current, [quoteId]: { goodsCny: "", chinaCny: "", cargoCny: "", accountId: draft.accountId } }));
+        await Promise.all([load(), loadPaymentProgress(quoteId)]);
+      }
     } finally {
       setSavingBuyoutId(null);
     }
@@ -1929,16 +1962,20 @@ function ClientQuotes({
               {POST_BUYOUT_STATUSES.includes(quote.status) && (
                 <button
                   type="button"
-                  onClick={() => setExpandedBuyoutId(expandedBuyoutId === quote.id ? null : quote.id)}
+                  onClick={() => {
+                    const next = expandedBuyoutId === quote.id ? null : quote.id;
+                    setExpandedBuyoutId(next);
+                    if (next && !quote.buyoutFactConfirmed && !paymentProgress[quote.id]) void loadPaymentProgress(quote.id);
+                  }}
                   className={cn(
                     "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-primary/10 hover:text-primary",
-                    quote.buyoutFactConfirmed ? "text-success" : "text-text-secondary",
+                    quote.buyoutFactConfirmed || paymentProgress[quote.id]?.buyout.realized ? "text-success" : "text-text-secondary",
                   )}
-                  aria-label="Факт по выкупу"
-                  title={quote.buyoutFactConfirmed ? "Факт по выкупу подтверждён" : "Факт по выкупу не подтверждён"}
+                  aria-label="Расход и оплата по выкупу"
+                  title={quote.buyoutFactConfirmed ? "Факт по выкупу подтверждён" : "Расход и оплата по выкупу"}
                 >
                   <Banknote className="h-4 w-4" />
-                  {!quote.buyoutFactConfirmed && (
+                  {!quote.buyoutFactConfirmed && !paymentProgress[quote.id]?.buyout.realized && (
                     <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-warning" />
                   )}
                 </button>
@@ -2132,61 +2169,93 @@ function ClientQuotes({
 
             {expandedBuyoutId === quote.id &&
               (() => {
-                const draft = getBuyoutDraft(quote);
-                const draftCny = Number(draft.cny);
-                const draftRate = Number(draft.rate);
-                const draftPaymentRub = Number(draft.paymentRub);
-                const draftPaymentRate = Number(draft.paymentRate);
-                const draftValid =
-                  Number.isFinite(draftCny) &&
-                  draftCny > 0 &&
-                  Number.isFinite(draftRate) &&
-                  draftRate > 0 &&
-                  Number.isFinite(draftPaymentRub) &&
-                  draftPaymentRub > 0 &&
-                  Number.isFinite(draftPaymentRate) &&
-                  draftPaymentRate > 0 &&
-                  Boolean(draft.accountId);
-                const draftSpentRub = draftValid ? draftCny * draftRate : null;
-                const draftProfitRub = draftSpentRub != null ? Number(quote.totalPriceRub) - draftSpentRub : null;
-                const confirmedSpentRub = quote.buyoutFactConfirmed
-                  ? Number(quote.actualBuyoutCny) * Number(quote.actualBuyoutRateUsed)
-                  : null;
-                // Уже получено отдельными "Приходными ордерами" с карточки
-                // клиента до подтверждения факта — "Оплата от клиента" ниже
-                // должна быть суммой ЗА ВЕСЬ просчёт (нужна целиком для
-                // расчёта скидки поставщика на сервере), но кассовый ордер
-                // сервер заведёт только на остаток сверх уже учтённого —
-                // подсказка здесь просто объясняет, откуда берётся разница.
-                const alreadyReceivedRub = quote.paymentAllocations.reduce((sum, a) => sum + Number(a.amountRub), 0);
-                return (
-                  <div className="mt-2 space-y-2 rounded-lg border border-border bg-bg p-2.5">
-                    <p className="text-xs text-text-secondary">
-                      По плану: {quote.totalPriceCny}¥ ({fmtRub(Number(quote.totalPriceRub))}₽)
-                    </p>
-
-                    {quote.buyoutFactConfirmed ? (
+                // Уже подтверждённые по старой схеме (buyoutFactConfirmed) —
+                // прежний вид без изменений, задним числом ничего не
+                // пересчитываем. Остальные — реальные деньги в Кассе вместо
+                // ручного ввода. См. план mellow-forging-kay.md.
+                if (quote.buyoutFactConfirmed) {
+                  const confirmedSpentRub = Number(quote.actualBuyoutCny) * Number(quote.actualBuyoutRateUsed);
+                  return (
+                    <div className="mt-2 space-y-2 rounded-lg border border-border bg-bg p-2.5">
+                      <p className="text-xs text-text-secondary">
+                        По плану: {quote.totalPriceCny}¥ ({fmtRub(Number(quote.totalPriceRub))}₽)
+                      </p>
                       <div className="space-y-1 rounded-md bg-surface p-2.5 text-sm">
                         <div className="text-text">
-                          Потрачено по факту: {quote.actualBuyoutCny}¥ × {quote.actualBuyoutRateUsed}₽ ={" "}
-                          {fmtRub(confirmedSpentRub!)}₽
+                          Потрачено по факту: {quote.actualBuyoutCny}¥ × {quote.actualBuyoutRateUsed}₽ = {fmtRub(confirmedSpentRub)}₽
                         </div>
                         <div className="font-bold text-success">
-                          Доход с выкупа: {fmtRub(Number(quote.totalPriceRub) - confirmedSpentRub!)}₽ (премия{" "}
+                          Доход с выкупа: {fmtRub(Number(quote.totalPriceRub) - confirmedSpentRub)}₽ (премия{" "}
                           {quote.buyoutPremiumRatePercent}%)
                         </div>
                         <div className="text-xs text-text-secondary">
                           Подтверждено {quote.buyoutConfirmedAt ? formatDate(quote.buyoutConfirmedAt) : ""}
                         </div>
                       </div>
-                    ) : canConfirmBuyout ? (
+                    </div>
+                  );
+                }
+
+                const draft = getExpenseDraft(quote);
+                const goodsCny = Number(draft.goodsCny);
+                const chinaCny = Number(draft.chinaCny);
+                const cargoCny = Number(draft.cargoCny);
+                const draftValid =
+                  Boolean(draft.accountId) &&
+                  ((Number.isFinite(goodsCny) && goodsCny > 0) ||
+                    (Number.isFinite(chinaCny) && chinaCny > 0) ||
+                    (Number.isFinite(cargoCny) && cargoCny > 0));
+                const progress = paymentProgress[quote.id];
+
+                const progressBlock = (label: string, block: { paidRub: number; owedRub: number; expenseRub: number; realized: boolean } | undefined) => {
+                  if (!block) return null;
+                  const percent = block.owedRub > 0 ? Math.min(100, Math.round((block.paidRub / block.owedRub) * 100)) : 0;
+                  return (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-text-secondary">{label}</span>
+                        <span className={cn("font-medium", block.realized ? "text-success" : "text-text")}>
+                          Оплачено {fmtRub(block.paidRub)} из {fmtRub(block.owedRub)}₽
+                        </span>
+                      </div>
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-border">
+                        <div
+                          className={cn("h-full rounded-full", block.realized ? "bg-success" : "bg-primary")}
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
+                      {block.expenseRub > 0 && (
+                        <p className="text-xs text-text-secondary">
+                          Расход по факту: {fmtRub(block.expenseRub)}₽
+                          {block.realized && (
+                            <> → доход {fmtRub(block.paidRub - block.expenseRub)}₽</>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  );
+                };
+
+                return (
+                  <div className="mt-2 space-y-2.5 rounded-lg border border-border bg-bg p-2.5">
+                    {loadingProgressId === quote.id && !progress ? (
+                      <p className="text-xs text-text-secondary">Загрузка…</p>
+                    ) : (
+                      <>
+                        {progressBlock("Выкуп", progress?.buyout)}
+                        {Number(quote.cargoDeliveryRub) > 0 && progressBlock("Карго", progress?.cargo)}
+                      </>
+                    )}
+
+                    {canConfirmBuyout && (
                       <div className="space-y-1.5 rounded-md bg-surface p-2.5">
+                        <p className="text-xs text-text-secondary">Записать расходный ордер (спишется с выбранного счёта, ¥):</p>
                         <Select
                           value={draft.accountId}
-                          onValueChange={(v) => setBuyoutDrafts((current) => ({ ...current, [quote.id]: { ...draft, accountId: v } }))}
+                          onValueChange={(v) => setExpenseDrafts((current) => ({ ...current, [quote.id]: { ...draft, accountId: v } }))}
                         >
                           <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Счёт зачисления" />
+                            <SelectValue placeholder="Счёт списания" />
                           </SelectTrigger>
                           <SelectContent>
                             {paymentAccounts.map((a) => (
@@ -2196,75 +2265,50 @@ function ClientQuotes({
                             ))}
                           </SelectContent>
                         </Select>
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <input
                             type="number"
                             step="0.01"
-                            placeholder="¥ потрачено"
-                            value={draft.cny}
+                            placeholder="Закупка товара, ¥"
+                            value={draft.goodsCny}
                             onChange={(e) =>
-                              setBuyoutDrafts((current) => ({ ...current, [quote.id]: { ...draft, cny: e.target.value } }))
+                              setExpenseDrafts((current) => ({ ...current, [quote.id]: { ...draft, goodsCny: e.target.value } }))
                             }
-                            className="w-32 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                            className="w-36 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
                           />
                           <input
                             type="number"
                             step="0.01"
-                            placeholder="курс ¥→₽"
-                            value={draft.rate}
+                            placeholder="Доставка по Китаю, ¥"
+                            value={draft.chinaCny}
                             onChange={(e) =>
-                              setBuyoutDrafts((current) => ({ ...current, [quote.id]: { ...draft, rate: e.target.value } }))
-                            }
-                            className="w-28 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
-                          />
-                        </div>
-                        <div className="flex gap-2">
-                          <input
-                            type="number"
-                            step="0.01"
-                            placeholder="₽ оплата от клиента"
-                            value={draft.paymentRub}
-                            onChange={(e) =>
-                              setBuyoutDrafts((current) => ({ ...current, [quote.id]: { ...draft, paymentRub: e.target.value } }))
+                              setExpenseDrafts((current) => ({ ...current, [quote.id]: { ...draft, chinaCny: e.target.value } }))
                             }
                             className="w-40 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
                           />
-                          <input
-                            type="number"
-                            step="0.01"
-                            placeholder="курс ₽→¥"
-                            value={draft.paymentRate}
-                            onChange={(e) =>
-                              setBuyoutDrafts((current) => ({ ...current, [quote.id]: { ...draft, paymentRate: e.target.value } }))
-                            }
-                            className="w-28 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
-                          />
+                          {Number(quote.cargoDeliveryRub) > 0 && (
+                            <input
+                              type="number"
+                              step="0.01"
+                              placeholder="Расход по карго, ¥"
+                              value={draft.cargoCny}
+                              onChange={(e) =>
+                                setExpenseDrafts((current) => ({ ...current, [quote.id]: { ...draft, cargoCny: e.target.value } }))
+                              }
+                              className="w-36 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                            />
+                          )}
                         </div>
-                        {alreadyReceivedRub > 0 && (
-                          <p className="text-xs text-text-secondary">
-                            Уже получено {fmtRub(alreadyReceivedRub)}₽ отдельными приходными ордерами — в «оплата от
-                            клиента» укажите ОБЩУЮ сумму за весь просчёт, остаток в кассу заведётся сам.
-                          </p>
-                        )}
-                        {draftValid && (
-                          <p className={cn("text-xs font-medium", draftProfitRub! >= 0 ? "text-success" : "text-error")}>
-                            Потрачено: {fmtRub(draftSpentRub!)}₽ → Доход с выкупа: {fmtRub(draftProfitRub!)}₽
-                          </p>
-                        )}
                         <button
                           type="button"
-                          onClick={() => handleConfirmBuyout(quote.id)}
+                          onClick={() => handleSubmitExpenseOrder(quote.id)}
                           disabled={!draftValid || savingBuyoutId === quote.id}
                           className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/30 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {savingBuyoutId === quote.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                          Подтвердить факт
+                          Записать расход
                         </button>
                       </div>
-                    ) : (
-                      <p className="rounded-md bg-surface p-2.5 text-xs text-text-secondary">
-                        Ожидает подтверждения старшим менеджером или руководителем.
-                      </p>
                     )}
                   </div>
                 );
@@ -2559,7 +2603,7 @@ function ManagerClientsTab() {
   // as "can I confirm facts" the same way /api/managers above doubles as
   // "am I the owner", without a dedicated whoami endpoint. A lightweight
   // sibling of /api/manager-confirmations (same permission gate, same
-  // teamManagers query) that skips the 9 pending-confirmation queues this
+  // teamManagers query) that skips the pending-confirmation queues this
   // tab never displays — see app/api/manager-team-managers/route.ts.
   const [canConfirmBuyout, setCanConfirmBuyout] = useState(false);
   // Manager-scoped team list (owner: everyone; senior: self + own

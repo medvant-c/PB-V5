@@ -1,14 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, ChevronDown, Download, FileBarChart, Loader2, Lock } from "lucide-react";
+import { CheckCircle2, Download, FileBarChart, Loader2, Lock } from "lucide-react";
 import { PeriodProfitReport } from "@/components/manager/period-profit-report";
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect } from "@/components/manager/searchable-select";
-import { QUOTE_STATUSES, QUOTE_STATUS_LABEL, QUOTE_STATUS_DOT_COLOR, type QuoteStatus } from "@/lib/quote-statuses";
+import { QUOTE_STATUSES, QUOTE_STATUS_LABEL, QUOTE_STATUS_DOT_COLOR, BUYOUT_REALIZED_STATUSES, type QuoteStatus } from "@/lib/quote-statuses";
 import { cn } from "@/lib/utils";
 
 interface QuoteListRow {
@@ -34,31 +34,24 @@ interface ClientOption {
   company: string | null;
 }
 
+interface ProfitBlock {
+  incomeRub: number;
+  expenseRub: number;
+  profitRub: number;
+  realized: boolean;
+}
+
 interface ReportRow {
   id: string;
   displayId: number;
   productName: string;
   status: QuoteStatus;
   createdAt: string;
-  confirmed: boolean;
   totalRub: number;
-  proscetRub: number;
-  buyoutRub: number;
-  discountRub: number;
-  fxProfitRub: number;
-  cargoProfitRub: number;
-  rawTotalRub: number;
+  totalProfitRub: number;
+  buyout: ProfitBlock;
+  cargo: ProfitBlock;
   managerPremiumRub: number;
-  buyoutCommissionPercent: number;
-  cnyRateUsed: number;
-  actualBuyoutRateUsed: number | null;
-  usdRateUsed: number;
-  cargoSellRateUsd: number;
-  cargoCostRateUsd: number;
-  cargoBasisUnit: "kg" | "m3";
-  totalWeightKg: number;
-  totalVolumeM3: number;
-  fxProfitPerYuanRub: number | null;
   manager: { id: string; name: string };
   client: { id: string; name: string; company: string | null };
 }
@@ -66,10 +59,11 @@ interface ReportRow {
 interface ReportTotals {
   totalRevenueRub: number;
   totalProfitRub: number;
-  totalProscetRub: number;
-  totalBuyoutRub: number;
-  totalDiscountRub: number;
-  totalFxProfitRub: number;
+  totalBuyoutIncomeRub: number;
+  totalBuyoutExpenseRub: number;
+  totalBuyoutProfitRub: number;
+  totalCargoIncomeRub: number;
+  totalCargoExpenseRub: number;
   totalCargoProfitRub: number;
   profitPoolRub: number;
   managerPremiumRub: number;
@@ -78,12 +72,6 @@ interface ReportTotals {
 
 function fmt(value: number): string {
   return Number.isFinite(value) ? Math.round(value).toLocaleString("ru-RU") : "—";
-}
-
-// Rates ($1.7/кг, курс 12.85) lose their meaning rounded to a whole number
-// the way money figures do — kept to 2 decimal places instead.
-function fmtRate(value: number): string {
-  return Number.isFinite(value) ? value.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
 }
 
 // Every money figure here shows ¥ first, ₽ alongside — same convention as
@@ -109,7 +97,6 @@ function ManagerProfitReportTab() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const [report, setReport] = useState<{ rows: ReportRow[]; totals: ReportTotals } | null>(null);
-  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
@@ -346,8 +333,13 @@ function ManagerProfitReportTab() {
                     </span>
                   </td>
                   <td className="px-3 py-1.5">
-                    <span className={cn("text-xs font-medium", q.buyoutFactConfirmed ? "text-success" : "text-warning")}>
-                      {q.buyoutFactConfirmed ? "Факт" : "Оценка"}
+                    <span
+                      className={cn(
+                        "text-xs font-medium",
+                        q.buyoutFactConfirmed || BUYOUT_REALIZED_STATUSES.includes(q.status) ? "text-success" : "text-warning",
+                      )}
+                    >
+                      {q.buyoutFactConfirmed || BUYOUT_REALIZED_STATUSES.includes(q.status) ? "Факт" : "План"}
                     </span>
                   </td>
                   <td className="px-3 py-1.5 text-right font-medium text-text">{fmt(Number(q.totalRub))} ₽</td>
@@ -378,101 +370,43 @@ function ManagerProfitReportTab() {
             <table className="w-full min-w-250 border-collapse text-sm">
               <thead>
                 <tr className="border-b border-border bg-bg text-left text-xs text-text-secondary">
-                  <th className="px-3 py-1.5 font-medium"></th>
                   <th className="px-3 py-1.5 font-medium">№</th>
                   <th className="px-3 py-1.5 font-medium">Клиент / товар</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Просчёт</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Выкуп</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Скидка</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Курс. разница</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Карго</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Профит</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Выкуп: поступило</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Выкуп: потратили</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Выкуп: прибыль</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Карго: поступило</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Карго: потратили</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Карго: прибыль</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Прибыль</th>
                 </tr>
               </thead>
               <tbody>
                 {report.rows.map((row) => (
-                  <>
-                    <tr
-                      key={row.id}
-                      onClick={() => setExpandedRowId(expandedRowId === row.id ? null : row.id)}
-                      className="cursor-pointer border-b border-border last:border-0 hover:bg-bg"
-                    >
-                      <td className="px-2 py-1.5 text-text-secondary">
-                        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expandedRowId === row.id && "rotate-180")} />
-                      </td>
-                      <td className="px-3 py-1.5 text-text-secondary">
-                        {row.displayId}
-                        <div className={cn("text-[10px] font-medium", row.confirmed ? "text-success" : "text-warning")}>
-                          {row.confirmed ? "факт" : "оценка"}
-                        </div>
-                      </td>
-                      <td className="px-3 py-1.5 text-text">
-                        <div className="max-w-52 truncate">{row.productName}</div>
-                        <div className="text-xs text-text-secondary">
-                          {row.client.name}
-                          {row.client.company ? ` · ${row.client.company}` : ""} · {row.manager.name}
-                        </div>
-                      </td>
-                      <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.proscetRub)} ₽</td>
-                      <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.buyoutRub)} ₽</td>
-                      <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.discountRub)} ₽</td>
-                      <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.fxProfitRub)} ₽</td>
-                      <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.cargoProfitRub)} ₽</td>
-                      <td className={cn("px-3 py-1.5 text-right font-bold", row.rawTotalRub >= 0 ? "text-success" : "text-error")}>
-                        {fmt(row.rawTotalRub)} ₽
-                      </td>
-                    </tr>
-                    {expandedRowId === row.id && (
-                      <tr className="border-b border-border bg-bg last:border-0">
-                        <td colSpan={9} className="px-4 py-3">
-                          <div className="grid gap-x-6 gap-y-1.5 text-xs sm:grid-cols-3 lg:grid-cols-4">
-                            <div>
-                              <span className="text-text-secondary">Комиссия выкупа: </span>
-                              <span className="font-medium text-text">{fmtRate(row.buyoutCommissionPercent)}%</span>
-                            </div>
-                            <div>
-                              <span className="text-text-secondary">Курс продажи (¥→₽ клиенту): </span>
-                              <span className="font-medium text-text">{fmtRate(row.cnyRateUsed)} ₽</span>
-                            </div>
-                            <div>
-                              <span className="text-text-secondary">Курс закупки (факт): </span>
-                              <span className="font-medium text-text">
-                                {row.actualBuyoutRateUsed !== null ? `${fmtRate(row.actualBuyoutRateUsed)} ₽` : "не подтверждено"}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-text-secondary">Курс $: </span>
-                              <span className="font-medium text-text">{fmtRate(row.usdRateUsed)} ₽</span>
-                            </div>
-                            <div>
-                              <span className="text-text-secondary">Карго, ставка продажи: </span>
-                              <span className="font-medium text-text">
-                                ${fmtRate(row.cargoSellRateUsd)}/{row.cargoBasisUnit === "kg" ? "кг" : "м³"}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-text-secondary">Карго, себестоимость: </span>
-                              <span className="font-medium text-text">
-                                ${fmtRate(row.cargoCostRateUsd)}/{row.cargoBasisUnit === "kg" ? "кг" : "м³"}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-text-secondary">Доход с курса за 1¥: </span>
-                              <span className="font-medium text-text">
-                                {row.fxProfitPerYuanRub !== null ? `${fmtRate(row.fxProfitPerYuanRub)} ₽` : "не подтверждено"}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-text-secondary">Вес / объём: </span>
-                              <span className="font-medium text-text">
-                                {fmtRate(row.totalWeightKg)} кг / {fmtRate(row.totalVolumeM3)} м³
-                              </span>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </>
+                  <tr key={row.id} className="border-b border-border last:border-0 hover:bg-bg">
+                    <td className="px-3 py-1.5 text-text-secondary">
+                      {row.displayId}
+                      <div className={cn("text-[10px] font-medium", row.buyout.realized ? "text-success" : "text-warning")}>
+                        {row.buyout.realized ? "факт" : "план"}
+                      </div>
+                    </td>
+                    <td className="px-3 py-1.5 text-text">
+                      <div className="max-w-52 truncate">{row.productName}</div>
+                      <div className="text-xs text-text-secondary">
+                        {row.client.name}
+                        {row.client.company ? ` · ${row.client.company}` : ""} · {row.manager.name}
+                      </div>
+                    </td>
+                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.buyout.incomeRub)} ₽</td>
+                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.buyout.expenseRub)} ₽</td>
+                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.buyout.profitRub)} ₽</td>
+                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.cargo.incomeRub)} ₽</td>
+                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.cargo.expenseRub)} ₽</td>
+                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.cargo.profitRub)} ₽</td>
+                    <td className={cn("px-3 py-1.5 text-right font-bold", row.totalProfitRub >= 0 ? "text-success" : "text-error")}>
+                      {fmt(row.totalProfitRub)} ₽
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>
@@ -503,32 +437,39 @@ function ManagerProfitReportTab() {
               </div>
             </div>
 
-            <div className="mt-3 rounded-xl border border-dashed border-border p-3.5">
-              <div className="text-xs font-semibold text-text-secondary">Из чего складывается прибыль компании</div>
-              <div className="mt-2 space-y-1.5 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-text-secondary">Просчёт (услуга поиска + производство под заказ)</span>
-                  <span className="font-medium text-text">{fmtBoth(report.totals.totalProscetRub, cnyRateRub)}</span>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-dashed border-border p-3.5">
+                <div className="text-xs font-semibold text-text-secondary">Выкуп</div>
+                <div className="mt-2 space-y-1.5 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-text-secondary">Поступило</span>
+                    <span className="font-medium text-text">{fmtBoth(report.totals.totalBuyoutIncomeRub, cnyRateRub)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-text-secondary">Потратили</span>
+                    <span className="font-medium text-text">{fmtBoth(report.totals.totalBuyoutExpenseRub, cnyRateRub)}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-border pt-1.5 font-bold text-text">
+                    <span>Прибыль</span>
+                    <span>{fmtBoth(report.totals.totalBuyoutProfitRub, cnyRateRub)}</span>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-text-secondary">Выкуп (комиссия + разница план/факт)</span>
-                  <span className="font-medium text-text">{fmtBoth(report.totals.totalBuyoutRub, cnyRateRub)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-text-secondary">Скидка поставщика</span>
-                  <span className="font-medium text-text">{fmtBoth(report.totals.totalDiscountRub, cnyRateRub)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-text-secondary">Курсовая разница</span>
-                  <span className="font-medium text-text">{fmtBoth(report.totals.totalFxProfitRub, cnyRateRub)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-text-secondary">Карго-маржа</span>
-                  <span className="font-medium text-text">{fmtBoth(report.totals.totalCargoProfitRub, cnyRateRub)}</span>
-                </div>
-                <div className="flex items-center justify-between border-t border-border pt-1.5 font-bold text-text">
-                  <span>Итого</span>
-                  <span>{fmtBoth(report.totals.totalProfitRub, cnyRateRub)}</span>
+              </div>
+              <div className="rounded-xl border border-dashed border-border p-3.5">
+                <div className="text-xs font-semibold text-text-secondary">Карго</div>
+                <div className="mt-2 space-y-1.5 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-text-secondary">Поступило</span>
+                    <span className="font-medium text-text">{fmtBoth(report.totals.totalCargoIncomeRub, cnyRateRub)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-text-secondary">Потратили</span>
+                    <span className="font-medium text-text">{fmtBoth(report.totals.totalCargoExpenseRub, cnyRateRub)}</span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-border pt-1.5 font-bold text-text">
+                    <span>Прибыль</span>
+                    <span>{fmtBoth(report.totals.totalCargoProfitRub, cnyRateRub)}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -555,11 +496,12 @@ function ManagerProfitReportTab() {
             </div>
           )}
 
-          {report.rows.some((r) => !r.confirmed) && (
+          {report.rows.some((r) => !r.buyout.realized) && (
             <p className="flex items-start gap-1.5 text-xs text-text-secondary">
               <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              Часть выбранных сделок ещё не подтверждена фактом выкупа — для них прибыль показана оценочно (план, а
-              не факт) и пересчитается автоматически, как только выкуп подтвердят.
+              Часть выбранных сделок ещё не дошла до статуса «в доставке на склад» — для них прибыль показана по
+              плану из просчёта и пересчитается на реальные деньги из Кассы автоматически, как только статус
+              изменится.
             </p>
           )}
         </div>
