@@ -152,7 +152,10 @@ function computeQuoteBreakdown(
     buyoutIncomeRub = q.paymentAllocations.reduce((sum, a) => sum + Number(a.amountRub), 0);
     buyoutExpenseRub = financials.buyoutExpenseRub;
     const real = computeRealBuyoutProfit({ allocations: q.paymentAllocations, expenseRub: financials.buyoutExpenseRub });
-    managerServicesPremiumRub = alreadyPaidPremium.proscetRub + Math.max(0, real.profitRub) * (buyoutRate / 100);
+    // Не ниже alreadyPaidPremium.buyoutRub — иначе премия менеджера могла
+    // бы уменьшиться при переходе план→факт (см. PB-V5 chat 2026-08-12).
+    managerServicesPremiumRub =
+      alreadyPaidPremium.proscetRub + Math.max(alreadyPaidPremium.buyoutRub, Math.max(0, real.profitRub) * (buyoutRate / 100));
   } else {
     const estimated = estimatedSourceProfits(fields);
     const fx = estimatedFxProfitRub(q, attachedServicesTotalRub, cnyProfitTiers);

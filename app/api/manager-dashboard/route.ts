@@ -257,7 +257,14 @@ function summarize(
       if (BUYOUT_REALIZED_STATUSES.includes(q.status)) {
         const real = computeRealBuyoutProfit({ allocations: q.paymentAllocations, expenseRub: financials.buyoutExpenseRub });
         factualBuyoutRub += real.profitRub;
-        factualPremiumRub += Math.max(0, real.profitRub) * (buyoutRate / 100);
+        // Никогда не ниже того, что уже заморожено на отдельных
+        // QuotePaymentAllocation ДО того, как сделка перешла в "факт" —
+        // иначе премия менеджера могла бы УМЕНЬШИТЬСЯ при переходе
+        // план→факт (если реальный расход на товар/доставку окажется выше
+        // ожидаемого), нарушая тот же принцип, что уже соблюдает
+        // factualManagerPremiumRub для легаси-сделок. См. PB-V5 chat
+        // 2026-08-12.
+        factualPremiumRub += Math.max(alreadyPaidPremium.buyoutRub, Math.max(0, real.profitRub) * (buyoutRate / 100));
       } else {
         const { buyoutRub: estimatedBuyoutRub } = estimatedSourceProfits(q);
         factualBuyoutRub += alreadyPaidProfit.buyoutRub;
@@ -701,9 +708,11 @@ export async function GET(req: NextRequest) {
       // Ровно та же премия, что summarize() уже засчитывает менеджеру в
       // factualPremiumRub для этого просчёта (alreadyPaidPremium.proscetRub
       // уже заморожена по нужной ставке в момент оплаты, см.
-      // computePaymentAllocationPremiumRub).
+      // computePaymentAllocationPremiumRub). Не ниже alreadyPaidPremium.
+      // buyoutRub — та же анти-уменьшение защита, что и в summarize() выше.
       const managerServicesPremiumRub =
-        alreadyPaidPremium.proscetRub + (real ? Math.max(0, real.profitRub) * (buyoutRate / 100) : alreadyPaidPremium.buyoutRub);
+        alreadyPaidPremium.proscetRub +
+        (real ? Math.max(alreadyPaidPremium.buyoutRub, Math.max(0, real.profitRub) * (buyoutRate / 100)) : alreadyPaidPremium.buyoutRub);
 
       // Карго — cargoBonusRatePercent уже зафиксирован (сделка успела дойти
       // до "выдано клиенту" по старой схеме до того, как этот просчёт
