@@ -171,6 +171,15 @@ function summarize(
   let factualCargoProfitRub = 0;
   let potentialCargoBonusRub = 0;
   let factualCargoBonusRub = 0;
+  // Приход/расход (не только прибыль) для факт-блоков Выкуп/Карго — по
+  // прямому указанию пользователя: "поступило сумма - потратили на выкуп
+  // сумма - разница - прибыль", без детализации по источникам (просчёт/
+  // скидка поставщика больше не показываются отдельно, растворены в
+  // приходе блока "Выкуп"). См. PB-V5 chat 2026-08-13.
+  let factualBuyoutIncomeRub = 0;
+  let factualBuyoutExpenseRub = 0;
+  let factualCargoIncomeRub = 0;
+  let factualCargoExpenseRub = 0;
   // Estimated курсовая разница, pre-confirmation — see estimatedFxProfitRub
   // in lib/desk-services/quote-profit.ts. Only a projection: the factual
   // fxProfitRub() (confirmed deals) never runs through this bucket at all,
@@ -214,6 +223,14 @@ function summarize(
       factualProscetRub += proscetRub;
       factualBuyoutRub += buyoutRub;
       factualDiscountRub += discountRub;
+      // Легаси — приход/расход в той же форме, что и новая схема: расход =
+      // реально потраченное (actualBuyoutCny×actualBuyoutRateUsed), приход
+      // = расход + прежняя прибыль (просчёт+выкуп+скидка, без изменений).
+      // Курсовая разница сюда не входит — как и раньше, никогда не
+      // показывается менеджерам напрямую.
+      const legacyExpenseRub = Number(q.actualBuyoutCny) * Number(q.actualBuyoutRateUsed);
+      factualBuyoutExpenseRub += legacyExpenseRub;
+      factualBuyoutIncomeRub += proscetRub + buyoutRub + discountRub + legacyExpenseRub;
       // Locked at confirmation time (buyoutSelfSourcedBoost), never
       // recomputed live — see schema comment on that field. Просчёт gets
       // the full 100% boost for a self-sourced client; Выкуп/Скидка get a
@@ -236,6 +253,9 @@ function summarize(
       const { proscetRub } = estimatedSourceProfits(q);
       const alreadyPaidProfit = sumAlreadyPaidProfitRub(q.paymentAllocations);
       factualProscetRub += alreadyPaidProfit.proscetRub;
+      // Просчёт визуально сливается в блок "Выкуп" (та же "Счёт на выкуп"
+      // сделка, одно "поступило") — 0% себестоимости, целиком в приход.
+      factualBuyoutIncomeRub += alreadyPaidProfit.proscetRub;
       potentialProscetRub += Math.max(0, proscetRub - alreadyPaidProfit.proscetRub);
       const isBoosted = isSelfSourcedFor(q.client, q.managerId);
       const proscetRate = isBoosted ? premiumRates.selfSourcedProscetRatePercent : premiumRates.normalRatePercent;
@@ -257,6 +277,13 @@ function summarize(
       if (BUYOUT_REALIZED_STATUSES.includes(q.status)) {
         const real = computeRealBuyoutProfit({ allocations: q.paymentAllocations, expenseRub: financials.buyoutExpenseRub });
         factualBuyoutRub += real.profitRub;
+        // Приход — товар/доставка/комиссия/доп. услуги (real.incomeRub),
+        // плюс просчёт (search_service/custom_production), уже учтённый
+        // строкой выше через alreadyPaidProfit.proscetRub — вместе дают
+        // приход по ВСЕМУ "Счёту на выкуп". Расход — реально потраченное на
+        // закупку/доставку.
+        factualBuyoutIncomeRub += real.incomeRub;
+        factualBuyoutExpenseRub += financials.buyoutExpenseRub;
         // Никогда не ниже того, что уже заморожено на отдельных
         // QuotePaymentAllocation ДО того, как сделка перешла в "факт" —
         // иначе премия менеджера могла бы УМЕНЬШИТЬСЯ при переходе
@@ -268,6 +295,7 @@ function summarize(
       } else {
         const { buyoutRub: estimatedBuyoutRub } = estimatedSourceProfits(q);
         factualBuyoutRub += alreadyPaidProfit.buyoutRub;
+        factualBuyoutIncomeRub += alreadyPaidProfit.buyoutRub;
         potentialBuyoutRub += Math.max(0, estimatedBuyoutRub - alreadyPaidProfit.buyoutRub);
         potentialFxProfitRub += estimatedFxProfitRub(q, attachedServicesByQuoteId.get(q.id) ?? 0, cnyProfitTiers);
         const fullBuyoutPotentialRub = Math.max(0, estimatedBuyoutRub) * (buyoutRate / 100);
@@ -295,11 +323,15 @@ function summarize(
     // См. PB-V5 chat 2026-08-11.
     if (q.cargoBonusRatePercent !== null && q.cargoBonusRatePercent !== undefined) {
       factualCargoProfitRub += cargoProfitRub(q);
+      factualCargoIncomeRub += Number(q.cargoDeliveryRub);
+      factualCargoExpenseRub += Number(q.cargoCostRub);
       factualCargoBonusRub += flatCargoBonusRub(q, cargoRates, Number(q.cargoBonusRatePercent));
     } else if (CARGO_REALIZED_STATUSES.includes(q.status)) {
       const cargoFinancials = quoteRealFinancials.get(q.id) ?? emptyQuoteRealFinancials();
       const realCargo = computeRealCargoProfit({ incomeRub: cargoFinancials.cargoIncomeRub, expenseRub: cargoFinancials.cargoExpenseRub });
       factualCargoProfitRub += realCargo.profitRub;
+      factualCargoIncomeRub += cargoFinancials.cargoIncomeRub;
+      factualCargoExpenseRub += cargoFinancials.cargoExpenseRub;
       potentialCargoBonusRub += isSelfSourcedFor(q.client, q.managerId) ? flatCargoBonusRub(q, cargoRates) : 0;
     } else {
       potentialCargoProfitRub += cargoProfitRub(q);
@@ -337,6 +369,10 @@ function summarize(
     factualDiscountRub,
     potentialCargoProfitRub,
     factualCargoProfitRub,
+    factualBuyoutIncomeRub,
+    factualBuyoutExpenseRub,
+    factualCargoIncomeRub,
+    factualCargoExpenseRub,
     potentialCargoBonusRub,
     factualCargoBonusRub,
     potentialFxProfitRub,
@@ -588,6 +624,10 @@ export async function GET(req: NextRequest) {
   let factualDiscountRub: number | null = null;
   let potentialCargoProfitRub: number | null = null;
   let factualCargoProfitRub: number | null = null;
+  let factualBuyoutIncomeRub: number | null = null;
+  let factualBuyoutExpenseRub: number | null = null;
+  let factualCargoIncomeRub: number | null = null;
+  let factualCargoExpenseRub: number | null = null;
   let cargoVolumeM3: number | null = null;
   let cargoWeightKg: number | null = null;
   let searchFeeRub: number | null = null;
@@ -628,6 +668,10 @@ export async function GET(req: NextRequest) {
     factualDiscountRub = overall.factualDiscountRub;
     potentialCargoProfitRub = overall.potentialCargoProfitRub;
     factualCargoProfitRub = overall.factualCargoProfitRub;
+    factualBuyoutIncomeRub = overall.factualBuyoutIncomeRub;
+    factualBuyoutExpenseRub = overall.factualBuyoutExpenseRub;
+    factualCargoIncomeRub = overall.factualCargoIncomeRub;
+    factualCargoExpenseRub = overall.factualCargoExpenseRub;
     cargoVolumeM3 = overall.pipelineVolumeM3;
     cargoWeightKg = overall.pipelineWeightKg;
     searchFeeRub = overall.pipelineSearchFeeRub;
@@ -785,13 +829,24 @@ export async function GET(req: NextRequest) {
   }
 
   // Owner-confidential cargo-margin signal — never leaves the server for
-  // anyone but the owner, same as it's always been.
-  const stripCargoProfit = <T extends { potentialCargoProfitRub: number; factualCargoProfitRub: number }>(
+  // anyone but the owner, same as it's always been. Приход/расход по карго
+  // раскрывают ту же маржу (даже нагляднее, чем одна цифра прибыли), так
+  // что тоже урезаются здесь.
+  const stripCargoProfit = <
+    T extends {
+      potentialCargoProfitRub: number;
+      factualCargoProfitRub: number;
+      factualCargoIncomeRub: number;
+      factualCargoExpenseRub: number;
+    },
+  >(
     row: T,
-  ): Omit<T, "potentialCargoProfitRub" | "factualCargoProfitRub"> => {
+  ): Omit<T, "potentialCargoProfitRub" | "factualCargoProfitRub" | "factualCargoIncomeRub" | "factualCargoExpenseRub"> => {
     const copy = { ...row };
     delete (copy as Partial<T>).potentialCargoProfitRub;
     delete (copy as Partial<T>).factualCargoProfitRub;
+    delete (copy as Partial<T>).factualCargoIncomeRub;
+    delete (copy as Partial<T>).factualCargoExpenseRub;
     return copy;
   };
   const responseOverall = session.role === "owner" ? overall : stripCargoProfit(overall);
@@ -814,6 +869,10 @@ export async function GET(req: NextRequest) {
     factualDiscountRub,
     potentialCargoProfitRub,
     factualCargoProfitRub,
+    factualBuyoutIncomeRub,
+    factualBuyoutExpenseRub,
+    factualCargoIncomeRub,
+    factualCargoExpenseRub,
     cargoVolumeM3,
     cargoWeightKg,
     searchFeeRub,

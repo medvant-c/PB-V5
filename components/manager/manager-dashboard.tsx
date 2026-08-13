@@ -42,6 +42,12 @@ interface StatSummary {
   factualDiscountRub: number;
   potentialCargoProfitRub: number;
   factualCargoProfitRub: number;
+  // Приход/расход (не только прибыль) факт-блоков Выкуп/Карго — см. PB-V5
+  // chat 2026-08-13.
+  factualBuyoutIncomeRub: number;
+  factualBuyoutExpenseRub: number;
+  factualCargoIncomeRub: number;
+  factualCargoExpenseRub: number;
   potentialCargoBonusRub: number;
   factualCargoBonusRub: number;
   // Фулфилмент — flat 10% of billed amount, no potential/factual split
@@ -175,6 +181,13 @@ interface DashboardData {
   factualDiscountRub: number | null;
   potentialCargoProfitRub: number | null;
   factualCargoProfitRub: number | null;
+  // Приход/расход (не только прибыль) факт-блоков — "поступило минус
+  // потратили на выкуп/карго равно прибыль", без детализации по
+  // источникам. См. PB-V5 chat 2026-08-13.
+  factualBuyoutIncomeRub: number | null;
+  factualBuyoutExpenseRub: number | null;
+  factualCargoIncomeRub: number | null;
+  factualCargoExpenseRub: number | null;
   // Owner-only companions — physical totals and the two revenue lines
   // behind "Доход компании".
   cargoVolumeM3: number | null;
@@ -329,10 +342,10 @@ function StatCardsRow({
   potentialProscetRub,
   potentialBuyoutRub,
   potentialCargoProfitRub,
-  factualProscetRub,
-  factualBuyoutRub,
-  factualDiscountRub,
-  factualCargoProfitRub,
+  factualBuyoutIncomeRub,
+  factualBuyoutExpenseRub,
+  factualCargoIncomeRub,
+  factualCargoExpenseRub,
 }: {
   stats: StatSummary;
   expectedIncomeRub: number | null;
@@ -341,10 +354,10 @@ function StatCardsRow({
   potentialProscetRub: number | null;
   potentialBuyoutRub: number | null;
   potentialCargoProfitRub: number | null;
-  factualProscetRub: number | null;
-  factualBuyoutRub: number | null;
-  factualDiscountRub: number | null;
-  factualCargoProfitRub: number | null;
+  factualBuyoutIncomeRub: number | null;
+  factualBuyoutExpenseRub: number | null;
+  factualCargoIncomeRub: number | null;
+  factualCargoExpenseRub: number | null;
 }) {
   const isHighConversion = stats.conversionPercent >= CONVERSION_HEALTHY_THRESHOLD_PERCENT;
   const m = (rub: number) => fmtBoth(rub, cnyRateRub);
@@ -394,9 +407,9 @@ function StatCardsRow({
         subtitle={`ожидается ещё ${m(stats.estimatedPremiumRub)}`}
         tooltip={
           <>
-            <BreakdownRow label="Факт — просчёт" value={`${m(Math.max(0, stats.factualProscetRub))} прибыли`} />
-            <BreakdownRow label="Факт — выкуп" value={`${m(Math.max(0, stats.factualBuyoutRub))} прибыли`} />
-            <BreakdownRow label="Факт — скидка поставщика" value={`${m(Math.max(0, stats.factualDiscountRub))} прибыли`} />
+            <BreakdownRow label="Выкуп: поступило" value={`${m(stats.factualBuyoutIncomeRub)}`} />
+            <BreakdownRow label="Выкуп: потратили" value={`−${m(stats.factualBuyoutExpenseRub)}`} />
+            <BreakdownRow label="Выкуп: прибыль" value={`${m(Math.max(0, stats.factualBuyoutIncomeRub - stats.factualBuyoutExpenseRub))}`} />
             <BreakdownRow
               label="Факт — премия"
               value={`${m(stats.factualPremiumRub - stats.factualCargoBonusRub - stats.factualFulfillmentPremiumRub)}`}
@@ -421,10 +434,10 @@ function StatCardsRow({
             subtitle="Уже подтверждено"
             tooltip={
               <>
-                <BreakdownRow label="Просчёт (факт)" value={m(factualProscetRub ?? 0)} />
-                <BreakdownRow label="Выкуп (факт)" value={m(factualBuyoutRub ?? 0)} />
-                <BreakdownRow label="Скидка поставщика (факт)" value={m(factualDiscountRub ?? 0)} />
-                <BreakdownRow label="Карго (факт)" value={m(factualCargoProfitRub ?? 0)} />
+                <BreakdownRow label="Выкуп: поступило" value={m(factualBuyoutIncomeRub ?? 0)} />
+                <BreakdownRow label="Выкуп: потратили" value={`−${m(factualBuyoutExpenseRub ?? 0)}`} />
+                <BreakdownRow label="Карго: поступило" value={m(factualCargoIncomeRub ?? 0)} />
+                <BreakdownRow label="Карго: потратили" value={`−${m(factualCargoExpenseRub ?? 0)}`} />
                 <BreakdownRow label="Премии менеджерам" value={`−${m(stats.factualPremiumRub)}`} />
                 <BreakdownRow label="Итого доход (факт)" value={m(actualIncomeRub)} isTotal />
               </>
@@ -1117,10 +1130,10 @@ function ManagerDashboard() {
           potentialProscetRub={data.periodOverall ? data.periodOverall.potentialProscetRub : data.potentialProscetRub}
           potentialBuyoutRub={data.periodOverall ? data.periodOverall.potentialBuyoutRub : data.potentialBuyoutRub}
           potentialCargoProfitRub={data.periodOverall ? data.periodOverall.potentialCargoProfitRub : data.potentialCargoProfitRub}
-          factualProscetRub={data.periodOverall ? data.periodOverall.factualProscetRub : data.factualProscetRub}
-          factualBuyoutRub={data.periodOverall ? data.periodOverall.factualBuyoutRub : data.factualBuyoutRub}
-          factualDiscountRub={data.periodOverall ? data.periodOverall.factualDiscountRub : data.factualDiscountRub}
-          factualCargoProfitRub={data.periodOverall ? data.periodOverall.factualCargoProfitRub : data.factualCargoProfitRub}
+          factualBuyoutIncomeRub={data.periodOverall ? data.periodOverall.factualBuyoutIncomeRub : data.factualBuyoutIncomeRub}
+          factualBuyoutExpenseRub={data.periodOverall ? data.periodOverall.factualBuyoutExpenseRub : data.factualBuyoutExpenseRub}
+          factualCargoIncomeRub={data.periodOverall ? data.periodOverall.factualCargoIncomeRub : data.factualCargoIncomeRub}
+          factualCargoExpenseRub={data.periodOverall ? data.periodOverall.factualCargoExpenseRub : data.factualCargoExpenseRub}
         />
         <StatusPillsRow
           stats={data.overall}
@@ -1139,11 +1152,11 @@ function ManagerDashboard() {
 
         {data.potentialProscetRub != null &&
           data.potentialBuyoutRub != null &&
-          data.factualProscetRub != null &&
-          data.factualBuyoutRub != null &&
-          data.factualDiscountRub != null &&
+          data.factualBuyoutIncomeRub != null &&
+          data.factualBuyoutExpenseRub != null &&
           data.potentialCargoProfitRub != null &&
-          data.factualCargoProfitRub != null && (
+          data.factualCargoIncomeRub != null &&
+          data.factualCargoExpenseRub != null && (
             <div className="rounded-2xl border border-border bg-bg p-4 sm:p-5">
               <div className="flex items-center gap-1.5 text-sm font-bold text-text">
                 <Lock className="h-4 w-4 text-text-secondary" /> Разбивка дохода — видно только руководителю
@@ -1160,10 +1173,20 @@ function ManagerDashboard() {
                 </div>
                 <div className="rounded-xl border border-border bg-surface p-3.5">
                   <div className="flex items-center gap-1.5 text-xs text-text-secondary">
-                    <Handshake className="h-3.5 w-3.5" /> Просчёт + Выкуп — факт
+                    <Handshake className="h-3.5 w-3.5" /> Выкуп — факт
+                  </div>
+                  <div className="mt-1 space-y-0.5 text-xs text-text-secondary">
+                    <div className="flex justify-between gap-3">
+                      <span>Поступило</span>
+                      <span className="font-medium text-text">{fmtBoth(data.factualBuyoutIncomeRub, data.cnyRateRub)}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span>Потратили</span>
+                      <span className="font-medium text-text">−{fmtBoth(data.factualBuyoutExpenseRub, data.cnyRateRub)}</span>
+                    </div>
                   </div>
                   <div className="mt-1 text-lg font-bold text-success">
-                    {fmtBoth(data.factualProscetRub + data.factualBuyoutRub, data.cnyRateRub)}
+                    {fmtBoth(data.factualBuyoutIncomeRub - data.factualBuyoutExpenseRub, data.cnyRateRub)}
                   </div>
                 </div>
                 <div className="rounded-xl border border-border bg-surface p-3.5">
@@ -1183,13 +1206,19 @@ function ManagerDashboard() {
                   <div className="flex items-center gap-1.5 text-xs text-text-secondary">
                     <Ship className="h-3.5 w-3.5" /> Карго — факт
                   </div>
-                  <div className="mt-1 text-lg font-bold text-success">{fmtBoth(data.factualCargoProfitRub, data.cnyRateRub)}</div>
-                </div>
-                <div className="rounded-xl border border-border bg-surface p-3.5 sm:col-span-2">
-                  <div className="flex items-center gap-1.5 text-xs text-text-secondary">
-                    <Handshake className="h-3.5 w-3.5" /> Скидка поставщика — факт
+                  <div className="mt-1 space-y-0.5 text-xs text-text-secondary">
+                    <div className="flex justify-between gap-3">
+                      <span>Поступило</span>
+                      <span className="font-medium text-text">{fmtBoth(data.factualCargoIncomeRub, data.cnyRateRub)}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span>Потратили</span>
+                      <span className="font-medium text-text">−{fmtBoth(data.factualCargoExpenseRub, data.cnyRateRub)}</span>
+                    </div>
                   </div>
-                  <div className="mt-1 text-lg font-bold text-success">{fmtBoth(data.factualDiscountRub, data.cnyRateRub)}</div>
+                  <div className="mt-1 text-lg font-bold text-success">
+                    {fmtBoth(data.factualCargoIncomeRub - data.factualCargoExpenseRub, data.cnyRateRub)}
+                  </div>
                 </div>
               </div>
 
