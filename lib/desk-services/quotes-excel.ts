@@ -34,6 +34,13 @@ const MONEY_FORMAT_USD = '"$"#,##0.00';
 // convention as ₽ (every value already Math.round()'d before it's
 // written). See PB-V5 chat 2026-08-03.
 const MONEY_FORMAT_CNY = '#,##0" ¥"';
+// Цена ЗА ЕДИНИЦУ (не сумма) — у дешёвых товаров закупкой в тысячах штук
+// цена за штуку часто дробная (¥1.24, ¥9.50) и округление до целого ¥/₽
+// съедает существенную долю цены (¥1.24 → ¥1 — это -19%). Только для колонок
+// "Цена, ₽"/"Цена, ¥" — остальные денежные колонки (суммы, обычно крупные)
+// по-прежнему округляются до целого. См. PB-V5 chat 2026-08-13.
+const MONEY_FORMAT_RUB_UNIT = '#,##0.00" ₽"';
+const MONEY_FORMAT_CNY_UNIT = '#,##0.00" ¥"';
 // Approximate FONT_SIZE line height in points, for the row-height
 // estimate below — not pixel-perfect, just enough that a long wrapped
 // cell isn't silently clipped by the fixed photo-aligned row height.
@@ -52,7 +59,7 @@ const QUOTE_TYPE_LABEL: Record<string, string> = {
 // row array below — keep both in sync if either changes. `money` is which
 // format applies, not just whether one does — only the cargo column ever
 // switches to "usd" (see buildColumns/cargoInUsd).
-type MoneyKind = false | "rub" | "usd" | "cny";
+type MoneyKind = false | "rub" | "usd" | "cny" | "rub_unit" | "cny_unit";
 function buildColumns(cargoInUsd: boolean): { header: string; width: number; wrap: boolean; money: MoneyKind }[] {
   return [
     { header: "Клиент", width: 18, wrap: true, money: false },
@@ -68,8 +75,8 @@ function buildColumns(cargoInUsd: boolean): { header: string; width: number; wra
     { header: "Цвет", width: 12, wrap: false, money: false },
     { header: "Размеры", width: 16, wrap: true, money: false },
     { header: "Количество", width: 11, wrap: false, money: false },
-    { header: "Цена, ₽", width: 12, wrap: false, money: "rub" },
-    { header: "Цена, ¥", width: 12, wrap: false, money: "cny" },
+    { header: "Цена, ₽", width: 12, wrap: false, money: "rub_unit" },
+    { header: "Цена, ¥", width: 12, wrap: false, money: "cny_unit" },
     { header: "Общая стоимость, ₽", width: 16, wrap: false, money: "rub" },
     { header: "Общая стоимость, ¥", width: 16, wrap: false, money: "cny" },
     { header: "Доставка по Китаю, ₽", width: 16, wrap: false, money: "rub" },
@@ -183,8 +190,8 @@ async function renderQuotesExcel(props: {
       row.color ?? "",
       row.dimensions ?? "",
       row.quantity,
-      Math.round(row.priceRubPerUnit),
-      Math.round(row.priceCnyPerUnit),
+      Number(row.priceRubPerUnit.toFixed(2)),
+      Number(row.priceCnyPerUnit.toFixed(2)),
       Math.round(row.totalPriceRub),
       Math.round(row.totalPriceCny),
       Math.round(row.chinaDeliveryRub),
@@ -221,7 +228,18 @@ async function renderQuotesExcel(props: {
       };
       cell.font = colNumber === TOTAL_COLUMN_INDEX ? { bold: true, size: FONT_SIZE } : { size: FONT_SIZE };
       const money = COLUMNS[colNumber - 1]?.money;
-      if (money) cell.numFmt = money === "usd" ? MONEY_FORMAT_USD : money === "cny" ? MONEY_FORMAT_CNY : MONEY_FORMAT_RUB;
+      if (money) {
+        cell.numFmt =
+          money === "usd"
+            ? MONEY_FORMAT_USD
+            : money === "cny"
+              ? MONEY_FORMAT_CNY
+              : money === "rub_unit"
+                ? MONEY_FORMAT_RUB_UNIT
+                : money === "cny_unit"
+                  ? MONEY_FORMAT_CNY_UNIT
+                  : MONEY_FORMAT_RUB;
+      }
       if (stripeFill) cell.fill = stripeFill;
     });
 
