@@ -2,24 +2,20 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canAccessManagerQuote, canViewCargoCost } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
-import { isQuoteStatus } from "@/lib/quote-statuses";
+import { isQuoteStatus, BUYOUT_REALIZED_STATUSES, CARGO_REALIZED_STATUSES } from "@/lib/quote-statuses";
 import { BUYOUT_REVERT_DATA, stripCargoCostForNonOwner } from "@/lib/desk-services/quote-request";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
 }
 
-// Buyout-fact confirmation only makes sense once the quote has actually
-// reached "в доставке на склад" or later — moving status back out of this
-// set (mistake, or genuinely reverted) wipes any confirmed fact per the
-// agreed policy ("вернуть как было до смены статуса"), rather than leaving
-// stale real-money numbers attached to a quote that's no longer there.
-const POST_BUYOUT_STATUSES = ["in_transit_to_warehouse", "delivered_to_warehouse", "sent_to_client", "handed_to_client"];
-
 // Cargo must be actualized (real weight/volume from the warehouse) before
 // reaching either of these — hard block, unlike buyout facts, since there's
-// no confirmation gate to route around it through.
-const CARGO_ACTUALIZATION_REQUIRED_STATUSES = ["sent_to_client", "handed_to_client"];
+// no confirmation gate to route around it through. Same status set as
+// CARGO_REALIZED_STATUSES (см. lib/quote-statuses.ts) — единый источник
+// правды, чтобы учёт прибыли и этот гейт никогда не разъехались молча.
+// См. PB-V5 chat 2026-08-13.
+const CARGO_ACTUALIZATION_REQUIRED_STATUSES = CARGO_REALIZED_STATUSES;
 
 // Separate from the full-edit PATCH on manager-quotes/[id] — the status
 // dropdown in the client list changes just this one field, it shouldn't
@@ -58,7 +54,12 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     );
   }
 
-  const revertingPastBuyout = existing.buyoutFactConfirmed && !POST_BUYOUT_STATUSES.includes(status);
+  // Buyout-fact confirmation only makes sense once the quote has actually
+  // reached "в доставке на склад" or later — moving status back out of this
+  // set (mistake, or genuinely reverted) wipes any confirmed fact per the
+  // agreed policy ("вернуть как было до смены статуса"), rather than leaving
+  // stale real-money numbers attached to a quote that's no longer there.
+  const revertingPastBuyout = existing.buyoutFactConfirmed && !BUYOUT_REALIZED_STATUSES.includes(status);
   const revertingPastCargoActualization = existing.cargoActualizedAt && !CARGO_ACTUALIZATION_REQUIRED_STATUSES.includes(status);
   const revertingPastHandedToClient = existing.cargoBonusRatePercent !== null && status !== "handed_to_client";
 

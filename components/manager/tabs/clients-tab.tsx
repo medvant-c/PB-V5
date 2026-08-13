@@ -64,6 +64,7 @@ import {
   QUOTE_STATUS_BADGE_CLASSES,
   QUOTE_STATUS_DOT_COLOR,
   STALE_IN_PROGRESS_MS,
+  BUYOUT_REALIZED_STATUSES,
   type QuoteStatus,
 } from "@/lib/quote-statuses";
 import {
@@ -177,11 +178,6 @@ interface QuoteRecord {
 // lib/quote-engine.ts. Kept in sync manually since this is a display-only
 // label, not a pricing decision.
 const LOW_DENSITY_VOLUME_THRESHOLD_KG_M3 = 100;
-
-// Mirrors POST_BUYOUT_STATUSES in app/api/manager-quotes/[id]/status/
-// route.ts — only past this point does "факт по выкупу" make sense to ask
-// for (the manager hasn't actually bought anything before then).
-const POST_BUYOUT_STATUSES = ["in_transit_to_warehouse", "delivered_to_warehouse", "sent_to_client", "handed_to_client"];
 
 // Mirrors CARGO_ACTUALIZATION_REQUIRED_STATUSES in the same status route —
 // only from here on does actualizing cargo (or re-correcting it) make sense.
@@ -1959,7 +1955,7 @@ function ClientQuotes({
                 )}
               </button>
 
-              {POST_BUYOUT_STATUSES.includes(quote.status) && (
+              {BUYOUT_REALIZED_STATUSES.includes(quote.status) && (
                 <button
                   type="button"
                   onClick={() => {
