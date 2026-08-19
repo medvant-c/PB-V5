@@ -127,6 +127,21 @@ function perUnitTurnkeyRub(row: QuoteListRow): number {
   return row.quantity > 0 ? row.totalRub / row.quantity : 0;
 }
 
+// deliveryPricingMode is the MANAGER'S chosen mode at creation, not
+// necessarily what actually priced the quote — "density" mode auto-
+// downgrades to volume-based pricing below this density (see
+// DEFAULT_LOW_DENSITY_VOLUME_THRESHOLD_KG_M3 in lib/quote-engine.ts, same
+// threshold clients-tab.tsx already uses for the same reason). Reading
+// deliveryPricingMode alone here mislabels the $ rate — a real volume-
+// tariff rate (e.g. $340/м³) showing as "/кг" — even though the NUMBER is
+// already correct (cargoRateUsd was resolved off the right tariff at
+// create time). See PB-V5 chat 2026-08-19.
+const LOW_DENSITY_VOLUME_THRESHOLD_KG_M3 = 100;
+function cargoRateUnit(row: QuoteListRow): "кг" | "м³" {
+  const basisIsDensity = row.deliveryPricingMode === "density" && row.densityKgM3 >= LOW_DENSITY_VOLUME_THRESHOLD_KG_M3;
+  return basisIsDensity ? "кг" : "м³";
+}
+
 interface QuotesListPdfProps {
   client: { name: string; company: string | null };
   rows: QuoteListRow[];
@@ -197,9 +212,7 @@ function QuotesListPdfDocument({ client, rows, showTariff, cargoInUsd }: QuotesL
               <Text style={[styles.cell, styles.cellText, styles.colDensity]}>{fmt(row.densityKgM3)}</Text>
               {showTariff && (
                 <Text style={[styles.cell, styles.cellText, styles.colTariff]}>
-                  {row.cargoRateUsd !== undefined
-                    ? `$${row.cargoRateUsd.toFixed(2)}/${row.deliveryPricingMode === "volume" ? "м³" : "кг"}`
-                    : "—"}
+                  {row.cargoRateUsd !== undefined ? `$${row.cargoRateUsd.toFixed(2)}/${cargoRateUnit(row)}` : "—"}
                 </Text>
               )}
               {cargoInUsd && (
