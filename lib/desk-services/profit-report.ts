@@ -18,6 +18,7 @@ import {
   type QuoteProfitFields,
 } from "@/lib/desk-services/quote-profit";
 import { fetchQuoteRealFinancials, emptyQuoteRealFinancials, type QuoteRealFinancials } from "@/lib/desk-services/quote-real-financials";
+import { sumAllocationsRealCny } from "@/lib/desk-services/buyout-invoice-calc";
 import { BUYOUT_REALIZED_STATUSES, CARGO_REALIZED_STATUSES } from "@/lib/quote-statuses";
 
 // Shared by both app/api/manager-profit-report/route.ts (on-screen JSON) and
@@ -43,6 +44,7 @@ const PROFIT_SELECT = {
   chinaDeliveryCny: true,
   chinaDeliveryRub: true,
   cargoDeliveryRub: true,
+  cargoDeliveryUsd: true,
   cargoCostRub: true,
   cargoCostUsd: true,
   cargoRateUsd: true,
@@ -83,7 +85,13 @@ const PROFIT_SELECT = {
   // buyoutFactConfirmed. See PB-V5 chat 2026-08-04. amountRub — нужен ещё
   // computeRealBuyoutProfit/sumAlreadyPaidProfitRub (реальные деньги вместо
   // ручного подтверждения, см. PB-V5 chat 2026-08-11).
-  paymentAllocations: { select: { category: true, premiumRub: true, amountRub: true } },
+  // cashOrder.cnyToCurrencyRate — курс, реально использованный в момент
+  // ЭТОГО платежа (заморожен на ордере), нужен sumAllocationsRealCny ниже
+  // для точного ¥-прихода блока "Выкуп" без пересчёта по сегодняшнему
+  // курсу Тарифов. См. PB-V5 chat 2026-08-17.
+  paymentAllocations: {
+    select: { category: true, premiumRub: true, amountRub: true, cashOrder: { select: { cnyToCurrencyRate: true } } },
+  },
 } as const;
 
 type ProfitQuote = NonNullable<Awaited<ReturnType<typeof fetchProfitQuotes>>>[number];
@@ -140,6 +148,14 @@ function computeQuoteBreakdown(
   const buyoutBought = BUYOUT_REALIZED_STATUSES.includes(q.status);
   let buyoutIncomeRub: number;
   let buyoutExpenseRub: number;
+  // ¥-версия того же блока — для отображения (пользователь просил отчёт
+  // о прибыли "в юанях по выкупу"), премия/доли по-прежнему считаются в ₽
+  // выше, эти поля только для UI. Каждая ветка берёт САМЫЙ точный доступный
+  // ¥-источник вместо деления ₽-суммы на сегодняшний курс Тарифов (ровно та
+  // ошибка, из-за которой факт 2114¥ в Кассе показывался как 2106¥ в
+  // отчёте — см. PB-V5 chat 2026-08-17).
+  let buyoutIncomeCny: number;
+  let buyoutExpenseCny: number;
   let managerServicesPremiumRub: number;
   if (q.buyoutFactConfirmed) {
     const sourceProfits = factualSourceProfits(fields);
@@ -148,6 +164,13 @@ function computeQuoteBreakdown(
     buyoutExpenseRub = Number(q.actualBuyoutCny) * Number(q.actualBuyoutRateUsed);
     buyoutIncomeRub = profitRub + buyoutExpenseRub;
     managerServicesPremiumRub = factualManagerPremiumRub(sourceProfits, Boolean(q.buyoutSelfSourcedBoost), premiumRates, alreadyPaidPremium);
+    // actualBuyoutCny — уже точная ¥-сумма (введена вручную при
+    // подтверждении факта), не нужно ничего переводить. Прибыль в ¥ —
+    // тем же курсом, что и расход (actualBuyoutRateUsed — реальный курс
+    // ЭТОЙ покупки, точнее, чем курс просчёта cnyRateUsed).
+    buyoutExpenseCny = Number(q.actualBuyoutCny);
+    const realRate = Number(q.actualBuyoutRateUsed) || Number(q.cnyRateUsed) || 1;
+    buyoutIncomeCny = buyoutExpenseCny + profitRub / realRate;
   } else if (buyoutBought) {
     buyoutIncomeRub = q.paymentAllocations.reduce((sum, a) => sum + Number(a.amountRub), 0);
     buyoutExpenseRub = financials.buyoutExpenseRub;
@@ -156,6 +179,11 @@ function computeQuoteBreakdown(
     // бы уменьшиться при переходе план→факт (см. PB-V5 chat 2026-08-12).
     managerServicesPremiumRub =
       alreadyPaidPremium.proscetRub + Math.max(alreadyPaidPremium.buyoutRub, Math.max(0, real.profitRub) * (buyoutRate / 100));
+    // Реальные деньги — приход суммирует allocation'ы СВОИМ курсом каждого
+    // (cashOrder.cnyToCurrencyRate), расход уже точная ¥-сумма
+    // (CashOrder.amountCny), никакого курса вообще не требуется.
+    buyoutIncomeCny = sumAllocationsRealCny(q.paymentAllocations);
+    buyoutExpenseCny = financials.buyoutExpenseCny;
   } else {
     const estimated = estimatedSourceProfits(fields);
     const fx = estimatedFxProfitRub(q, attachedServicesTotalRub, cnyProfitTiers);
@@ -169,8 +197,15 @@ function computeQuoteBreakdown(
       alreadyPaidPremium.buyoutRub +
       Math.max(0, fullProscetPotentialRub - alreadyPaidPremium.proscetRub) +
       Math.max(0, fullBuyoutPotentialRub - alreadyPaidPremium.buyoutRub);
+    // Ещё не куплено — только план/оценка. Переводим уже посчитанные ₽-суммы
+    // курсом ПРОСЧЁТА (cnyRateUsed, заморожен на сделке), а не сегодняшним
+    // курсом Тарифов — та же логика, просто для оценки, а не факта.
+    const planRate = Number(q.cnyRateUsed) || 1;
+    buyoutIncomeCny = buyoutIncomeRub / planRate;
+    buyoutExpenseCny = buyoutExpenseRub / planRate;
   }
   const buyoutProfitRub = buyoutIncomeRub - buyoutExpenseRub;
+  const buyoutProfitCny = buyoutIncomeCny - buyoutExpenseCny;
 
   // --- Блок "Карго" ---
   // cargoBonusRatePercent уже зафиксирован (сделка дошла до "выдано
@@ -182,14 +217,26 @@ function computeQuoteBreakdown(
   const cargoSent = CARGO_REALIZED_STATUSES.includes(q.status);
   let cargoIncomeRub: number;
   let cargoExpenseRub: number;
+  // $-версия для UI (карго компания ведёт внутри в $, пользователь просил
+  // отчёт "в долларах по карго") — cargoDeliveryUsd/cargoCostUsd уже точные
+  // $-суммы, замороженные на просчёте, ничего переводить не нужно; для
+  // факта — financials.cargo*Usd уже переведены по курсу НА ДАТУ каждого
+  // реального ордера (см. quote-real-financials.ts), не сегодняшним.
+  let cargoIncomeUsd: number;
+  let cargoExpenseUsd: number;
   if (cargoLocked || !cargoSent) {
     cargoIncomeRub = Number(q.cargoDeliveryRub);
     cargoExpenseRub = Number(q.cargoCostRub);
+    cargoIncomeUsd = Number(q.cargoDeliveryUsd);
+    cargoExpenseUsd = Number(q.cargoCostUsd);
   } else {
     cargoIncomeRub = financials.cargoIncomeRub;
     cargoExpenseRub = financials.cargoExpenseRub;
+    cargoIncomeUsd = financials.cargoIncomeUsd;
+    cargoExpenseUsd = financials.cargoExpenseUsd;
   }
   const cargoProfitRubValue = cargoIncomeRub - cargoExpenseRub;
+  const cargoProfitUsdValue = cargoIncomeUsd - cargoExpenseUsd;
   // Доля МЕНЕДЖЕРА (managerCargoBonusRub) по-прежнему решается только
   // cargoBonusRatePercent ("выдано клиенту") — отдельный вопрос, не
   // трогаем; распределение долей инвесторов (cargoRealized) — статусом
@@ -228,8 +275,24 @@ function computeQuoteBreakdown(
     manager: q.manager,
     client: q.client,
     totalRub: Number(q.totalRub),
-    buyout: { incomeRub: buyoutIncomeRub, expenseRub: buyoutExpenseRub, profitRub: buyoutProfitRub, realized: q.buyoutFactConfirmed || buyoutBought },
-    cargo: { incomeRub: cargoIncomeRub, expenseRub: cargoExpenseRub, profitRub: cargoProfitRubValue, realized: cargoRealized },
+    buyout: {
+      incomeRub: buyoutIncomeRub,
+      expenseRub: buyoutExpenseRub,
+      profitRub: buyoutProfitRub,
+      incomeCny: buyoutIncomeCny,
+      expenseCny: buyoutExpenseCny,
+      profitCny: buyoutProfitCny,
+      realized: q.buyoutFactConfirmed || buyoutBought,
+    },
+    cargo: {
+      incomeRub: cargoIncomeRub,
+      expenseRub: cargoExpenseRub,
+      profitRub: cargoProfitRubValue,
+      incomeUsd: cargoIncomeUsd,
+      expenseUsd: cargoExpenseUsd,
+      profitUsd: cargoProfitUsdValue,
+      realized: cargoRealized,
+    },
     totalProfitRub: buyoutProfitRub + cargoProfitRubValue,
     investorShares,
     managerPremiumRub,
@@ -337,6 +400,14 @@ async function buildProfitReport(quoteIds: string[]) {
   const totalCargoIncomeRub = rows.reduce((sum, r) => sum + r.cargo.incomeRub, 0);
   const totalCargoExpenseRub = rows.reduce((sum, r) => sum + r.cargo.expenseRub, 0);
   const totalCargoProfitRub = rows.reduce((sum, r) => sum + r.cargo.profitRub, 0);
+  // ¥/$-итоги для UI (Выкуп — в юанях, Карго — в долларах, см. комментарии
+  // у buyoutIncomeCny/cargoIncomeUsd в computeQuoteBreakdown выше).
+  const totalBuyoutIncomeCny = rows.reduce((sum, r) => sum + r.buyout.incomeCny, 0);
+  const totalBuyoutExpenseCny = rows.reduce((sum, r) => sum + r.buyout.expenseCny, 0);
+  const totalBuyoutProfitCny = rows.reduce((sum, r) => sum + r.buyout.profitCny, 0);
+  const totalCargoIncomeUsd = rows.reduce((sum, r) => sum + r.cargo.incomeUsd, 0);
+  const totalCargoExpenseUsd = rows.reduce((sum, r) => sum + r.cargo.expenseUsd, 0);
+  const totalCargoProfitUsd = rows.reduce((sum, r) => sum + r.cargo.profitUsd, 0);
 
   // investorShares was only needed above to sum into the totals-level
   // investorShares array — the per-quote table doesn't display it (same as
@@ -359,6 +430,12 @@ async function buildProfitReport(quoteIds: string[]) {
       totalCargoIncomeRub,
       totalCargoExpenseRub,
       totalCargoProfitRub,
+      totalBuyoutIncomeCny,
+      totalBuyoutExpenseCny,
+      totalBuyoutProfitCny,
+      totalCargoIncomeUsd,
+      totalCargoExpenseUsd,
+      totalCargoProfitUsd,
       profitPoolRub,
       managerPremiumRub,
       investorShares,

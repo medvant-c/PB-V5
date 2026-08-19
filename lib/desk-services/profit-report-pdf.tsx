@@ -72,8 +72,8 @@ interface ProfitReportPdfRow {
   productName: string;
   totalRub: number;
   totalProfitRub: number;
-  buyout: { incomeRub: number; expenseRub: number; profitRub: number; realized: boolean };
-  cargo: { incomeRub: number; expenseRub: number; profitRub: number; realized: boolean };
+  buyout: { incomeCny: number; expenseCny: number; profitCny: number; realized: boolean };
+  cargo: { incomeUsd: number; expenseUsd: number; profitUsd: number; realized: boolean };
   client: { name: string; company: string | null };
   manager: { name: string };
 }
@@ -81,12 +81,12 @@ interface ProfitReportPdfRow {
 interface ProfitReportPdfTotals {
   totalRevenueRub: number;
   totalProfitRub: number;
-  totalBuyoutIncomeRub: number;
-  totalBuyoutExpenseRub: number;
-  totalBuyoutProfitRub: number;
-  totalCargoIncomeRub: number;
-  totalCargoExpenseRub: number;
-  totalCargoProfitRub: number;
+  totalBuyoutIncomeCny: number;
+  totalBuyoutExpenseCny: number;
+  totalBuyoutProfitCny: number;
+  totalCargoIncomeUsd: number;
+  totalCargoExpenseUsd: number;
+  totalCargoProfitUsd: number;
   profitPoolRub: number;
   managerPremiumRub: number;
   investorShares: { id: string; name: string; shareType: string; shareRub: number }[];
@@ -160,15 +160,15 @@ function ProfitReportPdfDocument({ rows, totals }: ProfitReportPdfProps) {
             <Text style={styles.splitTitle}>Выкуп</Text>
             <View style={styles.splitRow}>
               <Text style={styles.splitLabel}>Поступило</Text>
-              <Text style={styles.splitValue}>{fmt(totals.totalBuyoutIncomeRub)} ₽</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalBuyoutIncomeCny)} ¥</Text>
             </View>
             <View style={styles.splitRow}>
               <Text style={styles.splitLabel}>Потратили</Text>
-              <Text style={styles.splitValue}>{fmt(totals.totalBuyoutExpenseRub)} ₽</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalBuyoutExpenseCny)} ¥</Text>
             </View>
             <View style={styles.splitRow}>
               <Text style={styles.splitLabel}>Прибыль</Text>
-              <Text style={styles.splitValue}>{fmt(totals.totalBuyoutProfitRub)} ₽</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalBuyoutProfitCny)} ¥</Text>
             </View>
           </View>
 
@@ -176,15 +176,15 @@ function ProfitReportPdfDocument({ rows, totals }: ProfitReportPdfProps) {
             <Text style={styles.splitTitle}>Карго</Text>
             <View style={styles.splitRow}>
               <Text style={styles.splitLabel}>Поступило</Text>
-              <Text style={styles.splitValue}>{fmt(totals.totalCargoIncomeRub)} ₽</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalCargoIncomeUsd)} $</Text>
             </View>
             <View style={styles.splitRow}>
               <Text style={styles.splitLabel}>Потратили</Text>
-              <Text style={styles.splitValue}>{fmt(totals.totalCargoExpenseRub)} ₽</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalCargoExpenseUsd)} $</Text>
             </View>
             <View style={styles.splitRow}>
               <Text style={styles.splitLabel}>Прибыль</Text>
-              <Text style={styles.splitValue}>{fmt(totals.totalCargoProfitRub)} ₽</Text>
+              <Text style={styles.splitValue}>{fmt(totals.totalCargoProfitUsd)} $</Text>
             </View>
           </View>
 

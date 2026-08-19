@@ -6,7 +6,7 @@ import {
   CARGO_EXPENSE_CATEGORY_NAME,
   CARGO_INCOME_CATEGORY_NAME,
 } from "@/lib/desk-services/cash-categories";
-import { loadCnyRateHistory, cnyRateRubAsOf } from "@/lib/desk-services/historical-cny-rate";
+import { loadCnyRateHistory, cnyRateRubAsOf, usdRateRubAsOf } from "@/lib/desk-services/historical-cny-rate";
 
 // Реальные деньги в Кассе по блокам "Выкуп"/"Карго" для НЕ подтверждённых
 // по старой схеме сделок (buyoutFactConfirmed: false) — приход для блока
@@ -19,14 +19,27 @@ import { loadCnyRateHistory, cnyRateRubAsOf } from "@/lib/desk-services/historic
 // cash-categories.ts), просмотр отчёта не должен иметь побочных эффектов.
 // Один батч-запрос на весь набор просчётов, не один на просчёт. См. PB-V5
 // chat 2026-08-11.
+//
+// *Cny/*Usd поля (в отличие от *Rub) НЕ пересчитываются по сегодняшнему
+// курсу — CashOrder.amountCny уже точная реальная сумма, замороженная в
+// момент создания ордера (по курсу, который тогда реально использовали),
+// её достаточно просто просуммировать. $-поля для Карго считаются из этой
+// же точной ¥-суммы через исторический курс ¥→₽→$ НА ДАТУ ордера — не
+// сегодняшний, чтобы карго-цифры не "плыли" при каждом обновлении Тарифов.
+// См. PB-V5 chat 2026-08-17 (нашли реальный кейс: касса получила 2114¥
+// ордером по курсу 13.6, а отчёт показывал 2106¥, пересчитав по
+// обновившемуся за тот же день курсу 13.65).
 interface QuoteRealFinancials {
   buyoutExpenseRub: number;
+  buyoutExpenseCny: number;
   cargoIncomeRub: number;
   cargoExpenseRub: number;
+  cargoIncomeUsd: number;
+  cargoExpenseUsd: number;
 }
 
 function emptyQuoteRealFinancials(): QuoteRealFinancials {
-  return { buyoutExpenseRub: 0, cargoIncomeRub: 0, cargoExpenseRub: 0 };
+  return { buyoutExpenseRub: 0, buyoutExpenseCny: 0, cargoIncomeRub: 0, cargoExpenseRub: 0, cargoIncomeUsd: 0, cargoExpenseUsd: 0 };
 }
 
 async function fetchQuoteRealFinancials(quoteIds: string[]): Promise<Map<string, QuoteRealFinancials>> {
@@ -67,11 +80,31 @@ async function fetchQuoteRealFinancials(quoteIds: string[]): Promise<Map<string,
             const rate = cnyRateRubAsOf(tariffHistory, order.date);
             return rate === null ? 0 : Number(order.amountCny) * rate;
           })();
+    // amountCny уже точная реальная ¥-сумма (заморожена на ордере при
+    // создании) — никакого пересчёта не требуется вообще.
+    const cny = Number(order.amountCny);
+    // $ — либо сумма уже в $ (currency=usd, ничего переводить не нужно),
+    // либо ¥ → ₽ → $ по курсам НА ДАТУ ордера.
+    const usd =
+      order.currency === "usd"
+        ? Number(order.amount)
+        : (() => {
+            const cnyRate = cnyRateRubAsOf(tariffHistory, order.date);
+            const usdRate = usdRateRubAsOf(tariffHistory, order.date);
+            return cnyRate === null || usdRate === null || usdRate === 0 ? 0 : (cny * cnyRate) / usdRate;
+          })();
 
     const entry = result.get(order.quoteId) ?? emptyQuoteRealFinancials();
-    if (buyoutExpenseCategoryIds.has(order.categoryId)) entry.buyoutExpenseRub += rub;
-    else if (order.categoryId === cargoExpenseCategoryId) entry.cargoExpenseRub += rub;
-    else if (order.categoryId === cargoIncomeCategoryId) entry.cargoIncomeRub += rub;
+    if (buyoutExpenseCategoryIds.has(order.categoryId)) {
+      entry.buyoutExpenseRub += rub;
+      entry.buyoutExpenseCny += cny;
+    } else if (order.categoryId === cargoExpenseCategoryId) {
+      entry.cargoExpenseRub += rub;
+      entry.cargoExpenseUsd += usd;
+    } else if (order.categoryId === cargoIncomeCategoryId) {
+      entry.cargoIncomeRub += rub;
+      entry.cargoIncomeUsd += usd;
+    }
     result.set(order.quoteId, entry);
   }
 

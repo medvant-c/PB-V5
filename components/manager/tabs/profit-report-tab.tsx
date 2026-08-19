@@ -34,10 +34,23 @@ interface ClientOption {
   company: string | null;
 }
 
-interface ProfitBlock {
-  incomeRub: number;
-  expenseRub: number;
-  profitRub: number;
+// Выкуп ведём в ¥ (как реально закупают в Китае), Карго — в $ (как эта
+// компания внутри ведёт карго, см. lib/desk-services/quote-real-financials.ts).
+// Оба блока уже приходят с сервера в своей валюте, без пересчёта по курсу —
+// пользователь явно попросил (2026-08-17) отвязать этот отчёт от
+// сегодняшнего курса Тарифов, который "плыл" относительно реальных денег в
+// Кассе.
+interface BuyoutBlock {
+  incomeCny: number;
+  expenseCny: number;
+  profitCny: number;
+  realized: boolean;
+}
+
+interface CargoBlock {
+  incomeUsd: number;
+  expenseUsd: number;
+  profitUsd: number;
   realized: boolean;
 }
 
@@ -49,8 +62,8 @@ interface ReportRow {
   createdAt: string;
   totalRub: number;
   totalProfitRub: number;
-  buyout: ProfitBlock;
-  cargo: ProfitBlock;
+  buyout: BuyoutBlock;
+  cargo: CargoBlock;
   managerPremiumRub: number;
   manager: { id: string; name: string };
   client: { id: string; name: string; company: string | null };
@@ -59,12 +72,12 @@ interface ReportRow {
 interface ReportTotals {
   totalRevenueRub: number;
   totalProfitRub: number;
-  totalBuyoutIncomeRub: number;
-  totalBuyoutExpenseRub: number;
-  totalBuyoutProfitRub: number;
-  totalCargoIncomeRub: number;
-  totalCargoExpenseRub: number;
-  totalCargoProfitRub: number;
+  totalBuyoutIncomeCny: number;
+  totalBuyoutExpenseCny: number;
+  totalBuyoutProfitCny: number;
+  totalCargoIncomeUsd: number;
+  totalCargoExpenseUsd: number;
+  totalCargoProfitUsd: number;
   profitPoolRub: number;
   managerPremiumRub: number;
   investorShares: { id: string; name: string; shareType: string; shareRub: number }[];
@@ -74,8 +87,19 @@ function fmt(value: number): string {
   return Number.isFinite(value) ? Math.round(value).toLocaleString("ru-RU") : "—";
 }
 
+function fmtCny(value: number): string {
+  return `${fmt(value)} ¥`;
+}
+
+function fmtUsd(value: number): string {
+  return Number.isFinite(value) ? `${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $` : "— $";
+}
+
 // Every money figure here shows ¥ first, ₽ alongside — same convention as
-// manager-dashboard.tsx ("¥ is what the business actually thinks in").
+// manager-dashboard.tsx ("¥ is what the business actually thinks in"). Всё
+// ещё используется для сумм, которые по смыслу общие для Выкупа и Карго
+// разом (оборот/прибыль компании/премии/доли) — там смешивать валюты блоков
+// нельзя, только ₽.
 function fmtBoth(rub: number, cnyRateRub: number): string {
   const cny = cnyRateRub > 0 ? rub / cnyRateRub : 0;
   return `${fmt(cny)} ¥ (${fmt(rub)} ₽)`;
@@ -397,12 +421,12 @@ function ManagerProfitReportTab() {
                         {row.client.company ? ` · ${row.client.company}` : ""} · {row.manager.name}
                       </div>
                     </td>
-                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.buyout.incomeRub)} ₽</td>
-                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.buyout.expenseRub)} ₽</td>
-                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.buyout.profitRub)} ₽</td>
-                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.cargo.incomeRub)} ₽</td>
-                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.cargo.expenseRub)} ₽</td>
-                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmt(row.cargo.profitRub)} ₽</td>
+                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmtCny(row.buyout.incomeCny)}</td>
+                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmtCny(row.buyout.expenseCny)}</td>
+                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmtCny(row.buyout.profitCny)}</td>
+                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmtUsd(row.cargo.incomeUsd)}</td>
+                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmtUsd(row.cargo.expenseUsd)}</td>
+                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmtUsd(row.cargo.profitUsd)}</td>
                     <td className={cn("px-3 py-1.5 text-right font-bold", row.totalProfitRub >= 0 ? "text-success" : "text-error")}>
                       {fmt(row.totalProfitRub)} ₽
                     </td>
@@ -443,15 +467,15 @@ function ManagerProfitReportTab() {
                 <div className="mt-2 space-y-1.5 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-text-secondary">Поступило</span>
-                    <span className="font-medium text-text">{fmtBoth(report.totals.totalBuyoutIncomeRub, cnyRateRub)}</span>
+                    <span className="font-medium text-text">{fmtCny(report.totals.totalBuyoutIncomeCny)}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-text-secondary">Потратили</span>
-                    <span className="font-medium text-text">{fmtBoth(report.totals.totalBuyoutExpenseRub, cnyRateRub)}</span>
+                    <span className="font-medium text-text">{fmtCny(report.totals.totalBuyoutExpenseCny)}</span>
                   </div>
                   <div className="flex items-center justify-between border-t border-border pt-1.5 font-bold text-text">
                     <span>Прибыль</span>
-                    <span>{fmtBoth(report.totals.totalBuyoutProfitRub, cnyRateRub)}</span>
+                    <span>{fmtCny(report.totals.totalBuyoutProfitCny)}</span>
                   </div>
                 </div>
               </div>
@@ -460,15 +484,15 @@ function ManagerProfitReportTab() {
                 <div className="mt-2 space-y-1.5 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-text-secondary">Поступило</span>
-                    <span className="font-medium text-text">{fmtBoth(report.totals.totalCargoIncomeRub, cnyRateRub)}</span>
+                    <span className="font-medium text-text">{fmtUsd(report.totals.totalCargoIncomeUsd)}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-text-secondary">Потратили</span>
-                    <span className="font-medium text-text">{fmtBoth(report.totals.totalCargoExpenseRub, cnyRateRub)}</span>
+                    <span className="font-medium text-text">{fmtUsd(report.totals.totalCargoExpenseUsd)}</span>
                   </div>
                   <div className="flex items-center justify-between border-t border-border pt-1.5 font-bold text-text">
                     <span>Прибыль</span>
-                    <span>{fmtBoth(report.totals.totalCargoProfitRub, cnyRateRub)}</span>
+                    <span>{fmtUsd(report.totals.totalCargoProfitUsd)}</span>
                   </div>
                 </div>
               </div>

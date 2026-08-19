@@ -12,15 +12,21 @@ import { prisma } from "@/lib/prisma";
 // quote-real-financials.ts. См. PB-V5 chat 2026-08-11.
 interface CnyRateHistoryEntry {
   cnyRateRub: number;
+  // Тот же append-only снапшот несёт и курс доллара (одна строка
+  // TariffSettings = один момент, когда руководитель обновил оба курса
+  // разом) — нужен для перевода реальных денег по карго в $ (карго эта
+  // компания ведёт внутри в $, см. lib/desk-services/quote-real-financials.ts,
+  // profit-report.ts). См. PB-V5 chat 2026-08-17.
+  usdRateRub: number;
   createdAt: Date;
 }
 
 async function loadCnyRateHistory(): Promise<CnyRateHistoryEntry[]> {
   const rows = await prisma.tariffSettings.findMany({
     orderBy: { createdAt: "asc" },
-    select: { cnyRateRub: true, createdAt: true },
+    select: { cnyRateRub: true, usdRateRub: true, createdAt: true },
   });
-  return rows.map((r) => ({ cnyRateRub: Number(r.cnyRateRub), createdAt: r.createdAt }));
+  return rows.map((r) => ({ cnyRateRub: Number(r.cnyRateRub), usdRateRub: Number(r.usdRateRub), createdAt: r.createdAt }));
 }
 
 // Курс, действовавший НА дату date (последний заведённый курс с
@@ -37,5 +43,16 @@ function cnyRateRubAsOf(history: CnyRateHistoryEntry[], date: Date): number | nu
   return rate ?? (history.length > 0 ? history[0].cnyRateRub : null);
 }
 
-export { loadCnyRateHistory, cnyRateRubAsOf };
+// Тот же принцип, что и cnyRateRubAsOf — курс $→₽, действовавший НА дату
+// date, а не сегодняшний.
+function usdRateRubAsOf(history: CnyRateHistoryEntry[], date: Date): number | null {
+  let rate: number | null = null;
+  for (const entry of history) {
+    if (entry.createdAt > date) break;
+    rate = entry.usdRateRub;
+  }
+  return rate ?? (history.length > 0 ? history[0].usdRateRub : null);
+}
+
+export { loadCnyRateHistory, cnyRateRubAsOf, usdRateRubAsOf };
 export type { CnyRateHistoryEntry };

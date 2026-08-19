@@ -82,6 +82,22 @@ function sumAlreadyPaidRubByCategory(allocations: { category: string; amountRub:
   return result;
 }
 
+// Реальный ¥-приход по просчёту — БЕЗ единой конвертации ₽→¥ по
+// сегодняшнему курсу (та самая причина, почему "Отчёт о прибыли" мог
+// показывать другую ¥-сумму, чем реально пришло в Кассу — курс в Тарифах
+// успевал измениться между моментом платежа и моментом просмотра отчёта).
+// Каждая QuotePaymentAllocation.amountRub делится на курс ИМЕННО ТОГО
+// CashOrder, которым эта оплата была реально проведена (cnyToCurrencyRate
+// заморожен на ордере в момент его создания) — так что сумма всегда
+// совпадает с тем, что реально ушло в кассу, независимо от того, что
+// показывают сегодняшние Тарифы. См. PB-V5 chat 2026-08-17.
+function sumAllocationsRealCny(allocations: { amountRub: unknown; cashOrder: { cnyToCurrencyRate: unknown } }[]): number {
+  return allocations.reduce((sum, a) => {
+    const rate = Number(a.cashOrder.cnyToCurrencyRate);
+    return rate > 0 ? sum + Number(a.amountRub) / rate : sum;
+  }, 0);
+}
+
 interface BuyoutInvoiceAmounts {
   lineItems: BuyoutInvoiceLineItem[];
   totalAmount: number;
@@ -318,6 +334,7 @@ export {
   buildBuyoutInvoiceAmounts,
   buildBuyoutInvoiceRowAmounts,
   sumAlreadyPaidRubByCategory,
+  sumAllocationsRealCny,
   isQuotePaymentCategory,
   rawQuotePaymentCategoryAmountRub,
   alreadyPaidRubForCategory,
