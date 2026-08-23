@@ -2740,6 +2740,23 @@ function ManagerClientsTab() {
     }
   }
 
+  async function handleRevertSelfSourced(clientId: string) {
+    if (!window.confirm("Снять статус «Личный клиент» с этого клиента? Премия по уже подтверждённым просчётам не пересчитается — изменится только начисление по будущим.")) return;
+    setSelfSourcedBusyId(clientId);
+    setSelfSourcedError(null);
+    try {
+      const res = await fetch(`/api/manager-clients/${clientId}/revert-self-sourced`, { method: "PATCH" });
+      if (res.ok) {
+        await loadClients();
+      } else {
+        const data = await res.json();
+        setSelfSourcedError(data.error ?? "Не удалось снять статус.");
+      }
+    } finally {
+      setSelfSourcedBusyId(null);
+    }
+  }
+
   const [showNewForm, setShowNewForm] = useState(false);
   const [name, setName] = useState("");
   const [company, setCompany] = useState("");
@@ -3238,7 +3255,20 @@ function ManagerClientsTab() {
                 </label>
               )}
               {selectedClient.selfSourcedConfirmed ? (
-                <p className="text-xs font-medium text-success">✓ Личный клиент менеджера — повышенная премия с даты подтверждения</p>
+                <p className="flex flex-wrap items-center gap-2 text-xs font-medium text-success">
+                  ✓ Личный клиент менеджера — повышенная премия с даты подтверждения
+                  {canConfirmBuyout && (
+                    <button
+                      type="button"
+                      onClick={() => handleRevertSelfSourced(selectedClient.id)}
+                      disabled={selfSourcedBusyId === selectedClient.id}
+                      className="rounded-lg border border-border bg-bg px-2 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-error/30 hover:text-error disabled:opacity-50"
+                    >
+                      {selfSourcedBusyId === selectedClient.id && <Loader2 className="mr-1 inline h-3 w-3 animate-spin" />}
+                      Снять статус
+                    </button>
+                  )}
+                </p>
               ) : selectedClient.selfSourcedClaimed ? (
                 <p className="flex flex-wrap items-center gap-2 text-xs text-warning">
                   Заявлен как личный, ждёт подтверждения
