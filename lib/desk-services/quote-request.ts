@@ -127,12 +127,14 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
   const clientId = requiredString(formData.get("clientId"));
   const quoteType = requiredString(formData.get("quoteType"));
   const productDescription = requiredString(formData.get("productDescription"));
-  // Description is the only truly required field now — a draft quote
-  // ("менеджер получил только описание от клиента, без названия и цифр от
-  // поставщика") must be saveable with nothing else filled in. productName
-  // falls back to a truncated productDescription instead of blocking
-  // creation. See PB-V5 chat 2026-07-29.
-  const productName = requiredString(formData.get("productName")) ?? productDescription?.slice(0, 60) ?? null;
+  // Description used to be the one truly required field (a draft quote —
+  // "менеджер получил только описание от клиента, без названия и цифр от
+  // поставщика" — had to be saveable with nothing else filled in), with
+  // productName falling back to a truncated productDescription. Now neither
+  // is required (see PB-V5 chat 2026-08-23) — a manager may not have either
+  // yet at draft time — so the fallback chain ends in a generic placeholder
+  // instead of blocking creation.
+  const productName = requiredString(formData.get("productName")) ?? productDescription?.slice(0, 60) ?? "Без названия";
   const quantity = requiredNumber(formData.get("quantity"));
   const priceCnyPerUnit = requiredNumber(formData.get("priceCnyPerUnit"));
   const weightPerUnitKg = requiredNumber(formData.get("weightPerUnitKg"));
@@ -153,11 +155,9 @@ function parseQuoteFormData(formData: FormData): { fields: ParsedQuoteFields } |
   if (quoteType !== "standard" && quoteType !== "expert" && quoteType !== "pro") {
     return { error: "Выберите тип просчёта." };
   }
-  if (!productDescription) return { error: "Укажите описание товара." };
-  // Unreachable in practice (productName always derives from
-  // productDescription above once that check passes) — kept only so
-  // TypeScript narrows productName to `string` below.
-  if (!productName) return { error: "Укажите описание товара." };
+  // Unreachable — the fallback chain above always ends in "Без названия" —
+  // kept only so TypeScript narrows productName to `string` below.
+  if (!productName) return { error: "Укажите название или описание товара." };
   if (quantity === null || quantity <= 0) return { error: "Укажите количество." };
   if (isCargoOnly ? priceCnyPerUnit !== null && priceCnyPerUnit < 0 : priceCnyPerUnit === null || priceCnyPerUnit < 0) {
     return { error: "Укажите цену за единицу в юанях." };

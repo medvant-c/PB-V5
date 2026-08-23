@@ -349,6 +349,10 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   // so nothing already selected is hidden from view. See PB-V5 chat
   // 2026-07-30.
   const [servicesOpen, setServicesOpen] = useState(false);
+  // Свёрнуто по умолчанию — блок редко нужен (переопределяет тарифы только
+  // для отдельных нетиповых сделок), а занимал много места на экране на
+  // каждой карточке просчёта. См. PB-V5 chat 2026-08-23.
+  const [manualTariffsOpen, setManualTariffsOpen] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -780,7 +784,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   }, [catalog]);
 
   async function handleSubmit(shouldExport: boolean) {
-    if (submitting || !productDescription.trim()) return;
+    if (submitting) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -1161,8 +1165,8 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                 </div>
               </div>
               <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="product-description">Описание товара *</Label>
-                <Textarea id="product-description" value={productDescription} onChange={(e) => setProductDescription(e.target.value)} required />
+                <Label htmlFor="product-description">Описание товара</Label>
+                <Textarea id="product-description" value={productDescription} onChange={(e) => setProductDescription(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="product-color">Цвет</Label>
@@ -1340,6 +1344,34 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               </div>
             </div>
 
+            {preview && (
+              <div className="rounded-xl border border-border bg-bg p-3">
+                <div className="text-xs font-semibold text-text-secondary">Итого по грузу</div>
+                <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div>
+                    <div className="text-xs text-text-secondary">Общий вес</div>
+                    <div className="text-lg font-bold text-text">{preview.totalWeightKg.toFixed(1)} кг</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-text-secondary">Общий объём</div>
+                    <div className="text-lg font-bold text-text">{preview.totalVolumeM3.toFixed(3)} м³</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-text-secondary">Плотность груза</div>
+                    <div className={cn("text-lg font-bold", preview.densityKgM3 < 100 ? "text-warning" : "text-text")}>
+                      {fmt(preview.densityKgM3)} кг/м³
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-text-secondary">Ставка</div>
+                    <div className="text-lg font-bold text-primary">
+                      ${preview.cargoRateUsd.toFixed(2)}/{preview.cargoPricingBasis === "density" ? "кг" : "м³"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {!isCargoOnly && (
             <div className="rounded-lg border border-border">
               <button
@@ -1465,11 +1497,21 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               </div>
             )}
 
-            <div className="space-y-3 rounded-xl border border-border bg-bg p-3">
-              <div className="text-xs font-semibold text-text-secondary">
-                Ручная настройка тарифов (переопределяет значения из тарифов для этого просчёта)
-              </div>
-
+            <div className="rounded-xl border border-border bg-bg">
+              <button
+                type="button"
+                onClick={() => setManualTariffsOpen((v) => !v)}
+                className="flex w-full items-center justify-between gap-2 p-3 text-left"
+              >
+                <span className="text-xs font-semibold text-text-secondary">
+                  Ручная настройка тарифов (переопределяет значения из тарифов для этого просчёта)
+                </span>
+                <ChevronDown
+                  className={cn("h-4 w-4 shrink-0 text-text-secondary transition-transform", manualTariffsOpen && "rotate-180")}
+                />
+              </button>
+              {manualTariffsOpen && (
+              <div className="space-y-3 p-3 pt-0">
               <div className="space-y-1.5">
                 <Label>Ручной курс юаня, ₽ (необязательно — иначе берётся из тарифов)</Label>
                 <Input
@@ -1576,18 +1618,17 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
                   onChange={(e) => setCustomProductionFeeRubOverride(e.target.value)}
                 />
               </div>
+              </div>
+              )}
             </div>
 
             {error && <p className="text-xs text-error">{error}</p>}
-            {!productDescription.trim() && (
-              <p className="text-xs text-warning">Заполните описание товара — без него просчёт не сохранить.</p>
-            )}
             <div className="flex gap-2">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => handleSubmit(false)}
-                disabled={submitting || !productDescription.trim()}
+                disabled={submitting}
                 className="flex-1"
               >
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Сохранить и закрыть"}
@@ -1595,7 +1636,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               <Button
                 type="button"
                 onClick={() => handleSubmit(true)}
-                disabled={submitting || !productDescription.trim()}
+                disabled={submitting}
                 className="flex-1"
               >
                 {submitting ? (
