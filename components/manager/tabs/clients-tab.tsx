@@ -292,6 +292,10 @@ function ClientDraftRequests({
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editNote, setEditNote] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -360,6 +364,45 @@ function ClientDraftRequests({
     }
   }
 
+  async function handleCopy(draft: DraftRequestRecord) {
+    try {
+      await navigator.clipboard.writeText(draft.note);
+      setCopiedId(draft.id);
+      setTimeout(() => setCopiedId((current) => (current === draft.id ? null : current)), 1500);
+    } catch {
+      // Нет доступа к буферу обмена — восстанавливать нечего.
+    }
+  }
+
+  function startEdit(draft: DraftRequestRecord) {
+    setEditingId(draft.id);
+    setEditNote(draft.note);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditNote("");
+  }
+
+  async function handleSaveEdit(id: string) {
+    if (savingEdit || !editNote.trim()) return;
+    setSavingEdit(true);
+    try {
+      const res = await fetch(`/api/manager-quote-drafts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: editNote.trim() }),
+      });
+      if (res.ok) {
+        setEditingId(null);
+        setEditNote("");
+        await load();
+      }
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
   return (
     <div className="rounded-xl border border-warning/30 bg-warning/5">
       <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between gap-2 p-3 text-left">
@@ -374,58 +417,93 @@ function ClientDraftRequests({
         <div className="space-y-2 border-t border-warning/20 p-3 pt-2.5">
       {!loading && drafts.length > 0 && (
         <ul className="space-y-1.5">
-          {drafts.map((draft) => (
-            <li key={draft.id} className="flex items-start justify-between gap-2 rounded-lg border border-warning/20 bg-surface p-2.5 text-sm">
-              <div className="min-w-0">
-                <span className="mr-1.5 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
-                  к выполнению
-                </span>
-                {!draft.manager && (
-                  <span className="mr-1.5 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                    создано клиентом
-                  </span>
-                )}
-                <span className="text-text">{draft.note}</span>
-                {draft.quantity != null && <span className="ml-1.5 text-text-secondary">· {draft.quantity} шт</span>}
-                <div className="mt-0.5 text-xs text-text-secondary">
-                  {new Date(draft.createdAt).toLocaleDateString("ru-RU")}
-                  {draft.manager ? ` · ${draft.manager.name}` : ""}
+          {drafts.map((draft) =>
+            editingId === draft.id ? (
+              <li key={draft.id} className="rounded-lg border border-warning/20 bg-surface p-2.5 text-sm">
+                <Input
+                  value={editNote}
+                  onChange={(e) => setEditNote(e.target.value)}
+                  className="h-8 text-sm"
+                  autoFocus
+                />
+                <div className="mt-1.5 flex gap-2">
+                  <Button type="button" size="sm" onClick={() => handleSaveEdit(draft.id)} disabled={savingEdit || !editNote.trim()}>
+                    {savingEdit ? <Loader2 className="h-4 w-4 animate-spin" /> : "Сохранить"}
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={cancelEdit} disabled={savingEdit}>
+                    Отмена
+                  </Button>
                 </div>
-                {draft.files.length > 0 && (
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    {draft.files.map((file) => (
-                      <a
-                        key={file.id}
-                        href={`/api/quote-draft-files/${file.id}`}
-                        className="flex items-center gap-1 rounded-full border border-border bg-bg px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
-                      >
-                        <Download className="h-3 w-3" /> {file.originalName}
-                      </a>
-                    ))}
+              </li>
+            ) : (
+              <li key={draft.id} className="flex items-start justify-between gap-2 rounded-lg border border-warning/20 bg-surface p-2.5 text-sm">
+                <div className="min-w-0">
+                  <span className="mr-1.5 rounded-full bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+                    к выполнению
+                  </span>
+                  {!draft.manager && (
+                    <span className="mr-1.5 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                      создано клиентом
+                    </span>
+                  )}
+                  <span className="text-text">{draft.note}</span>
+                  {draft.quantity != null && <span className="ml-1.5 text-text-secondary">· {draft.quantity} шт</span>}
+                  <div className="mt-0.5 text-xs text-text-secondary">
+                    {new Date(draft.createdAt).toLocaleDateString("ru-RU")}
+                    {draft.manager ? ` · ${draft.manager.name}` : ""}
                   </div>
-                )}
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleMarkDone(draft.id)}
-                  disabled={busyId === draft.id}
-                  title="Просчёт создан — убрать из черновиков"
-                  className="text-text-secondary transition-colors hover:text-success disabled:opacity-50"
-                >
-                  <Check className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(draft.id)}
-                  disabled={busyId === draft.id}
-                  className="text-text-secondary transition-colors hover:text-error disabled:opacity-50"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </li>
-          ))}
+                  {draft.files.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {draft.files.map((file) => (
+                        <a
+                          key={file.id}
+                          href={`/api/quote-draft-files/${file.id}`}
+                          className="flex items-center gap-1 rounded-full border border-border bg-bg px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:border-primary/30 hover:text-primary"
+                        >
+                          <Download className="h-3 w-3" /> {file.originalName}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(draft)}
+                    title="Скопировать текст черновика"
+                    className="text-text-secondary transition-colors hover:text-primary"
+                  >
+                    {copiedId === draft.id ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => startEdit(draft)}
+                    title="Редактировать черновик"
+                    className="text-text-secondary transition-colors hover:text-primary"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleMarkDone(draft.id)}
+                    disabled={busyId === draft.id}
+                    title="Просчёт создан — убрать из черновиков"
+                    className="text-text-secondary transition-colors hover:text-success disabled:opacity-50"
+                  >
+                    <Check className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(draft.id)}
+                    disabled={busyId === draft.id}
+                    className="text-text-secondary transition-colors hover:text-error disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </li>
+            ),
+          )}
         </ul>
       )}
       <form onSubmit={handleCreate} className="flex gap-2">
