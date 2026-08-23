@@ -1475,7 +1475,7 @@ function ClientQuotes({
                 onClick={() => setExportMenuOpen(false)}
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary"
               >
-                <FileStack className="h-3.5 w-3.5 shrink-0" /> Скачать все просчёты клиента в PDF ({quotes.length})
+                <FileStack className="h-3.5 w-3.5 shrink-0 text-error" /> Скачать все просчёты клиента в PDF ({quotes.length})
               </a>
             )}
             {/* Тот же компактный табличный формат (одна строка на просчёт),
@@ -1489,7 +1489,7 @@ function ClientQuotes({
                 onClick={() => setExportMenuOpen(false)}
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary"
               >
-                <FileStack className="h-3.5 w-3.5 shrink-0" /> Скачать список выбранных в PDF ({selectedIds.length})
+                <FileStack className="h-3.5 w-3.5 shrink-0 text-error" /> Скачать список выбранных в PDF ({selectedIds.length})
               </a>
             )}
             <button
@@ -1501,7 +1501,7 @@ function ClientQuotes({
               disabled={selectedIds.length === 0 || exportingPdfBundle}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {exportingPdfBundle ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FileText className="h-3.5 w-3.5 shrink-0" />}
+              {exportingPdfBundle ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FileText className="h-3.5 w-3.5 shrink-0 text-error" />}
               Скачать PDF выбранных — по странице на просчёт {selectedIds.length > 0 && `(${selectedIds.length})`}
             </button>
             {/* Внутренний формат для согласования с фабрикой/логистикой —
@@ -1513,7 +1513,7 @@ function ClientQuotes({
                 onClick={() => setExportMenuOpen(false)}
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary"
               >
-                <FileStack className="h-3.5 w-3.5 shrink-0" /> Скачать список для менеджера ({quotes.length})
+                <FileStack className="h-3.5 w-3.5 shrink-0 text-error" /> Скачать список для менеджера ({quotes.length})
               </a>
             )}
             {!isGlobal && selectedIds.length > 0 && (
@@ -1522,7 +1522,7 @@ function ClientQuotes({
                 onClick={() => setExportMenuOpen(false)}
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary"
               >
-                <FileStack className="h-3.5 w-3.5 shrink-0" /> Скачать список для менеджера — выбранные ({selectedIds.length})
+                <FileStack className="h-3.5 w-3.5 shrink-0 text-error" /> Скачать список для менеджера — выбранные ({selectedIds.length})
               </a>
             )}
             {!isGlobal && quotes.length > 1 && (
@@ -1532,7 +1532,7 @@ function ClientQuotes({
                   onClick={() => setExportMenuOpen(false)}
                   className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary"
                 >
-                  <FileStack className="h-3.5 w-3.5 shrink-0" /> Все просчёты клиента (карго в $)
+                  <FileStack className="h-3.5 w-3.5 shrink-0 text-error" /> Все просчёты клиента (карго в $)
                 </a>
                 <div className="my-1 border-t border-border" />
               </>
@@ -1546,7 +1546,7 @@ function ClientQuotes({
               disabled={selectedIds.length === 0 || exportingExcel}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {exportingExcel ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />}
+              {exportingExcel ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5 shrink-0 text-success" />}
               Выгрузить выбранные в Excel {selectedIds.length > 0 && `(${selectedIds.length})`}
             </button>
             <button
@@ -1559,7 +1559,7 @@ function ClientQuotes({
               title="Карго — в $, остальное — в ₽"
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {exportingExcel ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />}
+              {exportingExcel ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <FileSpreadsheet className="h-3.5 w-3.5 shrink-0 text-success" />}
               Выбранные в Excel, карго в $ {selectedIds.length > 0 && `(${selectedIds.length})`}
             </button>
             <button
@@ -1571,7 +1571,7 @@ function ClientQuotes({
               disabled={selectedIds.length === 0 || exportingInvoice}
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-text-secondary transition-colors hover:bg-bg hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {exportingInvoice ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Receipt className="h-3.5 w-3.5 shrink-0" />}
+              {exportingInvoice ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Receipt className="h-3.5 w-3.5 shrink-0 text-success" />}
               Счёт на услуги {selectedIds.length > 0 && `(${selectedIds.length})`}
             </button>
             <div className="my-1 border-t border-border" />
@@ -1587,7 +1587,7 @@ function ClientQuotes({
                 {bulkBuyoutInvoiceCurrency === currency ? (
                   <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
                 ) : (
-                  <Receipt className="h-3.5 w-3.5 shrink-0" />
+                  <Receipt className="h-3.5 w-3.5 shrink-0 text-error" />
                 )}
                 Счёт на выкуп списком — {BUYOUT_CURRENCY_LABEL[currency]} {selectedIds.length > 0 && `(${selectedIds.length})`}
               </button>
