@@ -114,14 +114,23 @@ function ManagerStaffTab() {
       });
       if (res.ok) await load();
       else {
-        const data = await res.json();
-        setActionError(data.error ?? "Не удалось изменить менеджера.");
+        const data = await res.json().catch(() => null);
+        setActionError(data?.error ?? "Не удалось изменить менеджера.");
       }
+    } catch {
+      setActionError("Не удалось связаться с сервером.");
     } finally {
       setBusyId(null);
     }
   }
 
+  // res.json().catch(() => null) — a non-2xx response isn't guaranteed to
+  // have a JSON body (an uncaught server exception renders a plain HTML
+  // crash page); without the fallback that throw propagated out of this
+  // try with no catch, so setActionError never ran and the delete looked
+  // like it silently did nothing (busyId still reset via finally). Found
+  // via a real delete that hit exactly this — see the FK comment in
+  // app/api/managers/[id]/route.ts. See PB-V5 chat 2026-08-23.
   async function handleDelete(id: string) {
     setBusyId(id);
     setActionError(null);
@@ -129,9 +138,11 @@ function ManagerStaffTab() {
       const res = await fetch(`/api/managers/${id}`, { method: "DELETE" });
       if (res.ok) await load();
       else {
-        const data = await res.json();
-        setActionError(data.error ?? "Не удалось удалить менеджера.");
+        const data = await res.json().catch(() => null);
+        setActionError(data?.error ?? "Не удалось удалить менеджера.");
       }
+    } catch {
+      setActionError("Не удалось связаться с сервером.");
     } finally {
       setBusyId(null);
     }

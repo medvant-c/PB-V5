@@ -116,6 +116,24 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
     prisma.client.updateMany({ where: { createdByManagerId: id }, data: { createdByManagerId: session.managerId } }),
     prisma.quote.updateMany({ where: { managerId: id }, data: { managerId: session.managerId } }),
     prisma.tariffSettings.updateMany({ where: { createdByManagerId: id }, data: { createdByManagerId: session.managerId } }),
+    // Same "required (non-nullable) FK to Manager" problem as Client/Quote/
+    // TariffSettings above, just on tables this route forgot the first time
+    // round — any one of these existing for the target manager made the
+    // delete below throw a foreign-key violation, uncaught, which the
+    // frontend then showed as "нажимаю удалить и ничего не происходит"
+    // (res.json() on a non-JSON 500 body throws with no catch — see
+    // staff-tab.tsx handleDelete). Found via a real outsource-manager
+    // delete that silently failed on a single DailyPlanItem row. See PB-V5
+    // chat 2026-08-23.
+    prisma.cashOrder.updateMany({ where: { createdByManagerId: id }, data: { createdByManagerId: session.managerId } }),
+    prisma.quotePaymentAllocation.updateMany({ where: { createdByManagerId: id }, data: { createdByManagerId: session.managerId } }),
+    prisma.cashTransfer.updateMany({ where: { createdByManagerId: id }, data: { createdByManagerId: session.managerId } }),
+    prisma.cashOpeningBalance.updateMany({ where: { updatedByManagerId: id }, data: { updatedByManagerId: session.managerId } }),
+    prisma.issuedInvoice.updateMany({ where: { managerId: id }, data: { managerId: session.managerId } }),
+    prisma.fulfillmentOrder.updateMany({ where: { managerId: id }, data: { managerId: session.managerId } }),
+    prisma.dailyPlanItem.updateMany({ where: { managerId: id }, data: { managerId: session.managerId } }),
+    prisma.systemSettings.updateMany({ where: { updatedByManagerId: id }, data: { updatedByManagerId: session.managerId } }),
+    prisma.investor.updateMany({ where: { updatedByManagerId: id }, data: { updatedByManagerId: session.managerId } }),
     // Any manager attached to this one (if it was a "старший менеджер")
     // just loses that supervisor rather than being deleted themselves —
     // the owner can assign a new senior later from the Сотрудники tab.
