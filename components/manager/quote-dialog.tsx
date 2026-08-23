@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ExternalLink, Info, Loader2, Plus, X } from "lucide-react";
+import { BookOpen, ChevronDown, ExternalLink, Info, Loader2, Plus, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -357,6 +357,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   // Вкладка «Финансы» имеет смысл только у уже сохранённого просчёта — у
   // нового ещё нет ни счетов, ни движений денег (см. isEditing ниже).
   const [activeTab, setActiveTab] = useState<"form" | "finances">("form");
+  const [memoOpen, setMemoOpen] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -905,6 +906,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   const availablePhotoSlots = 3 - existingPhotos.length;
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
@@ -918,6 +920,15 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
             </p>
           )}
         </DialogHeader>
+
+        <button
+          type="button"
+          onClick={() => setMemoOpen(true)}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-error px-3 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-error/90"
+        >
+          <BookOpen className="h-4 w-4" />
+          Памятка: как правильно заполнить просчёт
+        </button>
 
         {isEditing && (
           <div className="flex gap-1 rounded-lg border border-border bg-bg p-1">
@@ -1686,6 +1697,117 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
         ))}
       </DialogContent>
     </Dialog>
+
+    <Dialog open={memoOpen} onOpenChange={setMemoOpen}>
+      <DialogContent className="max-h-[85vh] max-w-xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Памятка: как правильно заполнить просчёт</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 text-sm text-text">
+          <section>
+            <p className="font-semibold">1. Страна назначения</p>
+            <p className="text-text-secondary">
+              От неё зависят тарифы и категории карго. Меняйте в начале, а не после ввода данных — категория карго
+              сбросится.
+            </p>
+          </section>
+          <section>
+            <p className="font-semibold">2. Тип просчёта — Standart / Expert / Pro</p>
+            <p className="text-text-secondary">
+              Это не «уровень клиента», а объём работы по поиску товара: Standart — товар массовый, есть у многих
+              поставщиков; Expert — нужны переговоры, уточнение характеристик/фото/сроков; Pro — поиск альтернатив,
+              сравнение предложений, поиск под индивидуальное ТЗ или контрактное производство. Ставка идёт в услугу
+              поиска — если взяли Standart, а по факту вели сложные переговоры, компания недополучит.
+            </p>
+          </section>
+          <section>
+            <p className="font-semibold">3. «Только карго»</p>
+            <p className="text-text-secondary">
+              Включайте, если клиент уже сам купил товар и Panda Bridge только везёт. Данные о товаре всё равно
+              нужны (для веса/объёма), но клиенту выставляется только доставка.
+            </p>
+          </section>
+          <section>
+            <p className="font-semibold">4. «Производство под заказ»</p>
+            <p className="text-text-secondary">
+              Включайте, если товара нет в свободной продаже и фабрика делает его именно под этот заказ (отдельная
+              фиксированная наценка).
+            </p>
+          </section>
+          <section>
+            <p className="font-semibold">5. Описание / название / фото</p>
+            <p className="text-text-secondary">
+              Описание теперь необязательно, но если по факту знаете только описание от клиента (без цифр от
+              поставщика) — сохраните черновик уже на этом этапе, остальное дозаполните после получения счёта от
+              фабрики.
+            </p>
+          </section>
+          <section>
+            <p className="font-semibold">6. Количество и цена за штуку в ¥</p>
+            <p className="text-text-secondary">
+              Цена юаневая, не рублёвая. Доставка по Китаю — тоже в ¥, только если она есть отдельной строкой (не
+              всегда).
+            </p>
+          </section>
+          <section>
+            <p className="font-semibold">7. Вес за 1 шт (кг)</p>
+            <p className="text-text-secondary">Это вес одной единицы, не всей партии.</p>
+          </section>
+          <section>
+            <p className="font-semibold">8. Объём груза — 4 способа, выберите один</p>
+            <ul className="list-disc space-y-0.5 pl-4 text-text-secondary">
+              <li>«Габариты 1 шт» — вводите LxWxH одной коробки, система сама умножит на количество.</li>
+              <li>«Общие габариты» — вводите LxWxH сразу для всей партии.</li>
+              <li>«Объём 1 шт» — если знаете объём одной единицы в м³.</li>
+              <li>
+                «Объём вручную» — сразу общий объём партии в м³ (когда есть готовая цифра от поставщика — надёжнее,
+                чем пересчитывать из размеров).
+              </li>
+            </ul>
+            <p className="mt-1 font-medium text-warning">
+              Не путайте «на 1 шт» и «общие» — частая ошибка, из-за которой объём завышается/занижается в разы.
+            </p>
+          </section>
+          <section>
+            <p className="font-semibold">9. Тарификация доставки — «по плотности» / «по объёму»</p>
+            <p className="text-text-secondary">
+              Можно не выбирать вручную: если плотность груза ниже 100 кг/м³, система сама посчитает по объёму, даже
+              если выбрана «по плотности». Категорию груза выбирайте по факту товара — от неё зависит ставка.
+            </p>
+          </section>
+          <section>
+            <p className="font-semibold">10. Блок «Итого по грузу»</p>
+            <p className="text-text-secondary">
+              Обязательно проверьте перед сохранением: общий вес, общий объём, плотность и итоговая ставка $/кг или
+              $/м³. Если ставка неожиданно по м³, а не по кг — значит плотность ушла ниже 100, это нормально, не
+              баг.
+            </p>
+          </section>
+          <section>
+            <p className="font-semibold">11. Доп. услуги из прайс-листа</p>
+            <p className="text-text-secondary">
+              Сворачиваемый блок — отмечайте только то, что реально будете делать по этому заказу (упаковка, фото на
+              складе и т.д.), они добавляются к сумме клиента.
+            </p>
+          </section>
+          <section>
+            <p className="font-semibold">12. «Ручная настройка тарифов»</p>
+            <p className="text-text-secondary">
+              Свёрнута по умолчанию, трогайте только в нестандартных случаях (индивидуальный курс/ставка/скидка,
+              согласованная с руководителем) — не для повседневного использования. Каждое ручное поле — это
+              отклонение от тарифов, требует уверенности, что цифра согласована.
+            </p>
+          </section>
+          <section>
+            <p className="font-semibold">13. Кнопки внизу</p>
+            <p className="text-text-secondary">
+              «Сохранить и закрыть» просто сохраняет; «Скачать PDF» ещё и формирует файл для клиента сразу.
+            </p>
+          </section>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
 
