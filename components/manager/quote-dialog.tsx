@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PhotoPicker, LOW_RES_THRESHOLD_PX } from "@/components/manager/photo-picker";
 import { PhotoLightbox } from "@/components/manager/photo-lightbox";
+import { QuoteFinancesTab } from "@/components/manager/quote-finances-tab";
 import {
   computeQuote,
   computeQuoteWithAutoCnyTier,
@@ -353,6 +354,9 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
   // для отдельных нетиповых сделок), а занимал много места на экране на
   // каждой карточке просчёта. См. PB-V5 chat 2026-08-23.
   const [manualTariffsOpen, setManualTariffsOpen] = useState(false);
+  // Вкладка «Финансы» имеет смысл только у уже сохранённого просчёта — у
+  // нового ещё нет ни счетов, ни движений денег (см. isEditing ниже).
+  const [activeTab, setActiveTab] = useState<"form" | "finances">("form");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -417,6 +421,9 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
     setError(null);
     setPhotos([]);
     setRemovedPhotoIds([]);
+    // Открытие другого просчёта не должно оставлять пользователя на
+    // вкладке «Финансы» предыдущего.
+    setActiveTab("form");
 
     if (!editingQuoteId) {
       setAttachedServices([]);
@@ -912,7 +919,34 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
           )}
         </DialogHeader>
 
-        {loadingTariffs || loadingQuote ? (
+        {isEditing && (
+          <div className="flex gap-1 rounded-lg border border-border bg-bg p-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab("form")}
+              className={cn(
+                "flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                activeTab === "form" ? "bg-surface text-primary shadow-sm" : "text-text-secondary hover:text-text",
+              )}
+            >
+              Просчёт
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("finances")}
+              className={cn(
+                "flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                activeTab === "finances" ? "bg-surface text-primary shadow-sm" : "text-text-secondary hover:text-text",
+              )}
+            >
+              Финансы
+            </button>
+          </div>
+        )}
+
+        {isEditing && activeTab === "finances" && <QuoteFinancesTab quoteId={editingQuoteId!} />}
+
+        {activeTab === "form" && (loadingTariffs || loadingQuote ? (
           <p className="text-sm text-text-secondary">Загрузка…</p>
         ) : !tariffs ? (
           <p className="text-sm text-error">Тарифы не заданы — заполните вкладку «Тарифы» перед созданием просчёта.</p>
@@ -1649,7 +1683,7 @@ function QuoteDialog({ client, open, onOpenChange, onSaved, editingQuoteId }: Qu
               </Button>
             </div>
           </div>
-        )}
+        ))}
       </DialogContent>
     </Dialog>
   );
