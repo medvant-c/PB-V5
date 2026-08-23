@@ -68,6 +68,10 @@ enum DeskFileTab {
   // Внутреннее, никогда не идёт в клиентскую выгрузку — тот же статус, что
   // и у productLink. См. PB-V5 chat 2026-08-10.
   quote_wechat_qr
+  // Фото витрины поставщика в общей "Базе поставщиков" (кабинет
+  // менеджера) — relatedId это Supplier id. До нескольких штук на
+  // поставщика, как и quotes выше. См. PB-V5 chat 2026-08-23.
+  supplier_showcase
 }
 
 model DeskFile {
@@ -347,6 +351,7 @@ model Manager {
   quoteDraftRequests QuoteDraftRequest[]
   dailyPlanItems DailyPlanItem[]
   issuedInvoices IssuedInvoice[]
+  suppliers      Supplier[]
 }
 
 // Which tier of the "Поиск товара" service a quote is billed under — the
@@ -1775,4 +1780,50 @@ model TelegramCnyRateUpdate {
   tariffSettingsId String?
   rawMessage     String
   receivedAt     DateTime  @default(now())
+}
+
+// «База поставщиков» — общий, коллективно пополняемый справочник (кабинет
+// менеджера), доступен всем ролям без ограничений по видимости, в отличие
+// от Client/Quote. Перенесено из плоского списка тематических категорий
+// Telegram-группы. См. PB-V5 chat 2026-08-23.
+model SupplierCategory {
+  id   String @id @default(cuid())
+  name String @unique
+  // Emoji-иконка категории (как в исходной Telegram-группе) — чисто
+  // косметическое, может быть пустым для новых категорий.
+  emoji String?
+  // Порядок отображения слева — тот же принцип, что Investor.sortOrder/
+  // CashAccount.sortOrder (свободный список, не enum, чтобы категорию
+  // можно было добавить без миграции).
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  suppliers Supplier[]
+}
+
+model Supplier {
+  id         String           @id @default(cuid())
+  displayId  Int              @unique
+  categoryId String
+  category   SupplierCategory @relation(fields: [categoryId], references: [id])
+  name       String
+  // Чем занимается — свободный текст, не структурированный список товаров.
+  description String?
+  // Реквизиты/способ перечисления денег этому поставщику.
+  paymentInfo String?
+  // Где находится (город/рынок/адрес) — тоже свободный текст.
+  location String?
+  // Имя человека-контакта у поставщика (не название компании — то уже в
+  // name) — часто отдельно от неё в реальных карточках. См. PB-V5 chat
+  // 2026-08-23.
+  contactPerson String?
+  wechat        String?
+  whatsapp      String?
+  email         String?
+  phone         String?
+  createdByManagerId String
+  createdByManager   Manager  @relation(fields: [createdByManagerId], references: [id])
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([categoryId])
 }

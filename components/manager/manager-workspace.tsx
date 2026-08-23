@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { Briefcase, CheckSquare, Database, FileBarChart, FileText, Home, Loader2, LogOut, Menu, Package, Percent, Receipt, Settings, Tag, Trash2, UserCog, Users, UsersRound, Wallet, X } from "lucide-react";
+import { Briefcase, CheckSquare, Database, FileBarChart, FileText, Home, Loader2, LogOut, Menu, Package, Percent, Receipt, Settings, Store, Tag, Trash2, UserCog, Users, UsersRound, Wallet, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ManagerDashboard } from "@/components/manager/manager-dashboard";
@@ -32,6 +32,7 @@ function TabLoading() {
 // подгружается только при первом переключении на неё. См. PB-V5 chat
 // 2026-08-10.
 const ManagerClientsTab = dynamic(() => import("@/components/manager/tabs/clients-tab").then((m) => m.ManagerClientsTab), { loading: TabLoading });
+const ManagerSuppliersTab = dynamic(() => import("@/components/manager/tabs/suppliers-tab").then((m) => m.ManagerSuppliersTab), { loading: TabLoading });
 const ManagerAllQuotesTab = dynamic(() => import("@/components/manager/tabs/all-quotes-tab").then((m) => m.ManagerAllQuotesTab), { loading: TabLoading });
 const ManagerStaffTab = dynamic(() => import("@/components/manager/tabs/staff-tab").then((m) => m.ManagerStaffTab), { loading: TabLoading });
 const ManagerPriceListTab = dynamic(() => import("@/components/manager/tabs/price-list-tab").then((m) => m.ManagerPriceListTab), { loading: TabLoading });
@@ -90,6 +91,10 @@ const ALL_SECTIONS = [
   // page regardless of whether the manager wanted to see it right then.
   { id: "home", label: "Главная", icon: Home, Component: ManagerDashboard, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
   { id: "clients", label: "Клиенты", icon: Users, Component: ManagerClientsTab, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  // Общий, коллективно пополняемый справочник поставщиков — видна всем
+  // ролям без исключения, это не клиентские/финансовые данные. См. план
+  // mellow-forging-kay.md, PB-V5 chat 2026-08-23.
+  { id: "suppliers", label: "База поставщиков", icon: Store, Component: ManagerSuppliersTab, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
   // Same quotes, same actions as inside a client's own card (see
   // components/manager/tabs/clients-tab.tsx's ClientQuotes, reused here
   // with no clientId) — just flattened into one sortable/filterable list
