@@ -490,7 +490,7 @@ function ManagerSuppliersTab() {
             {!editingSupplier && (
               <div className="space-y-1.5">
                 <p className="text-xs font-medium text-text-secondary">Фото витрины</p>
-                <PhotoPicker photos={photos} onChange={setPhotos} />
+                <PhotoPicker photos={photos} onChange={setPhotos} maxPhotos={10} />
               </div>
             )}
             {formError && <p className="text-xs text-error">{formError}</p>}

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { storage } from "@/lib/storage";
 import { nextSupplierDisplayId } from "@/lib/display-ids";
 
-const MAX_PHOTOS = 3;
+const MAX_PHOTOS = 10;
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 

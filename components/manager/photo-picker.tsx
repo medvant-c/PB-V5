@@ -14,13 +14,17 @@ const LOW_RES_THRESHOLD_PX = 400;
 interface PhotoPickerProps {
   photos: File[];
   onChange: (photos: File[]) => void;
+  // Overridable per-caller — quote photos stay at the original MAX_PHOTOS
+  // (3, PDF hero-photo layout only ever shows that many), but a supplier
+  // showcase can reasonably want more angles. See PB-V5 chat 2026-08-23.
+  maxPhotos?: number;
 }
 
 // Supports three ways in — click-to-browse, drag/drop, AND clipboard paste
 // (Ctrl/Cmd+V) — pasting a screenshot straight from the clipboard is the
 // primary way managers actually get product photos day to day, per the
 // manager spec ("вставляет через буфер - это важно").
-function PhotoPicker({ photos, onChange }: PhotoPickerProps) {
+function PhotoPicker({ photos, onChange, maxPhotos = MAX_PHOTOS }: PhotoPickerProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
@@ -54,12 +58,12 @@ function PhotoPicker({ photos, onChange }: PhotoPickerProps) {
   function addPhotos(files: File[]) {
     const images = files.filter((file) => file.type.startsWith("image/"));
     if (images.length === 0) return;
-    onChange([...photos, ...images].slice(0, MAX_PHOTOS));
+    onChange([...photos, ...images].slice(0, maxPhotos));
   }
 
   useEffect(() => {
     function handlePaste(event: ClipboardEvent) {
-      if (photos.length >= MAX_PHOTOS) return;
+      if (photos.length >= maxPhotos) return;
       const items = event.clipboardData?.items;
       if (!items) return;
       const pastedFiles: File[] = [];
@@ -105,7 +109,7 @@ function PhotoPicker({ photos, onChange }: PhotoPickerProps) {
             </button>
           </div>
         ))}
-        {photos.length < MAX_PHOTOS && (
+        {photos.length < maxPhotos && (
           <div
             onDragOver={(event) => {
               event.preventDefault();
@@ -139,7 +143,7 @@ function PhotoPicker({ photos, onChange }: PhotoPickerProps) {
           event.target.value = "";
         }}
       />
-      <p className="text-[11px] text-text-secondary">До {MAX_PHOTOS} фото товара.</p>
+      <p className="text-[11px] text-text-secondary">До {maxPhotos} фото товара.</p>
     </div>
   );
 }
