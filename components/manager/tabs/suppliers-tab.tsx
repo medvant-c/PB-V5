@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PhotoPicker } from "@/components/manager/photo-picker";
+import { PhotoLightbox } from "@/components/manager/photo-lightbox";
 import { cn } from "@/lib/utils";
 
 interface CategoryRecord {
@@ -76,6 +77,7 @@ function ManagerSuppliersTab() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
 
   const loadCategories = useCallback(() => {
     setLoadingCategories(true);
@@ -348,26 +350,33 @@ function ManagerSuppliersTab() {
                     const expanded = expandedSupplierId === supplier.id;
                     return (
                       <li key={supplier.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
-                        <button type="button" onClick={() => toggleExpand(supplier)} className="flex w-full items-center gap-3 text-left">
+                        <div className="flex w-full items-center gap-3 text-left">
                           {supplier.previewPhotoId ? (
-                            // eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset
-                            <img
-                              src={`/api/suppliers/photos/${supplier.previewPhotoId}`}
-                              alt=""
-                              className="h-12 w-12 shrink-0 rounded-lg object-cover"
-                            />
+                            <button
+                              type="button"
+                              onClick={() => setPreviewPhotoUrl(`/api/suppliers/photos/${supplier.previewPhotoId}`)}
+                              className="shrink-0"
+                              aria-label="Увеличить фото"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset */}
+                              <img
+                                src={`/api/suppliers/photos/${supplier.previewPhotoId}`}
+                                alt=""
+                                className="h-12 w-12 rounded-lg object-cover transition-opacity hover:opacity-80"
+                              />
+                            </button>
                           ) : (
                             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-bg text-text-secondary">
                               <Store className="h-5 w-5" />
                             </div>
                           )}
-                          <div className="min-w-0 flex-1">
+                          <button type="button" onClick={() => toggleExpand(supplier)} className="min-w-0 flex-1 text-left">
                             <div className="truncate font-medium text-text">
                               №{supplier.displayId} {supplier.name}
                             </div>
                             {supplier.description && <div className="truncate text-xs text-text-secondary">{supplier.description}</div>}
-                          </div>
-                        </button>
+                          </button>
+                        </div>
 
                         {expanded && (
                           <div className="mt-3 space-y-2 border-t border-border pt-3">
@@ -411,13 +420,20 @@ function ManagerSuppliersTab() {
                             {expandedPhotos.length > 0 && (
                               <div className="flex flex-wrap gap-2 pt-1">
                                 {expandedPhotos.map((photo) => (
-                                  // eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset
-                                  <img
+                                  <button
                                     key={photo.id}
-                                    src={`/api/suppliers/photos/${photo.id}`}
-                                    alt={photo.originalName}
-                                    className="h-24 w-24 rounded-lg border border-border object-cover"
-                                  />
+                                    type="button"
+                                    onClick={() => setPreviewPhotoUrl(`/api/suppliers/photos/${photo.id}`)}
+                                    className="shrink-0"
+                                    aria-label={`Увеличить фото: ${photo.originalName}`}
+                                  >
+                                    {/* eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset */}
+                                    <img
+                                      src={`/api/suppliers/photos/${photo.id}`}
+                                      alt={photo.originalName}
+                                      className="h-24 w-24 rounded-lg border border-border object-cover transition-opacity hover:opacity-80"
+                                    />
+                                  </button>
                                 ))}
                               </div>
                             )}
@@ -500,6 +516,8 @@ function ManagerSuppliersTab() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <PhotoLightbox src={previewPhotoUrl} onClose={() => setPreviewPhotoUrl(null)} />
     </div>
   );
 }
