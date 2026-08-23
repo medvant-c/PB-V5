@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
-import { ChevronDown, Download, File as FileIcon, Loader2, Trash2, Upload } from "lucide-react";
+import { ChevronDown, Download, Eye, File as FileIcon, Loader2, Trash2, Upload } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { PhotoLightbox } from "@/components/manager/photo-lightbox";
 import { cn } from "@/lib/utils";
 
 interface ClientFileRecord {
@@ -25,6 +27,15 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
+// Только картинки и PDF — браузер сам умеет отрисовать их по месту
+// (<img>/<iframe>). DOC(X)/XLS(X) без стороннего сервиса-конвертера показать
+// негде, для них по-прежнему только «Скачать».
+function isPreviewable(mimeType: string): "image" | "pdf" | null {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType === "application/pdf") return "pdf";
+  return null;
+}
+
 interface ClientFilesPanelProps {
   clientId: string;
 }
@@ -46,6 +57,8 @@ function ClientFilesPanel({ clientId }: ClientFilesPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [previewImageId, setPreviewImageId] = useState<string | null>(null);
+  const [previewPdf, setPreviewPdf] = useState<ClientFileRecord | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const loadFiles = useCallback(async () => {
@@ -183,7 +196,9 @@ function ClientFilesPanel({ clientId }: ClientFilesPanelProps) {
             <p className="text-xs text-text-secondary">Документов пока нет.</p>
           ) : (
             <ul className="space-y-1.5">
-              {files.map((file) => (
+              {files.map((file) => {
+                const previewKind = isPreviewable(file.mimeType);
+                return (
                 <li
                   key={file.id}
                   className="flex items-center gap-2 rounded-lg border border-border bg-bg px-3 py-2 text-sm"
@@ -196,6 +211,16 @@ function ClientFilesPanel({ clientId }: ClientFilesPanelProps) {
                       {file.uploadedByManager ? ` · ${file.uploadedByManager.name}` : ""}
                     </div>
                   </div>
+                  {previewKind && (
+                    <button
+                      type="button"
+                      onClick={() => (previewKind === "image" ? setPreviewImageId(file.id) : setPreviewPdf(file))}
+                      aria-label={`Просмотреть ${file.originalName}`}
+                      className="shrink-0 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-black/5 hover:text-primary"
+                    >
+                      <Eye className="h-4 w-4" />
+                    </button>
+                  )}
                   <a
                     href={`/api/manager-client-files/${file.id}`}
                     aria-label={`Скачать ${file.originalName}`}
@@ -219,11 +244,26 @@ function ClientFilesPanel({ clientId }: ClientFilesPanelProps) {
                     </button>
                   )}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </div>
       )}
+
+      <PhotoLightbox
+        src={previewImageId ? `/api/manager-client-files/${previewImageId}?preview=1` : null}
+        onClose={() => setPreviewImageId(null)}
+      />
+
+      <Dialog open={previewPdf !== null} onOpenChange={(v) => !v && setPreviewPdf(null)}>
+        <DialogContent className="flex h-[90vh] max-w-4xl flex-col gap-2 p-3">
+          <DialogTitle className="truncate pr-6 text-sm">{previewPdf?.originalName}</DialogTitle>
+          {previewPdf && (
+            <iframe src={`/api/manager-client-files/${previewPdf.id}?preview=1`} className="min-h-0 flex-1 rounded-lg border border-border" />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

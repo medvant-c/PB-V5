@@ -33,11 +33,16 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: "Файл не найден." }, { status: 404 });
   }
 
+  // ?preview=1 — та же самая ручка, только "inline" вместо "attachment":
+  // браузер сам умеет показать картинку/PDF по месту (в <img>/<iframe>),
+  // не скачивая файл — обычная ссылка «Скачать» по-прежнему форсирует
+  // Save As. См. PB-V5 chat 2026-08-23.
+  const isPreview = new URL(req.url).searchParams.get("preview") === "1";
   const buffer = await storage.get(record.storageKey);
   return new Response(new Uint8Array(buffer), {
     headers: {
       "Content-Type": record.mimeType,
-      "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(record.originalName)}`,
+      "Content-Disposition": `${isPreview ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(record.originalName)}`,
       "Content-Length": String(record.size),
     },
   });
