@@ -171,7 +171,16 @@ model Client {
   // this field existed or via the older shared-password /desk "Клиенты" tab.
   // Needed for KPI attribution ("новых клиентов за месяц" per manager).
   createdByManagerId String?
-  createdByManager   Manager? @relation(fields: [createdByManagerId], references: [id])
+  createdByManager   Manager? @relation("ClientCreatedBy", fields: [createdByManagerId], references: [id])
+  // Кто и когда последний раз отредактировал карточку клиента (см. PATCH
+  // /api/manager-clients/[id]) — updatedAt обновляется Prisma автоматически
+  // при любом .update(), updatedByManagerId выставляется явно в самом
+  // роуте. Отдельная именованная связь от createdByManager — иначе Prisma
+  // не может различить два FK на одну и ту же модель Manager. См. PB-V5
+  // chat 2026-08-24.
+  updatedByManagerId String?
+  updatedByManager   Manager? @relation("ClientUpdatedBy", fields: [updatedByManagerId], references: [id])
+  updatedAt          DateTime @default(now()) @updatedAt
   // Manager-initiated claim ("этот клиент — мой личный") — required before
   // it shows up in the owner/senior confirmation queue, so ordinary
   // inbound/marketing clients (the vast majority) never clutter that queue
@@ -335,7 +344,8 @@ model Manager {
   probationMonths    Int         @default(2)
   createdAt          DateTime    @default(now())
 
-  clients        Client[]
+  clients        Client[] @relation("ClientCreatedBy")
+  updatedClients Client[] @relation("ClientUpdatedBy")
   quotes         Quote[]
   deletedQuotes  Quote[] @relation("QuoteDeletedBy")
   tariffUpdates  TariffSettings[]

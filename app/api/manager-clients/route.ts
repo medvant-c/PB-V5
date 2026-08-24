@@ -39,6 +39,8 @@ export async function GET(req: NextRequest) {
       status: true,
       createdByManagerId: true,
       createdByManager: { select: { name: true } },
+      updatedAt: true,
+      updatedByManager: { select: { name: true } },
       selfSourcedClaimed: true,
       selfSourcedClaimedAt: true,
       selfSourcedConfirmed: true,

@@ -104,6 +104,8 @@ interface ClientRecord {
   status: ClientStatus;
   createdByManagerId: string | null;
   createdByManager: { name: string } | null;
+  updatedAt: string;
+  updatedByManager: { name: string } | null;
   selfSourcedClaimed: boolean;
   selfSourcedClaimedAt: string | null;
   selfSourcedConfirmed: boolean;
@@ -3262,6 +3264,12 @@ function ManagerClientsTab() {
                     </>
                   )}
                   {selectedClient.source ? ` · ${SOURCE_LABELS[selectedClient.source] ?? selectedClient.source}` : ""}
+                </div>
+                <div className="text-xs text-text-secondary">
+                  Создан: {formatDate(selectedClient.createdAt)}
+                  {selectedClient.updatedByManager && selectedClient.updatedAt !== selectedClient.createdAt && (
+                    <> · Изменён: {formatDate(selectedClient.updatedAt)} ({selectedClient.updatedByManager.name})</>
+                  )}
                 </div>
               </div>
 

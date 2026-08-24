@@ -79,7 +79,10 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     }
 
     await prisma.$transaction([
-      prisma.client.update({ where: { id }, data: { createdByManagerId: transferToManagerId, contactsHiddenFromManager: true } }),
+      prisma.client.update({
+        where: { id },
+        data: { createdByManagerId: transferToManagerId, contactsHiddenFromManager: true, updatedByManagerId: session.managerId },
+      }),
       prisma.quote.updateMany({ where: { clientId: id }, data: { managerId: transferToManagerId } }),
     ]);
   }
@@ -144,6 +147,11 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       data.vladShareRatePercentOverride = percent;
     }
   }
+
+  // Только если это реальная правка полей — пустой PATCH (ни одно
+  // условие выше не сработало) не должен создавать ложную запись "кем
+  // отредактировано".
+  if (Object.keys(data).length > 0) data.updatedByManagerId = session.managerId;
 
   const client = await prisma.client.update({ where: { id }, data });
   // Never leak vladShareRatePercentOverride to a non-owner response, even
