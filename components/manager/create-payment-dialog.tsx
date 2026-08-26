@@ -19,6 +19,19 @@ const CATEGORY_LABEL: Record<string, string> = {
   attached_services: "Доп. услуги",
 };
 const CATEGORIES = Object.keys(CATEGORY_LABEL) as (keyof typeof CATEGORY_LABEL)[];
+// Те же категории, что PREMIUM_ELIGIBLE_PAYMENT_CATEGORIES в
+// lib/desk-services/quote-profit.ts (сервер — единственный источник
+// правды и там же проверяется ещё раз) — 100% маржа, без привязанной
+// себестоимости, поэтому по ним можно ввести сумму больше расчётного
+// остатка (округление в пользу клиента, курсовая наценка бота и т.п. —
+// реальная допприбыль, а не переплата за конкретный товар). "Товар"/
+// "Доставка по Китаю" остаются жёстко ограничены остатком. См. PB-V5
+// chat 2026-08-26.
+const MARGIN_CATEGORIES = new Set(["search_service", "custom_production", "buyout_commission", "attached_services"]);
+
+function allocationKey(quoteId: string, category: string): string {
+  return `${quoteId}__${category}`;
+}
 
 interface RemainingQuote {
   quoteId: string;
@@ -40,19 +53,25 @@ interface CreatePaymentDialogProps {
 
 // "Приходный ордер" started from a quote card's checkbox selection —
 // руководитель/старший менеджер picks WHICH SERVICES the client just paid
-// for (a checkbox per "Счёт на выкуп" category, applied uniformly across
-// every selected quote), not a manual amount per quote — each checked
-// category is billed at its FULL remaining balance on every quote that
-// still owes something for it. A category already fully paid on some (or
-// all) of the selected quotes is called out by name instead of silently
-// contributing 0, so the manager knows exactly why the total looks smaller
-// than expected. See app/api/manager-quotes/create-payment and PB-V5 chat
-// 2026-08-05.
+// for (a checkbox per "Счёт на выкуп" category, applied per quote it
+// applies to), defaulting to that quote's own FULL remaining balance but
+// editable — see MARGIN_CATEGORIES above for which categories allow
+// entering more than the computed remaining. A category already fully
+// paid on some (or all) of the selected quotes is called out by name
+// instead of silently contributing 0, so the manager knows exactly why
+// the default total looks smaller than expected. See
+// app/api/manager-quotes/create-payment and PB-V5 chat 2026-08-05,
+// extended 2026-08-26.
 function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePaymentDialogProps) {
   const [loading, setLoading] = useState(true);
   const [client, setClient] = useState<{ name: string; company: string | null } | null>(null);
   const [quotes, setQuotes] = useState<RemainingQuote[]>([]);
   const [checkedCategories, setCheckedCategories] = useState<Record<string, boolean>>({});
+  // Редактируемая сумма на каждую пару (просчёт, категория) — ключ через
+  // allocationKey. Инициализируется остатком по умолчанию при загрузке
+  // просчётов, дальше менеджер может её поправить (см. MARGIN_CATEGORIES
+  // выше — куда именно можно ввести больше остатка).
+  const [customAmounts, setCustomAmounts] = useState<Record<string, string>>({});
   const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([]);
   const [accountId, setAccountId] = useState("");
   const [cnyRate, setCnyRate] = useState("");
@@ -66,6 +85,7 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
     setLoading(true);
     setError(null);
     setCheckedCategories({});
+    setCustomAmounts({});
     setComment("");
     Promise.all([
       fetch(`/api/manager-quotes/payment-remaining?quoteIds=${quoteIds.join(",")}`).then((res) => res.json()),
@@ -78,7 +98,17 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
           return;
         }
         setClient(remainingData.client);
-        setQuotes(remainingData.quotes ?? []);
+        const fetchedQuotes: RemainingQuote[] = remainingData.quotes ?? [];
+        setQuotes(fetchedQuotes);
+        // По умолчанию — весь остаток, как и раньше; менеджер правит
+        // точечно, только там, где это реально нужно.
+        const defaults: Record<string, string> = {};
+        for (const q of fetchedQuotes) {
+          for (const category of CATEGORIES) {
+            defaults[allocationKey(q.quoteId, category)] = String(q.remaining[category] ?? 0);
+          }
+        }
+        setCustomAmounts(defaults);
         if (tariffsData?.settings?.cnyRateRub) setCnyRate(String(tariffsData.settings.cnyRateRub));
         const fetchedAccounts = accountsData?.accounts ?? [];
         setAccounts(fetchedAccounts);
@@ -88,23 +118,33 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
     // eslint-disable-next-line react-hooks/exhaustive-deps -- quoteIds is an array literal from the caller, re-running on open is what matters
   }, [open]);
 
-  // Per category: total still owed across every selected quote, plus which
-  // quotes have nothing left for it (already covered by an earlier order)
-  // so that gets called out by name instead of just quietly not counting.
+  // Per category: which quotes can actually receive an allocation here.
+  // Безмаржинальные категории (MARGIN_CATEGORIES) — все выбранные
+  // просчёты, даже с нулевым остатком: по ним разрешено ввести сумму
+  // сверху (см. комментарий у MARGIN_CATEGORIES). Остальные — только те,
+  // где реально что-то ещё не оплачено, ровно как раньше.
   const categoryInfo = useMemo(() => {
     return CATEGORIES.map((category) => {
       const owing = quotes.filter((q) => (q.remaining[category] ?? 0) > 0);
       const alreadyPaid = quotes.filter((q) => (q.remaining[category] ?? 0) <= 0);
+      const applicable = MARGIN_CATEGORIES.has(category) ? quotes : owing;
       const totalRemaining = owing.reduce((sum, q) => sum + q.remaining[category], 0);
-      return { category, owing, alreadyPaid, totalRemaining };
+      return { category, owing, alreadyPaid, applicable, totalRemaining };
     });
   }, [quotes]);
 
   const allocations = useMemo(() => {
     return categoryInfo
       .filter((info) => checkedCategories[info.category])
-      .flatMap((info) => info.owing.map((q) => ({ quoteId: q.quoteId, category: info.category, amountRub: q.remaining[info.category] })));
-  }, [categoryInfo, checkedCategories]);
+      .flatMap((info) =>
+        info.applicable.map((q) => ({
+          quoteId: q.quoteId,
+          category: info.category,
+          amountRub: parseLocaleNumber(customAmounts[allocationKey(q.quoteId, info.category)] || "0"),
+        })),
+      )
+      .filter((a) => Number.isFinite(a.amountRub) && a.amountRub > 0);
+  }, [categoryInfo, checkedCategories, customAmounts]);
 
   const totalRub = allocations.reduce((sum, a) => sum + a.amountRub, 0);
   const cnyRateNum = parseLocaleNumber(cnyRate || "0");
@@ -167,46 +207,82 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
         ) : (
           <div className="space-y-4">
             <p className="text-xs text-text-secondary">
-              Выберите, по каким услугам клиент оплатил — сумма посчитается сама, как остаток по этой услуге на
-              каждом из {quotes.length} выбранных просчётов ({quotes.map((q) => `№${q.displayId}`).join(", ")}).
+              Выберите, по каким услугам клиент оплатил — сумма по умолчанию равна остатку, но её можно поправить
+              вручную на {quotes.length === 1 ? "просчёте" : "любом из выбранных просчётов"} (
+              {quotes.map((q) => `№${q.displayId}`).join(", ")}
+              ). По «Товару»/«Доставке по Китаю» больше остатка ввести нельзя, по остальным — можно (округление,
+              курсовая наценка и т.п. — реальная допприбыль).
             </p>
 
             {error && <p className="text-xs text-error">{error}</p>}
 
             <div className="space-y-2">
-              {categoryInfo.map(({ category, owing, alreadyPaid, totalRemaining }) => {
-                const disabled = owing.length === 0;
+              {categoryInfo.map(({ category, owing, alreadyPaid, applicable, totalRemaining }) => {
+                const disabled = applicable.length === 0;
+                const checked = Boolean(checkedCategories[category]);
+                const isMargin = MARGIN_CATEGORIES.has(category);
                 return (
-                  <label
+                  <div
                     key={category}
-                    className={`flex items-start gap-2.5 rounded-lg border p-3 ${
-                      disabled ? "cursor-not-allowed border-border bg-bg opacity-60" : "cursor-pointer border-border hover:border-primary/30"
-                    }`}
+                    className={`rounded-lg border p-3 ${disabled ? "border-border bg-bg opacity-60" : "border-border"}`}
                   >
-                    <input
-                      type="checkbox"
-                      className="mt-0.5"
-                      disabled={disabled}
-                      checked={Boolean(checkedCategories[category])}
-                      onChange={(e) => setCheckedCategories((c) => ({ ...c, [category]: e.target.checked }))}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-text">{CATEGORY_LABEL[category]}</span>
-                        {!disabled && <span className="text-sm font-bold text-text">{fmt(totalRemaining)} ₽</span>}
+                    <label className={`flex items-start gap-2.5 ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}>
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        disabled={disabled}
+                        checked={checked}
+                        onChange={(e) => setCheckedCategories((c) => ({ ...c, [category]: e.target.checked }))}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-medium text-text">{CATEGORY_LABEL[category]}</span>
+                          {!disabled && !checked && <span className="text-sm font-bold text-text">{fmt(totalRemaining)} ₽</span>}
+                        </div>
+                        {disabled ? (
+                          <p className="text-xs text-text-secondary">Уже полностью оплачено по всем выбранным просчётам.</p>
+                        ) : (
+                          !checked &&
+                          alreadyPaid.length > 0 &&
+                          !isMargin && (
+                            <p className="text-xs text-warning">
+                              Уже ранее оплачено по: {alreadyPaid.map((q) => `№${q.displayId}`).join(", ")} — счёт будет только по{" "}
+                              {owing.map((q) => `№${q.displayId}`).join(", ")}.
+                            </p>
+                          )
+                        )}
                       </div>
-                      {disabled ? (
-                        <p className="text-xs text-text-secondary">Уже полностью оплачено по всем выбранным просчётам.</p>
-                      ) : (
-                        alreadyPaid.length > 0 && (
-                          <p className="text-xs text-warning">
-                            Уже ранее оплачено по: {alreadyPaid.map((q) => `№${q.displayId}`).join(", ")} — счёт будет только по{" "}
-                            {owing.map((q) => `№${q.displayId}`).join(", ")}.
-                          </p>
-                        )
-                      )}
-                    </div>
-                  </label>
+                    </label>
+
+                    {checked && (
+                      <div className="mt-2 space-y-1.5 pl-6">
+                        {applicable.map((q) => {
+                          const key = allocationKey(q.quoteId, category);
+                          const remaining = q.remaining[category] ?? 0;
+                          return (
+                            <div key={q.quoteId} className="flex items-center justify-between gap-2">
+                              {applicable.length > 1 && (
+                                <span className="shrink-0 text-xs text-text-secondary">№{q.displayId}</span>
+                              )}
+                              <div className="flex flex-1 items-center justify-end gap-1.5">
+                                {!isMargin && (
+                                  <span className="text-xs text-text-secondary">остаток {fmt(remaining)} ₽</span>
+                                )}
+                                <Input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={customAmounts[key] ?? "0"}
+                                  onChange={(e) => setCustomAmounts((c) => ({ ...c, [key]: e.target.value }))}
+                                  className="h-7 w-28 text-right text-sm"
+                                />
+                                <span className="text-xs text-text-secondary">₽</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>

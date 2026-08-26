@@ -11,7 +11,12 @@ import {
   alreadyPaidRubForCategory,
   type QuotePaymentCategoryValue,
 } from "@/lib/desk-services/buyout-invoice-calc";
-import { computePaymentAllocationPremiumRub, isSelfSourcedFor, type ManagerPremiumRates } from "@/lib/desk-services/quote-profit";
+import {
+  computePaymentAllocationPremiumRub,
+  isSelfSourcedFor,
+  isPremiumEligiblePaymentCategory,
+  type ManagerPremiumRates,
+} from "@/lib/desk-services/quote-profit";
 
 type Category = QuotePaymentCategoryValue;
 const isCategory = isQuotePaymentCategory;
@@ -135,7 +140,15 @@ export async function POST(req: NextRequest) {
     const rawAmountRub = rawQuotePaymentCategoryAmountRub(quote, attachedServicesTotalRub, a.category);
     const alreadyPaidRub = sumAlreadyPaidRubByCategory(existingAllocationsByQuoteId.get(a.quoteId) ?? []);
     const remainingRub = Math.max(0, rawAmountRub - alreadyPaidRubForCategory(alreadyPaidRub, a.category));
-    if (a.amountRub > remainingRub + 0.01) {
+    // "Товар"/"Доставка по Китаю" остаются жёстко привязаны к реальной
+    // себестоимости — превысить остаток по ним нельзя. Безмаржинальные
+    // категории (те же, что уже премируются — см.
+    // PREMIUM_ELIGIBLE_PAYMENT_CATEGORIES в quote-profit.ts) можно
+    // получить сверх расчётного остатка: округление в пользу клиента и
+    // курсовая наценка бота иногда дают реально больше денег, чем сама
+    // услуга стоит по тарифу — это чистая допприбыль, а не оплата сверх
+    // цены за конкретный товар. См. PB-V5 chat 2026-08-26.
+    if (a.amountRub > remainingRub + 0.01 && !isPremiumEligiblePaymentCategory(a.category)) {
       return Response.json(
         {
           error: `Просчёт №${quote.displayId}: остаток по «${a.category}» — ${Math.round(remainingRub)} ₽, а указано ${Math.round(a.amountRub)} ₽.`,
