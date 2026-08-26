@@ -157,6 +157,13 @@ function computeQuoteBreakdown(
   let buyoutIncomeCny: number;
   let buyoutExpenseCny: number;
   let managerServicesPremiumRub: number;
+  // Справочная (не влияет ни на прибыль, ни на премию — те уже посчитаны
+  // выше по реальным ₽) величина: сколько из прибыли блока "Выкуп" дал
+  // именно курс — разница между тем, во сколько ₽ обошлась бы реальная
+  // ¥-закупка по курсу, который выставили клиенту (cnyRateUsed), и тем,
+  // сколько реально потратили в ₽ (по курсу настоящей покупки). null —
+  // пока не куплено (план), считать не от чего. См. PB-V5 chat 2026-08-26.
+  let fxMarginRub: number | null;
   if (q.buyoutFactConfirmed) {
     const sourceProfits = factualSourceProfits(fields);
     const fx = fxProfitRub(fields);
@@ -171,6 +178,7 @@ function computeQuoteBreakdown(
     buyoutExpenseCny = Number(q.actualBuyoutCny);
     const realRate = Number(q.actualBuyoutRateUsed) || Number(q.cnyRateUsed) || 1;
     buyoutIncomeCny = buyoutExpenseCny + profitRub / realRate;
+    fxMarginRub = fx;
   } else if (buyoutBought) {
     buyoutIncomeRub = q.paymentAllocations.reduce((sum, a) => sum + Number(a.amountRub), 0);
     buyoutExpenseRub = financials.buyoutExpenseRub;
@@ -184,6 +192,10 @@ function computeQuoteBreakdown(
     // (CashOrder.amountCny), никакого курса вообще не требуется.
     buyoutIncomeCny = sumAllocationsRealCny(q.paymentAllocations);
     buyoutExpenseCny = financials.buyoutExpenseCny;
+    // Сколько бы ₽ ушло на эту же ¥-закупку по курсу, выставленному
+    // клиенту, минус сколько реально ушло по курсу настоящей покупки —
+    // положительное число = купили ¥ дешевле, чем заложили в цену клиенту.
+    fxMarginRub = financials.buyoutExpenseCny * Number(q.cnyRateUsed) - financials.buyoutExpenseRub;
   } else {
     const estimated = estimatedSourceProfits(fields);
     const fx = estimatedFxProfitRub(q, attachedServicesTotalRub, cnyProfitTiers);
@@ -203,6 +215,7 @@ function computeQuoteBreakdown(
     const planRate = Number(q.cnyRateUsed) || 1;
     buyoutIncomeCny = buyoutIncomeRub / planRate;
     buyoutExpenseCny = buyoutExpenseRub / planRate;
+    fxMarginRub = null;
   }
   const buyoutProfitRub = buyoutIncomeRub - buyoutExpenseRub;
   const buyoutProfitCny = buyoutIncomeCny - buyoutExpenseCny;
@@ -282,6 +295,7 @@ function computeQuoteBreakdown(
       incomeCny: buyoutIncomeCny,
       expenseCny: buyoutExpenseCny,
       profitCny: buyoutProfitCny,
+      fxMarginRub,
       realized: q.buyoutFactConfirmed || buyoutBought,
     },
     cargo: {
@@ -408,6 +422,10 @@ async function buildProfitReport(quoteIds: string[]) {
   const totalCargoIncomeUsd = rows.reduce((sum, r) => sum + r.cargo.incomeUsd, 0);
   const totalCargoExpenseUsd = rows.reduce((sum, r) => sum + r.cargo.expenseUsd, 0);
   const totalCargoProfitUsd = rows.reduce((sum, r) => sum + r.cargo.profitUsd, 0);
+  // Справочно — сколько из totalBuyoutProfitRub дал именно курс (см.
+  // fxMarginRub в computeQuoteBreakdown). null у ещё не купленных сделок
+  // просто не участвует в сумме.
+  const totalBuyoutFxMarginRub = rows.reduce((sum, r) => sum + (r.buyout.fxMarginRub ?? 0), 0);
 
   // investorShares was only needed above to sum into the totals-level
   // investorShares array — the per-quote table doesn't display it (same as
@@ -436,6 +454,7 @@ async function buildProfitReport(quoteIds: string[]) {
       totalCargoIncomeUsd,
       totalCargoExpenseUsd,
       totalCargoProfitUsd,
+      totalBuyoutFxMarginRub,
       profitPoolRub,
       managerPremiumRub,
       investorShares,

@@ -78,6 +78,7 @@ interface ReportTotals {
   totalCargoIncomeUsd: number;
   totalCargoExpenseUsd: number;
   totalCargoProfitUsd: number;
+  totalBuyoutFxMarginRub: number;
   profitPoolRub: number;
   managerPremiumRub: number;
   investorShares: { id: string; name: string; shareType: string; shareRub: number }[];
@@ -476,6 +477,14 @@ function ManagerProfitReportTab() {
                   <div className="flex items-center justify-between border-t border-border pt-1.5 font-bold text-text">
                     <span>Прибыль</span>
                     <span>{fmtCny(report.totals.totalBuyoutProfitCny)}</span>
+                  </div>
+                  {/* Справочно, в ₽ (курсовая разница — величина в рублях по
+                      природе) — не влияет ни на прибыль выше, ни на премии,
+                      просто показывает, сколько из неё дал именно курс.
+                      См. PB-V5 chat 2026-08-26. */}
+                  <div className="flex items-center justify-between text-xs text-text-secondary">
+                    <span>из них маржа с курса (справочно)</span>
+                    <span>{fmt(report.totals.totalBuyoutFxMarginRub)} ₽</span>
                   </div>
                 </div>
               </div>

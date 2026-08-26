@@ -87,6 +87,7 @@ interface ProfitReportPdfTotals {
   totalCargoIncomeUsd: number;
   totalCargoExpenseUsd: number;
   totalCargoProfitUsd: number;
+  totalBuyoutFxMarginRub: number;
   profitPoolRub: number;
   managerPremiumRub: number;
   investorShares: { id: string; name: string; shareType: string; shareRub: number }[];
@@ -169,6 +170,10 @@ function ProfitReportPdfDocument({ rows, totals }: ProfitReportPdfProps) {
             <View style={styles.splitRow}>
               <Text style={styles.splitLabel}>Прибыль</Text>
               <Text style={styles.splitValue}>{fmt(totals.totalBuyoutProfitCny)} ¥</Text>
+            </View>
+            <View style={styles.splitRow}>
+              <Text style={styles.splitLabel}>из них маржа с курса (справочно)</Text>
+              <Text style={styles.splitLabel}>{fmt(totals.totalBuyoutFxMarginRub)} ₽</Text>
             </View>
           </View>
 
