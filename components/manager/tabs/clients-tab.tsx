@@ -593,6 +593,7 @@ function ClientQuotes({
   // — just controlled now (opened from inside the Действия menu) instead
   // of an AlertDialogTrigger wrapping the button directly.
   const [recalculateConfirmOpen, setRecalculateConfirmOpen] = useState(false);
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
   // Owner-only bulk cargo discount, computed off cargo MARGIN, not the full
   // cargo charge — see app/api/manager-quotes/bulk-cargo-discount/route.ts.
   const [cargoMarginDiscountPercent, setCargoMarginDiscountPercent] = useState("");
@@ -679,7 +680,7 @@ function ClientQuotes({
   const [cargoModalBusy, setCargoModalBusy] = useState(false);
   const [cargoModalError, setCargoModalError] = useState<string | null>(null);
   const [recalculatingId, setRecalculatingId] = useState<string | null>(null);
-  const [bulkBusy, setBulkBusy] = useState<"recalculate" | "duplicate" | "status" | "quoteType" | "reassign" | null>(null);
+  const [bulkBusy, setBulkBusy] = useState<"recalculate" | "duplicate" | "status" | "quoteType" | "reassign" | "delete" | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
   // Filters the visible list only — "Выбрать все" and every bulk action
   // below operate on whatever's currently visible, not the client's full
@@ -908,6 +909,23 @@ function ClientQuotes({
         selectedIds.map((id) => fetch(`/api/manager-quotes/${id}/duplicate`, { method: "POST" })),
       );
       if (results.some((r) => !r.ok)) setBulkError("Часть просчётов не удалось дублировать.");
+      setSelectedIds([]);
+      await load();
+      onChanged();
+    } catch {
+      setBulkError("Не удалось связаться с сервером.");
+    } finally {
+      setBulkBusy(null);
+    }
+  }
+
+  async function handleBulkDelete() {
+    if (selectedIds.length === 0 || bulkBusy) return;
+    setBulkBusy("delete");
+    setBulkError(null);
+    try {
+      const results = await Promise.all(selectedIds.map((id) => fetch(`/api/manager-quotes/${id}`, { method: "DELETE" })));
+      if (results.some((r) => !r.ok)) setBulkError("Часть просчётов не удалось удалить.");
       setSelectedIds([]);
       await load();
       onChanged();
@@ -1724,6 +1742,21 @@ function ClientQuotes({
                 </Select>
               )}
 
+              <div className="my-1 border-t border-border" />
+
+              <button
+                type="button"
+                onClick={() => {
+                  setBulkDeleteConfirmOpen(true);
+                  setActionsMenuOpen(false);
+                }}
+                disabled={selectedIds.length === 0 || bulkBusy !== null}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-medium text-error transition-colors hover:bg-error/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {bulkBusy === "delete" ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Trash2 className="h-3.5 w-3.5 shrink-0" />}
+                Удалить {selectedIds.length > 0 && `(${selectedIds.length})`}
+              </button>
+
               {allManagers !== null && (
                 <>
                   <div className="my-1 border-t border-border" />
@@ -1789,6 +1822,24 @@ function ClientQuotes({
             <AlertDialogFooter>
               <AlertDialogCancel>Отмена</AlertDialogCancel>
               <AlertDialogAction onClick={handleBulkRecalculate}>Пересчитать</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={bulkDeleteConfirmOpen} onOpenChange={setBulkDeleteConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Удалить {selectedIds.length} просчёт(ов)?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Выбранные просчёты и приложенные к ним фото переместятся в «Корзину» — их можно будет восстановить
+                оттуда. Вы уверены, что хотите удалить {selectedIds.length} просчёт(ов)?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Отмена</AlertDialogCancel>
+              <AlertDialogAction variant="danger" onClick={handleBulkDelete}>
+                Удалить
+              </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
@@ -2183,8 +2234,8 @@ function ClientQuotes({
                       <AlertDialogHeader>
                         <AlertDialogTitle>Удалить просчёт?</AlertDialogTitle>
                         <AlertDialogDescription>
-                          Просчёт №{outsourceQuoteLabels?.[quote.id] ?? quote.displayId} «{quote.productName}» и приложенные к нему фото будут удалены без
-                          возможности восстановления.
+                          Просчёт №{outsourceQuoteLabels?.[quote.id] ?? quote.displayId} «{quote.productName}» и приложенные к нему фото переместятся в
+                          «Корзину» — их можно будет восстановить оттуда.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
