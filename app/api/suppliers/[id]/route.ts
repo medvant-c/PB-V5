@@ -81,11 +81,13 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: "Удалить может только автор карточки или руководитель." }, { status: 403 });
   }
 
-  const photos = await prisma.deskFile.findMany({ where: { tab: "supplier_showcase", relatedId: id } });
-  for (const photo of photos) {
-    await storage.delete(photo.storageKey);
+  const files = await prisma.deskFile.findMany({
+    where: { relatedId: id, tab: { in: ["supplier_showcase", "supplier_document"] } },
+  });
+  for (const file of files) {
+    await storage.delete(file.storageKey);
   }
-  await prisma.deskFile.deleteMany({ where: { tab: "supplier_showcase", relatedId: id } });
+  await prisma.deskFile.deleteMany({ where: { relatedId: id, tab: { in: ["supplier_showcase", "supplier_document"] } } });
   await prisma.supplier.delete({ where: { id } });
 
   return Response.json({ ok: true });

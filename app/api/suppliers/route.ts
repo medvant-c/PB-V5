@@ -15,6 +15,14 @@ function optionalString(value: FormDataEntryValue | null): string | null {
 // «База поставщиков» — общий справочник, доступен всем менеджерам без
 // ролевых ограничений (тот же принцип, что POST /api/manager-clients).
 // См. план mellow-forging-kay.md, PB-V5 chat 2026-08-23.
+//
+// ?categoryId= — поставщики одной категории (обычный просмотр).
+// ?q= — сквозной поиск по всем категориям сразу (название, описание,
+// реквизиты, контакты) — менеджер не обязан помнить, в какой из ~45
+// категорий лежит нужный поставщик. Фильтрация в JS, а не через Prisma
+// `contains` — SQLite LIKE регистронезависим только для ASCII, а
+// названия/контакты по-русски. Данных мало (внутренний справочник), так
+// что full scan в памяти не проблема. См. PB-V5 chat 2026-08-27.
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
@@ -22,15 +30,28 @@ export async function GET(req: NextRequest) {
   }
 
   const categoryId = req.nextUrl.searchParams.get("categoryId");
-  if (!categoryId) {
-    return Response.json({ error: "Не указана категория." }, { status: 400 });
+  const q = req.nextUrl.searchParams.get("q")?.trim() || null;
+  if (!categoryId && !q) {
+    return Response.json({ error: "Не указана категория или поисковый запрос." }, { status: 400 });
   }
 
-  const suppliers = await prisma.supplier.findMany({
-    where: { categoryId },
+  let suppliers = await prisma.supplier.findMany({
+    where: categoryId ? { categoryId } : undefined,
     orderBy: { createdAt: "desc" },
-    include: { createdByManager: { select: { id: true, name: true } } },
+    include: {
+      createdByManager: { select: { id: true, name: true } },
+      category: { select: { id: true, name: true, emoji: true } },
+    },
   });
+
+  if (q) {
+    const needle = q.toLowerCase();
+    suppliers = suppliers.filter((s) =>
+      [s.name, s.description, s.paymentInfo, s.location, s.contactPerson, s.wechat, s.whatsapp, s.email, s.phone].some((value) =>
+        value?.toLowerCase().includes(needle),
+      ),
+    );
+  }
 
   // DeskFile — общий tab+relatedId дискриминатор, не прямая Prisma-связь
   // (тот же паттерн, что фото просчёта в app/api/manager-quotes/[id]/route.ts) —
@@ -59,6 +80,7 @@ export async function GET(req: NextRequest) {
       phone: s.phone,
       createdAt: s.createdAt,
       createdByManager: s.createdByManager,
+      category: s.category,
       previewPhotoId: firstPhotoIdBySupplier.get(s.id) ?? null,
     })),
   });

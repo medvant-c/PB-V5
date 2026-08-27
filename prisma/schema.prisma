@@ -72,6 +72,11 @@ enum DeskFileTab {
   // менеджера) — relatedId это Supplier id. До нескольких штук на
   // поставщика, как и quotes выше. См. PB-V5 chat 2026-08-23.
   supplier_showcase
+  // Документы поставщика (прайс-листы, договоры и т.п.) в той же «Базе
+  // поставщиков» — отдельно от фото витрины выше, тот же relatedId =
+  // Supplier id, любой тип файла (не только картинки). См. PB-V5 chat
+  // 2026-08-27.
+  supplier_document
 }
 
 model DeskFile {

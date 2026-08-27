@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, Loader2, Mail, MapPin, MessageCircle, Phone, Pencil, Plus, Store, Trash2, User, Wallet } from "lucide-react";
+import { ChevronLeft, Loader2, Mail, MapPin, MessageCircle, Phone, Pencil, Plus, Search, Store, Trash2, User, Wallet } from "lucide-react";
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PhotoPicker } from "@/components/manager/photo-picker";
 import { PhotoLightbox } from "@/components/manager/photo-lightbox";
+import { SupplierDocumentsPanel } from "@/components/manager/supplier-documents-panel";
 import { cn } from "@/lib/utils";
 
 interface CategoryRecord {
@@ -34,6 +35,7 @@ interface SupplierRecord {
   createdAt: string;
   createdByManager: { id: string; name: string };
   previewPhotoId: string | null;
+  category: { id: string; name: string; emoji: string | null };
 }
 
 interface SupplierPhoto {
@@ -69,6 +71,13 @@ function ManagerSuppliersTab() {
   const [loadingSuppliers, setLoadingSuppliers] = useState(false);
   const [expandedSupplierId, setExpandedSupplierId] = useState<string | null>(null);
   const [expandedPhotos, setExpandedPhotos] = useState<SupplierPhoto[]>([]);
+
+  // Поиск по всем поставщикам сразу (не только в выбранной категории) —
+  // менеджер не обязан помнить, в какой из ~45 категорий лежит нужный
+  // поставщик. См. PB-V5 chat 2026-08-27.
+  const [supplierQuery, setSupplierQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SupplierRecord[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<SupplierRecord | null>(null);
@@ -107,6 +116,26 @@ function ManagerSuppliersTab() {
     setExpandedSupplierId(null);
     loadSuppliers(selectedCategoryId);
   }, [selectedCategoryId, loadSuppliers]);
+
+  const runSearch = useCallback((q: string) => {
+    setSearchLoading(true);
+    return fetch(`/api/suppliers?q=${encodeURIComponent(q)}`)
+      .then((res) => res.json())
+      .then((data) => setSearchResults(data.suppliers ?? []))
+      .finally(() => setSearchLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const q = supplierQuery.trim();
+    if (!q) {
+      setSearchResults([]);
+      return;
+    }
+    const timer = setTimeout(() => runSearch(q), 300);
+    return () => clearTimeout(timer);
+  }, [supplierQuery, runSearch]);
+
+  const isSearching = supplierQuery.trim().length > 0;
 
   const selectedCategory = useMemo(() => categories.find((c) => c.id === selectedCategoryId) ?? null, [categories, selectedCategoryId]);
 
@@ -169,7 +198,8 @@ function ManagerSuppliersTab() {
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (submitting || !form.name.trim() || !selectedCategoryId) return;
+    if (submitting || !form.name.trim()) return;
+    if (!editingSupplier && !selectedCategoryId) return;
     setSubmitting(true);
     setFormError(null);
     try {
@@ -185,6 +215,7 @@ function ManagerSuppliersTab() {
           return;
         }
       } else {
+        if (!selectedCategoryId) return;
         const formData = new FormData();
         formData.append("categoryId", selectedCategoryId);
         for (const [key, value] of Object.entries(form)) {
@@ -199,7 +230,10 @@ function ManagerSuppliersTab() {
         }
       }
       setDialogOpen(false);
-      await Promise.all([loadCategories(), loadSuppliers(selectedCategoryId)]);
+      const tasks = [loadCategories()];
+      if (selectedCategoryId) tasks.push(loadSuppliers(selectedCategoryId));
+      if (isSearching) tasks.push(runSearch(supplierQuery.trim()));
+      await Promise.all(tasks);
     } finally {
       setSubmitting(false);
     }
@@ -212,7 +246,10 @@ function ManagerSuppliersTab() {
       const res = await fetch(`/api/suppliers/${id}`, { method: "DELETE" });
       if (res.ok) {
         setExpandedSupplierId(null);
-        await Promise.all([loadCategories(), selectedCategoryId ? loadSuppliers(selectedCategoryId) : Promise.resolve()]);
+        const tasks = [loadCategories()];
+        if (selectedCategoryId) tasks.push(loadSuppliers(selectedCategoryId));
+        if (isSearching) tasks.push(runSearch(supplierQuery.trim()));
+        await Promise.all(tasks);
       } else {
         const data = await res.json();
         window.alert(data.error ?? "Не удалось удалить.");
@@ -233,6 +270,136 @@ function ManagerSuppliersTab() {
     setExpandedPhotos(res.ok ? (data.photos ?? []) : []);
   }
 
+  // Общий рендер карточки поставщика — используется и для списка внутри
+  // категории, и для результатов сквозного поиска (showCategory отличает
+  // второй случай, где нужно показать, в какой категории лежит поставщик).
+  function renderSupplierRow(supplier: SupplierRecord, showCategory: boolean) {
+    const expanded = expandedSupplierId === supplier.id;
+    return (
+      <li key={supplier.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
+        <div className="flex w-full items-center gap-3 text-left">
+          {supplier.previewPhotoId ? (
+            <button
+              type="button"
+              onClick={() => setPreviewPhotoUrl(`/api/suppliers/photos/${supplier.previewPhotoId}`)}
+              className="shrink-0"
+              aria-label="Увеличить фото"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset */}
+              <img
+                src={`/api/suppliers/photos/${supplier.previewPhotoId}`}
+                alt=""
+                className="h-12 w-12 rounded-lg object-cover transition-opacity hover:opacity-80"
+              />
+            </button>
+          ) : (
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-bg text-text-secondary">
+              <Store className="h-5 w-5" />
+            </div>
+          )}
+          <button type="button" onClick={() => toggleExpand(supplier)} className="min-w-0 flex-1 text-left">
+            <div className="truncate font-medium text-text">
+              №{supplier.displayId} {supplier.name}
+            </div>
+            {showCategory && (
+              <div className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-bg px-1.5 py-0.5 text-[10px] text-text-secondary">
+                {supplier.category.emoji || "📦"} {supplier.category.name}
+              </div>
+            )}
+            {supplier.description && <div className="truncate text-xs text-text-secondary">{supplier.description}</div>}
+          </button>
+        </div>
+
+        {expanded && (
+          <div className="mt-3 space-y-2 border-t border-border pt-3">
+            {supplier.description && <p className="text-text-secondary">{supplier.description}</p>}
+            {supplier.paymentInfo && (
+              <p className="flex items-start gap-1.5 text-text-secondary">
+                <Wallet className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {supplier.paymentInfo}
+              </p>
+            )}
+            {supplier.location && (
+              <p className="flex items-start gap-1.5 text-text-secondary">
+                <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {supplier.location}
+              </p>
+            )}
+            {supplier.contactPerson && (
+              <p className="flex items-start gap-1.5 text-text-secondary">
+                <User className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {supplier.contactPerson}
+              </p>
+            )}
+            {supplier.wechat && (
+              <p className="flex items-start gap-1.5 text-text-secondary">
+                <MessageCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> WeChat: {supplier.wechat}
+              </p>
+            )}
+            {supplier.whatsapp && (
+              <p className="flex items-start gap-1.5 text-text-secondary">
+                <MessageCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> WhatsApp: {supplier.whatsapp}
+              </p>
+            )}
+            {supplier.email && (
+              <p className="flex items-start gap-1.5 text-text-secondary">
+                <Mail className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {supplier.email}
+              </p>
+            )}
+            {supplier.phone && (
+              <p className="flex items-start gap-1.5 text-text-secondary">
+                <Phone className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {supplier.phone}
+              </p>
+            )}
+
+            {expandedPhotos.length > 0 && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {expandedPhotos.map((photo) => (
+                  <button
+                    key={photo.id}
+                    type="button"
+                    onClick={() => setPreviewPhotoUrl(`/api/suppliers/photos/${photo.id}`)}
+                    className="shrink-0"
+                    aria-label={`Увеличить фото: ${photo.originalName}`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset */}
+                    <img
+                      src={`/api/suppliers/photos/${photo.id}`}
+                      alt={photo.originalName}
+                      className="h-24 w-24 rounded-lg border border-border object-cover transition-opacity hover:opacity-80"
+                    />
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <SupplierDocumentsPanel supplierId={supplier.id} />
+
+            <div className="flex items-center justify-between pt-2 text-xs text-text-secondary">
+              <span>Добавил: {supplier.createdByManager.name}</span>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => openEditDialog(supplier)}
+                  className="rounded-md p-1.5 text-text-secondary transition-colors hover:bg-black/5 hover:text-primary"
+                  aria-label="Редактировать"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(supplier.id)}
+                  disabled={deletingId === supplier.id}
+                  className="rounded-md p-1.5 text-text-secondary transition-colors hover:bg-error/10 hover:text-error disabled:opacity-50"
+                  aria-label="Удалить"
+                >
+                  {deletingId === supplier.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </li>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-4 lg:h-[calc(100vh-260px)] lg:min-h-140 lg:flex-row">
@@ -240,7 +407,7 @@ function ManagerSuppliersTab() {
         <div
           className={cn(
             "w-full shrink-0 flex-col rounded-xl border border-border bg-surface lg:flex lg:w-80",
-            selectedCategory ? "hidden lg:flex" : "flex",
+            selectedCategory || isSearching ? "hidden lg:flex" : "flex",
           )}
         >
           <div className="space-y-2 border-b border-border p-3">
@@ -313,162 +480,62 @@ function ManagerSuppliersTab() {
           </div>
         </div>
 
-        {/* RIGHT: suppliers in the selected category */}
+        {/* RIGHT: suppliers in the selected category, or search results */}
         <div
           className={cn(
             "min-w-0 flex-1 overflow-y-auto rounded-xl border border-border bg-bg p-4 lg:block lg:min-h-0",
-            selectedCategory ? "block" : "hidden lg:block",
+            selectedCategory || isSearching ? "block" : "hidden lg:block",
           )}
         >
-          {!selectedCategory ? (
-            <EmptyState icon={Store} message="Выберите категорию слева, чтобы увидеть поставщиков." />
-          ) : (
-            <div className="space-y-3">
-              <button
-                type="button"
-                onClick={() => setSelectedCategoryId(null)}
-                className="-ml-1 flex items-center gap-1 text-xs font-medium text-text-secondary hover:text-primary lg:hidden"
-              >
-                <ChevronLeft className="h-3.5 w-3.5" /> Назад к категориям
-              </button>
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-sm font-bold text-text">
-                  {selectedCategory.emoji || "📦"} {selectedCategory.name} · {suppliers.length}
-                </h3>
-                <Button type="button" size="sm" onClick={openCreateDialog}>
-                  <Plus className="h-3.5 w-3.5" /> Добавить поставщика
-                </Button>
-              </div>
-
-              {loadingSuppliers ? (
-                <p className="text-xs text-text-secondary">Загрузка…</p>
-              ) : suppliers.length === 0 ? (
-                <EmptyState icon={Store} compact message="В этой категории пока нет поставщиков." />
-              ) : (
-                <ul className="space-y-2">
-                  {suppliers.map((supplier) => {
-                    const expanded = expandedSupplierId === supplier.id;
-                    return (
-                      <li key={supplier.id} className="rounded-lg border border-border bg-surface p-3 text-sm">
-                        <div className="flex w-full items-center gap-3 text-left">
-                          {supplier.previewPhotoId ? (
-                            <button
-                              type="button"
-                              onClick={() => setPreviewPhotoUrl(`/api/suppliers/photos/${supplier.previewPhotoId}`)}
-                              className="shrink-0"
-                              aria-label="Увеличить фото"
-                            >
-                              {/* eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset */}
-                              <img
-                                src={`/api/suppliers/photos/${supplier.previewPhotoId}`}
-                                alt=""
-                                className="h-12 w-12 rounded-lg object-cover transition-opacity hover:opacity-80"
-                              />
-                            </button>
-                          ) : (
-                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-bg text-text-secondary">
-                              <Store className="h-5 w-5" />
-                            </div>
-                          )}
-                          <button type="button" onClick={() => toggleExpand(supplier)} className="min-w-0 flex-1 text-left">
-                            <div className="truncate font-medium text-text">
-                              №{supplier.displayId} {supplier.name}
-                            </div>
-                            {supplier.description && <div className="truncate text-xs text-text-secondary">{supplier.description}</div>}
-                          </button>
-                        </div>
-
-                        {expanded && (
-                          <div className="mt-3 space-y-2 border-t border-border pt-3">
-                            {supplier.description && <p className="text-text-secondary">{supplier.description}</p>}
-                            {supplier.paymentInfo && (
-                              <p className="flex items-start gap-1.5 text-text-secondary">
-                                <Wallet className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {supplier.paymentInfo}
-                              </p>
-                            )}
-                            {supplier.location && (
-                              <p className="flex items-start gap-1.5 text-text-secondary">
-                                <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {supplier.location}
-                              </p>
-                            )}
-                            {supplier.contactPerson && (
-                              <p className="flex items-start gap-1.5 text-text-secondary">
-                                <User className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {supplier.contactPerson}
-                              </p>
-                            )}
-                            {supplier.wechat && (
-                              <p className="flex items-start gap-1.5 text-text-secondary">
-                                <MessageCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> WeChat: {supplier.wechat}
-                              </p>
-                            )}
-                            {supplier.whatsapp && (
-                              <p className="flex items-start gap-1.5 text-text-secondary">
-                                <MessageCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> WhatsApp: {supplier.whatsapp}
-                              </p>
-                            )}
-                            {supplier.email && (
-                              <p className="flex items-start gap-1.5 text-text-secondary">
-                                <Mail className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {supplier.email}
-                              </p>
-                            )}
-                            {supplier.phone && (
-                              <p className="flex items-start gap-1.5 text-text-secondary">
-                                <Phone className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {supplier.phone}
-                              </p>
-                            )}
-
-                            {expandedPhotos.length > 0 && (
-                              <div className="flex flex-wrap gap-2 pt-1">
-                                {expandedPhotos.map((photo) => (
-                                  <button
-                                    key={photo.id}
-                                    type="button"
-                                    onClick={() => setPreviewPhotoUrl(`/api/suppliers/photos/${photo.id}`)}
-                                    className="shrink-0"
-                                    aria-label={`Увеличить фото: ${photo.originalName}`}
-                                  >
-                                    {/* eslint-disable-next-line @next/next/no-img-element -- session-gated API route, not a static asset */}
-                                    <img
-                                      src={`/api/suppliers/photos/${photo.id}`}
-                                      alt={photo.originalName}
-                                      className="h-24 w-24 rounded-lg border border-border object-cover transition-opacity hover:opacity-80"
-                                    />
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-
-                            <div className="flex items-center justify-between pt-2 text-xs text-text-secondary">
-                              <span>Добавил: {supplier.createdByManager.name}</span>
-                              <div className="flex gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => openEditDialog(supplier)}
-                                  className="rounded-md p-1.5 text-text-secondary transition-colors hover:bg-black/5 hover:text-primary"
-                                  aria-label="Редактировать"
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDelete(supplier.id)}
-                                  disabled={deletingId === supplier.id}
-                                  className="rounded-md p-1.5 text-text-secondary transition-colors hover:bg-error/10 hover:text-error disabled:opacity-50"
-                                  aria-label="Удалить"
-                                >
-                                  {deletingId === supplier.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+          <div className="space-y-3">
+            <div className="relative">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-text-secondary" />
+              <Input
+                placeholder="Поиск поставщика по названию, контактам, реквизитам…"
+                value={supplierQuery}
+                onChange={(e) => setSupplierQuery(e.target.value)}
+                className="h-8 pl-8 text-xs"
+              />
             </div>
-          )}
+
+            {isSearching ? (
+              searchLoading ? (
+                <p className="text-xs text-text-secondary">Поиск…</p>
+              ) : searchResults.length === 0 ? (
+                <EmptyState icon={Store} compact message="Ничего не найдено." />
+              ) : (
+                <ul className="space-y-2">{searchResults.map((supplier) => renderSupplierRow(supplier, true))}</ul>
+              )
+            ) : !selectedCategory ? (
+              <EmptyState icon={Store} message="Выберите категорию слева, чтобы увидеть поставщиков." />
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategoryId(null)}
+                  className="-ml-1 flex items-center gap-1 text-xs font-medium text-text-secondary hover:text-primary lg:hidden"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" /> Назад к категориям
+                </button>
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-bold text-text">
+                    {selectedCategory.emoji || "📦"} {selectedCategory.name} · {suppliers.length}
+                  </h3>
+                  <Button type="button" size="sm" onClick={openCreateDialog}>
+                    <Plus className="h-3.5 w-3.5" /> Добавить поставщика
+                  </Button>
+                </div>
+
+                {loadingSuppliers ? (
+                  <p className="text-xs text-text-secondary">Загрузка…</p>
+                ) : suppliers.length === 0 ? (
+                  <EmptyState icon={Store} compact message="В этой категории пока нет поставщиков." />
+                ) : (
+                  <ul className="space-y-2">{suppliers.map((supplier) => renderSupplierRow(supplier, false))}</ul>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
 
