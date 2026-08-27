@@ -240,6 +240,7 @@ model Client {
   quoteDraftRequests QuoteDraftRequest[]
   dailyPlanItems DailyPlanItem[]
   issuedInvoices IssuedInvoice[]
+  quoteGroups QuoteGroup[]
 
   @@index([createdByManagerId])
 }
@@ -712,6 +713,24 @@ enum QuoteStatus {
   handed_to_client // выдан клиенту
 }
 
+// Произвольные папки-группы просчётов ВНУТРИ одного клиента ("Мебель",
+// "Оборудование" и т.п.) — заводятся менеджером по желанию, чисто для
+// удобной сортировки/фильтра его собственных просчётов, никак не влияют
+// на расчёты. Свои у каждого клиента (не общий на всю компанию — один и
+// тот же клиент может заказывать совсем разные категории товара). См.
+// PB-V5 chat 2026-08-27.
+model QuoteGroup {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id])
+  name      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  quotes    Quote[]
+
+  @@unique([clientId, name])
+}
+
 model Quote {
   id       String  @id @default(cuid())
   displayId Int    @unique
@@ -719,6 +738,9 @@ model Quote {
   client   Client  @relation(fields: [clientId], references: [id])
   managerId String
   manager  Manager @relation(fields: [managerId], references: [id])
+  // Необязательная папка-группа внутри этого клиента — см. QuoteGroup выше.
+  groupId  String?
+  group    QuoteGroup? @relation(fields: [groupId], references: [id])
 
   status          QuoteStatus @default(new_request)
   // Bumped on every status change (not just createdAt) — lets the UI show

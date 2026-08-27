@@ -124,6 +124,8 @@ export async function GET(req: NextRequest) {
       updatedAt: true,
       manager: { select: { id: true, name: true } },
       client: { select: { id: true, name: true, company: true } },
+      groupId: true,
+      group: { select: { id: true, name: true } },
       // Sum of prior "Приходный ордер" partial payments already sitting in
       // the cash ledger for this quote — the client card's "Подтвердить
       // факт" mini-form shows this so the amount typed for "оплата от

@@ -144,6 +144,8 @@ interface QuoteRecord {
   updatedAt: string;
   manager: { id: string; name: string };
   client: { id: string; name: string; company: string | null };
+  groupId: string | null;
+  group: { id: string; name: string } | null;
   firstPhotoId: string | null;
   clientComment: string;
   managerComment: string;
@@ -563,6 +565,14 @@ function ClientQuotes({
   // См. PB-V5 chat 2026-08-08.
   const [zoomedPhotoId, setZoomedPhotoId] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<QuoteRecord[]>([]);
+  // Произвольные папки-группы этого клиента ("Мебель"/"Оборудование") —
+  // только в режиме одного клиента (isGlobal=false), группы свои у
+  // каждого. См. QuoteGroup в prisma/schema.prisma, PB-V5 chat 2026-08-27.
+  const [groups, setGroups] = useState<{ id: string; name: string; quoteCount: number }[]>([]);
+  const [groupFilter, setGroupFilter] = useState<string>("all");
+  const [newGroupName, setNewGroupName] = useState("");
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [groupBusyId, setGroupBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [changingStatusId, setChangingStatusId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -680,13 +690,19 @@ function ClientQuotes({
   const [cargoModalBusy, setCargoModalBusy] = useState(false);
   const [cargoModalError, setCargoModalError] = useState<string | null>(null);
   const [recalculatingId, setRecalculatingId] = useState<string | null>(null);
-  const [bulkBusy, setBulkBusy] = useState<"recalculate" | "duplicate" | "status" | "quoteType" | "reassign" | "delete" | null>(null);
+  const [bulkBusy, setBulkBusy] = useState<"recalculate" | "duplicate" | "status" | "quoteType" | "reassign" | "delete" | "group" | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
   // Filters the visible list only — "Выбрать все" and every bulk action
   // below operate on whatever's currently visible, not the client's full
   // quote history, matching what the manager is actually looking at.
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const filteredQuotes = statusFilter === "all" ? quotes : quotes.filter((q) => q.status === statusFilter);
+  const statusFilteredQuotes = statusFilter === "all" ? quotes : quotes.filter((q) => q.status === statusFilter);
+  const filteredQuotes =
+    groupFilter === "all"
+      ? statusFilteredQuotes
+      : groupFilter === "ungrouped"
+        ? statusFilteredQuotes.filter((q) => !q.groupId)
+        : statusFilteredQuotes.filter((q) => q.groupId === groupFilter);
 
   // Search/sort — only surfaced in "Все просчёты" mode (see isGlobal
   // above); a single client's own list is short enough that the plain
@@ -746,9 +762,81 @@ function ClientQuotes({
       .finally(() => setLoading(false));
   }, [clientId]);
 
+  const loadGroups = useCallback(() => {
+    if (!clientId) return Promise.resolve();
+    return fetch(`/api/manager-clients/${clientId}/quote-groups`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setGroups(data?.groups ?? []));
+  }, [clientId]);
+
   useEffect(() => {
     load();
-  }, [load, refreshKey]);
+    loadGroups();
+  }, [load, loadGroups, refreshKey]);
+
+  useEffect(() => {
+    setGroupFilter("all");
+  }, [clientId]);
+
+  async function handleCreateGroup() {
+    if (!clientId || creatingGroup || !newGroupName.trim()) return;
+    setCreatingGroup(true);
+    try {
+      const res = await fetch(`/api/manager-clients/${clientId}/quote-groups`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newGroupName }),
+      });
+      if (res.ok) {
+        setNewGroupName("");
+        await loadGroups();
+      } else {
+        const data = await res.json();
+        setBulkError(data.error ?? "Не удалось создать группу.");
+      }
+    } finally {
+      setCreatingGroup(false);
+    }
+  }
+
+  async function handleAssignGroup(quoteId: string, groupId: string | null) {
+    setGroupBusyId(quoteId);
+    try {
+      const res = await fetch(`/api/manager-quotes/${quoteId}/group`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groupId }),
+      });
+      if (res.ok) {
+        await Promise.all([load(), loadGroups()]);
+      }
+    } finally {
+      setGroupBusyId(null);
+    }
+  }
+
+  async function handleBulkAssignGroup(groupId: string | null) {
+    if (selectedIds.length === 0 || bulkBusy) return;
+    setBulkBusy("group");
+    setBulkError(null);
+    try {
+      const results = await Promise.all(
+        selectedIds.map((id) =>
+          fetch(`/api/manager-quotes/${id}/group`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ groupId }),
+          }),
+        ),
+      );
+      if (results.some((r) => !r.ok)) setBulkError("Часть просчётов не удалось переместить.");
+      await Promise.all([load(), loadGroups()]);
+    } catch {
+      setBulkError("Не удалось связаться с сервером.");
+    } finally {
+      setBulkBusy(null);
+    }
+  }
 
   async function handleStatusChange(quoteId: string, status: string) {
     setChangingStatusId(quoteId);
@@ -1463,6 +1551,40 @@ function ClientQuotes({
             ))}
           </SelectContent>
         </Select>
+
+        {!isGlobal && (
+          <>
+            <Select value={groupFilter} onValueChange={(value) => { setGroupFilter(value); setSelectedIds([]); }}>
+              <SelectTrigger className="h-8 w-44 text-xs">
+                <SelectValue placeholder="Все группы" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все группы</SelectItem>
+                <SelectItem value="ungrouped">Без группы</SelectItem>
+                {groups.map((g) => (
+                  <SelectItem key={g.id} value={g.id}>
+                    {g.name} ({g.quoteCount})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="flex items-center gap-1">
+              <Input
+                placeholder="Новая группа…"
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleCreateGroup();
+                }}
+                className="h-8 w-32 text-xs"
+              />
+              <Button type="button" size="sm" variant="outline" onClick={handleCreateGroup} disabled={creatingGroup || !newGroupName.trim()}>
+                {creatingGroup ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              </Button>
+            </div>
+          </>
+        )}
+
         <label className="flex w-fit items-center gap-1.5 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs font-medium text-text-secondary">
           <input
             type="checkbox"
@@ -1736,6 +1858,33 @@ function ClientQuotes({
                     {teamManagers.map((m) => (
                       <SelectItem key={m.id} value={m.id}>
                         {m.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              {!isGlobal && (
+                <Select
+                  value=""
+                  onValueChange={(v) => {
+                    handleBulkAssignGroup(v === "ungrouped" ? null : v);
+                    setActionsMenuOpen(false);
+                  }}
+                  disabled={selectedIds.length === 0 || bulkBusy !== null}
+                >
+                  <SelectTrigger className="h-8 w-full text-xs">
+                    {bulkBusy === "group" ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <SelectValue placeholder={`Переместить в группу${selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}`} />
+                    )}
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ungrouped">Без группы</SelectItem>
+                    {groups.map((g) => (
+                      <SelectItem key={g.id} value={g.id}>
+                        {g.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -2073,6 +2222,12 @@ function ClientQuotes({
                 </SelectContent>
               </Select>
 
+              {!isGlobal && quote.group && (
+                <span className="shrink-0 rounded-full bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary" title="Группа">
+                  {quote.group.name}
+                </span>
+              )}
+
               <button
                 type="button"
                 onClick={() => setExpandedCommentId(expandedCommentId === quote.id ? null : quote.id)}
@@ -2202,6 +2357,31 @@ function ClientQuotes({
                         Ставка премии за карго
                       </button>
                     )}
+
+                  {!isGlobal && (
+                    <div className="px-1 py-1">
+                      <Select
+                        value={quote.groupId ?? "ungrouped"}
+                        onValueChange={(v) => {
+                          handleAssignGroup(quote.id, v === "ungrouped" ? null : v);
+                          setRowActionsMenuId(null);
+                        }}
+                        disabled={groupBusyId === quote.id}
+                      >
+                        <SelectTrigger className="h-8 w-full text-xs">
+                          {groupBusyId === quote.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <SelectValue placeholder="Группа" />}
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ungrouped">Без группы</SelectItem>
+                          {groups.map((g) => (
+                            <SelectItem key={g.id} value={g.id}>
+                              {g.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
 
                   <button
                     type="button"
