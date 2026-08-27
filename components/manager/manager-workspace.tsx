@@ -171,6 +171,36 @@ function ManagerWorkspace({ name, role, impersonatedByName, permissions }: Manag
       .catch(() => {});
   }, [role, activeSection]);
 
+  // Курс ¥→₽ прямо в шапке кабинета — то же значение (TariffSettings.
+  // cnyRateRub), что менеджер использует при расчёте просчёта, и то же,
+  // что автоматически обновляет Telegram-бот из канала с курсом (см.
+  // app/api/telegram-cny-rate-webhook/route.ts) — не пересчитывается
+  // заново, просто читается из той же таблицы. Публичное поле (не маржа),
+  // видно всем ролям. Опрашивается раз в 5 минут, чтобы не требовать
+  // перезагрузки страницы, когда бот обновляет курс в течение дня. См.
+  // PB-V5 chat 2026-08-27.
+  const [cnyRate, setCnyRate] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    function loadCnyRate() {
+      fetch("/api/manager-tariffs")
+        .then((res) => res.json())
+        .then((data) => {
+          // TariffSettings.cnyRateRub is a Prisma Decimal — serialized to
+          // JSON as a string, not a number.
+          const parsed = Number(data.settings?.cnyRateRub);
+          if (!cancelled) setCnyRate(Number.isFinite(parsed) ? parsed : null);
+        })
+        .catch(() => {});
+    }
+    loadCnyRate();
+    const interval = setInterval(loadCnyRate, 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
   // Clicking a nav tab jumps straight to that tab's content, skipping past
   // the dashboard above it — the dashboard is useful to glance at on load,
   // not something to scroll past every time you switch tabs.
@@ -271,15 +301,25 @@ function ManagerWorkspace({ name, role, impersonatedByName, permissions }: Manag
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleLogout}
-            disabled={loggingOut}
-            className="flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-error/10 hover:text-error disabled:opacity-50"
-          >
-            <LogOut className="h-4 w-4 shrink-0" />
-            <span className="hidden sm:inline">Выйти</span>
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {cnyRate !== null && (
+              <div
+                className="hidden items-center gap-1 rounded-full border border-primary/20 bg-white/60 px-3 py-1.5 text-xs font-semibold text-text sm:flex"
+                title="Курс ¥→₽, автоматически обновляется ботом"
+              >
+                ¥ = {cnyRate.toFixed(2)} ₽
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-error/10 hover:text-error disabled:opacity-50"
+            >
+              <LogOut className="h-4 w-4 shrink-0" />
+              <span className="hidden sm:inline">Выйти</span>
+            </button>
+          </div>
         </div>
 
         <nav className="mt-3 hidden flex-wrap items-center gap-1 border-t border-primary/10 pt-3 lg:flex">
@@ -321,6 +361,7 @@ function ManagerWorkspace({ name, role, impersonatedByName, permissions }: Manag
               <div>
                 <h2 className="text-sm font-bold text-text">{name}</h2>
                 <p className="text-xs text-text-secondary">{ROLE_LABEL[role]} · Panda Bridge</p>
+                {cnyRate !== null && <p className="mt-1 text-xs font-semibold text-text">¥ = {cnyRate.toFixed(2)} ₽</p>}
               </div>
               <button
                 type="button"
