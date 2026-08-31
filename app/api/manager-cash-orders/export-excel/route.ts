@@ -63,14 +63,17 @@ export async function GET(req: NextRequest) {
     }),
     // Тот же учёт переводов между счетами в приход/расход, что и в GET
     // /api/manager-cash-orders — см. комментарий там. Держим в синхроне,
-    // чтобы Excel-отчёт не расходился с тем, что видно на экране.
+    // чтобы Excel-отчёт не расходился с тем, что видно на экране. Полный
+    // набор полей (не только amountCny) — нужен, чтобы показать каждый
+    // перевод отдельной строкой в листе "Операции", а не только суммой в
+    // сводке. См. PB-V5 chat 2026-08-31.
     prisma.cashTransfer.findMany({
       where: { date: { gte: monthStart, lt: monthEnd }, ...(accountIdFilter ? { toAccountId: accountIdFilter } : {}) },
-      select: { amountCny: true },
+      include: { fromAccount: { select: { name: true } }, createdByManager: { select: { name: true } } },
     }),
     prisma.cashTransfer.findMany({
       where: { date: { gte: monthStart, lt: monthEnd }, ...(accountIdFilter ? { fromAccountId: accountIdFilter } : {}) },
-      select: { amountCny: true },
+      include: { toAccount: { select: { name: true } }, createdByManager: { select: { name: true } } },
     }),
   ]);
 
@@ -109,18 +112,49 @@ export async function GET(req: NextRequest) {
     expenseCny,
     closingBalanceCny,
     categoryBreakdown: [...breakdownMap.values()],
-    orders: monthOrders.map((order) => ({
-      date: order.date,
-      type: order.type,
-      categoryName: order.category.name,
-      clientName: order.client?.name ?? null,
-      amount: Number(order.amount),
-      currency: order.currency,
-      cnyToCurrencyRate: Number(order.cnyToCurrencyRate),
-      amountCny: Number(order.amountCny),
-      comment: order.comment,
-      createdByName: order.createdByManager.name,
-    })),
+    // Переводы — отдельными строками вместе с обычными ордерами (не только
+    // суммой в сводке, см. breakdownMap выше) — иначе в листе "Операции"
+    // не видно, что конкретно за перевод (когда, от кого/кому, на какую
+    // сумму) сформировал ту самую сумму в "Итого приход/расход". См. PB-V5
+    // chat 2026-08-31.
+    orders: [
+      ...monthOrders.map((order) => ({
+        date: order.date,
+        type: order.type,
+        categoryName: order.category.name,
+        clientName: order.client?.name ?? null,
+        amount: Number(order.amount),
+        currency: order.currency,
+        cnyToCurrencyRate: Number(order.cnyToCurrencyRate),
+        amountCny: Number(order.amountCny),
+        comment: order.comment,
+        createdByName: order.createdByManager.name,
+      })),
+      ...transfersInScope.map((t) => ({
+        date: t.date,
+        type: "income" as const,
+        categoryName: "Перевод между счетами",
+        clientName: null,
+        amount: Number(t.amount),
+        currency: t.currency,
+        cnyToCurrencyRate: Number(t.cnyToCurrencyRate),
+        amountCny: Number(t.amountCny),
+        comment: [`от «${t.fromAccount.name}»`, t.comment].filter(Boolean).join(" — "),
+        createdByName: t.createdByManager.name,
+      })),
+      ...transfersOutScope.map((t) => ({
+        date: t.date,
+        type: "expense" as const,
+        categoryName: "Перевод между счетами",
+        clientName: null,
+        amount: Number(t.amount),
+        currency: t.currency,
+        cnyToCurrencyRate: Number(t.cnyToCurrencyRate),
+        amountCny: Number(t.amountCny),
+        comment: [`на «${t.toAccount.name}»`, t.comment].filter(Boolean).join(" — "),
+        createdByName: t.createdByManager.name,
+      })),
+    ].sort((a, b) => a.date.getTime() - b.date.getTime()),
   });
 
   const fileName = `Кассовый отчёт — ${monthLabel}.xlsx`;
