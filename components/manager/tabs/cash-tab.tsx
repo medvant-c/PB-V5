@@ -498,13 +498,23 @@ function ManagerCashTab() {
   }
 
   async function handleExport() {
-    const res = await fetch(`/api/manager-cash-orders/export-excel?month=${month}`);
+    const params = new URLSearchParams({ month });
+    // Без этого отчёт всегда выгружал ВСЕ счета сразу, даже когда на
+    // экране открыт конкретный счёт (например, «Антон») — сумма в файле
+    // расходилась с тем, что видно в интерфейсе. См. PB-V5 chat 2026-08-31.
+    if (filterAccountId !== "all") params.set("accountId", filterAccountId);
+    const res = await fetch(`/api/manager-cash-orders/export-excel?${params.toString()}`);
     if (!res.ok) return;
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `Кассовый отчёт — ${month}.xlsx`;
+    // Имя файла берём из ответа сервера (учитывает выбранный счёт), а не
+    // хардкодим — иначе имя файла не совпадало бы с его реальным
+    // содержимым при выбранном фильтре по счёту.
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = disposition.match(/filename\*=UTF-8''([^;]+)/);
+    a.download = match ? decodeURIComponent(match[1]) : `Кассовый отчёт — ${month}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
   }

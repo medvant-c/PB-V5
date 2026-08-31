@@ -87,7 +87,13 @@ export async function GET(req: NextRequest) {
     breakdownMap.set(order.categoryId, entry);
   }
 
-  const monthLabel = `${MONTH_LABEL[monthStart.getMonth()]} ${monthStart.getFullYear()}`;
+  // Название счёта — в заголовке листа и в имени файла (оба берутся из
+  // monthLabel), чтобы выгруженный отчёт по конкретному счёту нельзя было
+  // спутать со сводным по всем счетам. См. PB-V5 chat 2026-08-31.
+  const accountName = accountIdFilter
+    ? (await prisma.cashAccount.findUnique({ where: { id: accountIdFilter }, select: { name: true } }))?.name
+    : null;
+  const monthLabel = `${MONTH_LABEL[monthStart.getMonth()]} ${monthStart.getFullYear()}${accountName ? ` — ${accountName}` : ""}`;
 
   const buffer = await renderCashReportExcel({
     monthLabel,
