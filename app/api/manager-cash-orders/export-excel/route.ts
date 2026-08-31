@@ -86,6 +86,13 @@ export async function GET(req: NextRequest) {
     entry.totalCny += Number(order.amountCny);
     breakdownMap.set(order.categoryId, entry);
   }
+  // CashTransfer не имеет статьи (это не CashOrder — см. модель в
+  // prisma/schema.prisma), поэтому не попадает в цикл выше, хотя уже
+  // учтён в incomeCny/expenseCny. Без этой строки «Итого приход/расход» в
+  // отчёте не сходился с суммой видимых статей, если за период были
+  // переводы между своими счетами. См. PB-V5 chat 2026-08-31.
+  if (transfersInCny > 0) breakdownMap.set("__transfer_in__", { name: "Перевод между счетами", type: "income", totalCny: transfersInCny });
+  if (transfersOutCny > 0) breakdownMap.set("__transfer_out__", { name: "Перевод между счетами", type: "expense", totalCny: transfersOutCny });
 
   // Название счёта — в заголовке листа и в имени файла (оба берутся из
   // monthLabel), чтобы выгруженный отчёт по конкретному счёту нельзя было
