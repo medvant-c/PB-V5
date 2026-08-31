@@ -3,6 +3,7 @@ import sharp from "sharp";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { storage } from "@/lib/storage";
 import { mintPublicPhotoToken } from "@/lib/desk-services/product-search-photo-tokens";
+import { getAppOrigin } from "@/lib/app-url";
 
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
@@ -45,7 +46,11 @@ export async function POST(req: NextRequest) {
   const buffer = await sharp(originalBuffer).jpeg({ quality: 92 }).toBuffer();
   const stored = await storage.upload(buffer, "photo.jpg");
   const token = mintPublicPhotoToken(stored.key, "image/jpeg");
-  const publicUrl = new URL(`/api/product-lookup/public-photo/${token}`, req.url).toString();
+  // req.url отражает внутренний адрес процесса за nginx (localhost:3000),
+  // не настоящий домен — bhapi.ru физически не смог бы его получить.
+  // getAppOrigin() — тот же APP_BASE_URL, что уже используется для ссылок
+  // в письмах (см. lib/app-url.ts). См. PB-V5 chat 2026-08-31.
+  const publicUrl = `${getAppOrigin(req)}/api/product-lookup/public-photo/${token}`;
 
   return Response.json({ storageKey: stored.key, publicUrl });
 }
