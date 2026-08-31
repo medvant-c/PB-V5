@@ -10,6 +10,14 @@ import { parseLocaleNumber } from "@/lib/number";
 import { DESTINATION_COUNTRIES, type DestinationCountry } from "@/lib/destination-countries";
 import { cn } from "@/lib/utils";
 
+interface WbDimensions {
+  weightKg: number | null;
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
+  matchedFrom: { weight: string | null; length: string | null; width: string | null; height: string | null };
+}
+
 interface WbSearchProduct {
   id: number;
   link: string;
@@ -17,6 +25,9 @@ interface WbSearchProduct {
   rating: number;
   feedbacks: number;
   description: string;
+  imageUrl: string | null;
+  title: string;
+  dimensions: WbDimensions | null;
 }
 
 interface Item1688SearchResult {
@@ -108,8 +119,7 @@ function ManagerProductLookupTab() {
   const [wbSearching, setWbSearching] = useState(false);
   const [wbResults, setWbResults] = useState<WbSearchProduct[]>([]);
   const [wbSelectedLink, setWbSelectedLink] = useState<string | null>(null);
-  const [wbItemLoading, setWbItemLoading] = useState(false);
-  const [wbMatchedFrom, setWbMatchedFrom] = useState<Record<string, string | null> | null>(null);
+  const [wbMatchedFrom, setWbMatchedFrom] = useState<WbDimensions["matchedFrom"] | null>(null);
   const [wbError, setWbError] = useState<string | null>(null);
 
   const [weightKgStr, setWeightKgStr] = useState("");
@@ -141,40 +151,19 @@ function ManagerProductLookupTab() {
     }
   }
 
-  async function selectWbProduct(link: string) {
-    setWbSelectedLink(link);
-    setWbItemLoading(true);
+  // Вес/габариты и фото уже пришли вместе с результатами поиска (см.
+  // /api/product-lookup/wb-search) — выбор кандидата мгновенный, без
+  // повторного похода к bhapi за той же карточкой.
+  function selectWbProduct(product: WbSearchProduct) {
+    setWbSelectedLink(product.link);
     setWbError(null);
-    setWbMatchedFrom(null);
-    try {
-      const res = await fetch("/api/product-lookup/wb-item", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: link }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setWbError(data.error ?? "Не удалось получить карточку товара.");
-        return;
-      }
-      const dims = data.dimensions as {
-        weightKg: number | null;
-        lengthCm: number | null;
-        widthCm: number | null;
-        heightCm: number | null;
-        matchedFrom: Record<string, string | null>;
-      };
-      if (dims.weightKg !== null) setWeightKgStr(String(dims.weightKg));
-      if (dims.lengthCm !== null) setLengthCmStr(String(dims.lengthCm));
-      if (dims.widthCm !== null) setWidthCmStr(String(dims.widthCm));
-      if (dims.heightCm !== null) setHeightCmStr(String(dims.heightCm));
-      setWbMatchedFrom(dims.matchedFrom);
-      if (!productName.trim() && data.item?.title) setProductName(data.item.title);
-    } catch {
-      setWbError("Не удалось связаться с сервером.");
-    } finally {
-      setWbItemLoading(false);
-    }
+    const dims = product.dimensions;
+    setWeightKgStr(dims?.weightKg !== null && dims?.weightKg !== undefined ? String(dims.weightKg) : "");
+    setLengthCmStr(dims?.lengthCm !== null && dims?.lengthCm !== undefined ? String(dims.lengthCm) : "");
+    setWidthCmStr(dims?.widthCm !== null && dims?.widthCm !== undefined ? String(dims.widthCm) : "");
+    setHeightCmStr(dims?.heightCm !== null && dims?.heightCm !== undefined ? String(dims.heightCm) : "");
+    setWbMatchedFrom(dims?.matchedFrom ?? null);
+    if (!productName.trim() && product.title) setProductName(product.title);
   }
 
   // --- 1688: поиск по фото (когда заработает), по названию, вручную ---
@@ -446,28 +435,36 @@ function ManagerProductLookupTab() {
           </Button>
         </div>
         {wbError && <p className="mt-2 text-xs text-error">{wbError}</p>}
+        {wbSearching && (
+          <p className="mt-2 flex items-center gap-1.5 text-xs text-text-secondary">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Ищу и подтягиваю фото/характеристики…
+          </p>
+        )}
         {wbResults.length > 0 && (
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
             {wbResults.map((p) => (
               <button
                 key={p.id}
                 type="button"
-                onClick={() => selectWbProduct(p.link)}
+                onClick={() => selectWbProduct(p)}
                 className={cn(
                   "rounded-lg border p-2 text-left text-xs transition-colors",
                   wbSelectedLink === p.link ? "border-primary bg-primary/5" : "border-border hover:bg-bg",
                 )}
               >
+                {p.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- внешняя картинка с CDN Wildberries, не наш storage
+                  <img src={p.imageUrl} alt="" className="mb-1 h-16 w-full rounded object-cover" />
+                ) : (
+                  <div className="mb-1 flex h-16 w-full items-center justify-center rounded bg-bg text-[10px] text-text-secondary">
+                    без фото
+                  </div>
+                )}
                 <div className="line-clamp-2 font-medium text-text">{p.description}</div>
                 <div className="mt-1 text-text-secondary">{Math.round(p.price).toLocaleString("ru-RU")} ₽ · ★{p.rating}</div>
               </button>
             ))}
           </div>
-        )}
-        {wbItemLoading && (
-          <p className="mt-2 flex items-center gap-1.5 text-xs text-text-secondary">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Получаю характеристики…
-          </p>
         )}
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div>
