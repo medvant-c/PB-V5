@@ -128,6 +128,27 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+// "YYYY-MM-DDTHH:mm" in the BROWSER's own local time zone (not UTC) — the
+// value a <input type="datetime-local"> needs, both as a default ("now")
+// and when prefilling from an existing order's stored date. Building this
+// from getFullYear()/getMonth()/etc (not toISOString(), which is UTC)
+// keeps what the manager sees in the field matching their own clock.
+function toDatetimeLocalValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function nowDatetimeLocal(): string {
+  return toDatetimeLocalValue(new Date());
+}
+
+// Дата+время операции — та же пара, что теперь и в кассовом отчёте
+// (lib/desk-services/cash-report-excel.ts). См. PB-V5 chat 2026-09-06.
+function formatDateTime(date: string | Date): string {
+  const d = new Date(date);
+  return `${d.toLocaleDateString("ru-RU")} ${d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}`;
+}
+
 const EMPTY_DRAFT = {
   date: todayIso(),
   accountId: "",
@@ -297,8 +318,14 @@ function ManagerCashTab() {
     setEditingOrderId(null);
     setDraft({
       ...EMPTY_DRAFT,
+      // EMPTY_DRAFT.date фиксируется один раз при загрузке модуля — если
+      // просто разложить его через spread, дата/время окажутся тем
+      // моментом, когда открылась вкладка, а не когда реально открыт
+      // диалог (тем более важно теперь, когда указывается ещё и точное
+      // время, не только день). См. PB-V5 chat 2026-09-06.
+      date: nowDatetimeLocal(),
       // Если сейчас смотрим ленту одного счёта — новый ордер по умолчанию
-      // на нём же; иначе первый по списку (Александр).
+      // на нём же; иначе первый по списку (см. CashAccount.sortOrder).
       accountId: (filterAccountId !== "all" ? filterAccountId : accounts[0]?.id) ?? "",
       categoryId: (type === "income" ? incomeCategories : expenseCategories)[0]?.id ?? "",
     });
@@ -311,7 +338,7 @@ function ManagerCashTab() {
     setDialogType(order.type);
     setEditingOrderId(order.id);
     setDraft({
-      date: order.date.slice(0, 10),
+      date: toDatetimeLocalValue(new Date(order.date)),
       accountId: order.accountId,
       categoryId: order.categoryId,
       clientId: order.clientId ?? "",
@@ -606,6 +633,7 @@ function ManagerCashTab() {
   function openTransferDialog() {
     setTransferDraft({
       ...EMPTY_TRANSFER_DRAFT,
+      date: nowDatetimeLocal(),
       fromAccountId: accounts[0]?.id ?? "",
       toAccountId: accounts[1]?.id ?? "",
     });
@@ -919,9 +947,7 @@ function ManagerCashTab() {
               {ledgerRows.map((row) =>
                 row.kind === "transfer" ? (
                   <tr key={`transfer-${row.id}`} className="border-b border-border last:border-0">
-                    <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">
-                      {new Date(row.transfer.date).toLocaleDateString("ru-RU")}
-                    </td>
+                    <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">{formatDateTime(row.transfer.date)}</td>
                     <td className="px-3 py-1.5">
                       <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Перевод</span>
                     </td>
@@ -956,9 +982,7 @@ function ManagerCashTab() {
                   </tr>
                 ) : (
                 <tr key={`order-${row.id}`} className="border-b border-border last:border-0">
-                  <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">
-                    {new Date(row.order.date).toLocaleDateString("ru-RU")}
-                  </td>
+                  <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">{formatDateTime(row.order.date)}</td>
                   <td className="px-3 py-1.5">
                     <span
                       className={cn(
@@ -1098,7 +1122,7 @@ function ManagerCashTab() {
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label>Дата</Label>
-              <Input type="date" value={draft.date} onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))} />
+              <Input type="datetime-local" value={draft.date} onChange={(e) => setDraft((d) => ({ ...d, date: e.target.value }))} />
             </div>
 
             <div className="space-y-1.5">
@@ -1347,7 +1371,7 @@ function ManagerCashTab() {
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label>Дата</Label>
-              <Input type="date" value={transferDraft.date} onChange={(e) => setTransferDraft((d) => ({ ...d, date: e.target.value }))} />
+              <Input type="datetime-local" value={transferDraft.date} onChange={(e) => setTransferDraft((d) => ({ ...d, date: e.target.value }))} />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1.5">

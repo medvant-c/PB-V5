@@ -91,6 +91,7 @@ function buildOrdersSheet(workbook: ExcelJS.Workbook, orders: CashOrderExcelRow[
   const sheet = workbook.addWorksheet("Операции");
   const columns = [
     { header: "Дата", width: 12 },
+    { header: "Время", width: 8 },
     { header: "Тип", width: 10 },
     { header: "Статья", width: 30 },
     { header: "Клиент", width: 22 },
@@ -112,6 +113,7 @@ function buildOrdersSheet(workbook: ExcelJS.Workbook, orders: CashOrderExcelRow[
   for (const order of orders) {
     const row = sheet.addRow([
       order.date.toLocaleDateString("ru-RU"),
+      order.date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }),
       TYPE_LABEL[order.type] ?? order.type,
       order.categoryName,
       order.clientName ?? "",
