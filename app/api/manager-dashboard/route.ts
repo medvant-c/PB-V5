@@ -546,6 +546,14 @@ export async function GET(req: NextRequest) {
   let periodOverall: ReturnType<typeof summarize> | null = null;
   let periodExpectedIncomeRub: number | null = null;
   let periodActualIncomeRub: number | null = null;
+  // Per-manager премия за выбранный период, по датам РЕАЛЬНЫХ событий
+  // (buildPeriodReport — тот же расчёт, что и "Реальные деньги за период" в
+  // Отчёте о прибыли), а не по дате создания просчёта — иначе оплата,
+  // пришедшая в этом периоде по просчёту, СОЗДАННОМУ раньше начала периода,
+  // была бы не видна в KPI по сотрудникам (реальный кейс — просчёт создан
+  // 27 августа, оплата и премия прошли 4 сентября, период "Месяц" в
+  // сентябре показывал 0). См. PB-V5 chat 2026-09-06.
+  let realPeriodManagerPremiumRub: Map<string, number> | null = null;
   const dashboardFromParam = req.nextUrl.searchParams.get("from");
   const dashboardToParam = req.nextUrl.searchParams.get("to");
   if (dashboardFromParam && dashboardToParam) {
@@ -554,17 +562,21 @@ export async function GET(req: NextRequest) {
     if (!Number.isNaN(dashboardFrom.getTime()) && !Number.isNaN(dashboardTo.getTime())) {
       const periodQuotes = quotes.filter((q) => q.createdAt >= dashboardFrom && q.createdAt < dashboardTo);
       periodOverall = summarize(periodQuotes, cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials);
-      if (session.role === "owner") {
-        periodExpectedIncomeRub =
-          periodOverall.potentialProscetRub + periodOverall.potentialBuyoutRub + periodOverall.potentialCargoProfitRub + periodOverall.potentialFxProfitRub - periodOverall.estimatedPremiumRub;
-
+      if (session.role === "owner" || session.role === "senior") {
         const realPeriod = await buildPeriodReport({ from: dashboardFrom, to: dashboardTo });
-        periodOverall.factualProscetRub = realPeriod.proscetRub;
-        periodOverall.factualBuyoutRub = realPeriod.buyoutRub;
-        periodOverall.factualDiscountRub = realPeriod.discountRub;
-        periodOverall.factualCargoProfitRub = realPeriod.cargoProfitRub;
-        periodOverall.factualPremiumRub = realPeriod.totalManagerPremiumRub;
-        periodActualIncomeRub = realPeriod.companyProfitRub - realPeriod.totalManagerPremiumRub;
+        realPeriodManagerPremiumRub = new Map(realPeriod.managerPayouts.map((p) => [p.managerId, p.owedRub]));
+
+        if (session.role === "owner") {
+          periodExpectedIncomeRub =
+            periodOverall.potentialProscetRub + periodOverall.potentialBuyoutRub + periodOverall.potentialCargoProfitRub + periodOverall.potentialFxProfitRub - periodOverall.estimatedPremiumRub;
+
+          periodOverall.factualProscetRub = realPeriod.proscetRub;
+          periodOverall.factualBuyoutRub = realPeriod.buyoutRub;
+          periodOverall.factualDiscountRub = realPeriod.discountRub;
+          periodOverall.factualCargoProfitRub = realPeriod.cargoProfitRub;
+          periodOverall.factualPremiumRub = realPeriod.totalManagerPremiumRub;
+          periodActualIncomeRub = realPeriod.companyProfitRub - realPeriod.totalManagerPremiumRub;
+        }
       }
     }
   }
@@ -588,20 +600,30 @@ export async function GET(req: NextRequest) {
       list.push(q);
       byManager.set(q.managerId, list);
     }
-    perManager = managers.map((m) => ({
-      managerId: m.id,
-      managerName: m.name,
-      ...withFulfillmentPremium(
-        summarize(byManager.get(m.id) ?? [], cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials),
-        m.id,
-      ),
-      completedToday: countCompletedSince(m.id, startOfDay),
-      completedWeek: countCompletedSince(m.id, startOfWeek),
-      completedMonth: countCompletedSince(m.id, startOfMonth),
-      completedTodayList: completedQuotesSince(m.id, startOfDay),
-      completedWeekList: completedQuotesSince(m.id, startOfWeek),
-      completedMonthList: completedQuotesSince(m.id, startOfMonth),
-    }));
+    perManager = managers.map((m) => {
+      const row = {
+        managerId: m.id,
+        managerName: m.name,
+        ...withFulfillmentPremium(
+          summarize(byManager.get(m.id) ?? [], cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials),
+          m.id,
+        ),
+        completedToday: countCompletedSince(m.id, startOfDay),
+        completedWeek: countCompletedSince(m.id, startOfWeek),
+        completedMonth: countCompletedSince(m.id, startOfMonth),
+        completedTodayList: completedQuotesSince(m.id, startOfDay),
+        completedWeekList: completedQuotesSince(m.id, startOfWeek),
+        completedMonthList: completedQuotesSince(m.id, startOfMonth),
+      };
+      // Период выбран (не "Всё время") — заменяем факт-премию, посчитанную
+      // по дате создания просчёта, на реальную (по датам факт-событий, см.
+      // realPeriodManagerPremiumRub выше). Без периода (from/to не пришли)
+      // строка остаётся как есть — уже фактически "за всё время".
+      if (realPeriodManagerPremiumRub) {
+        row.factualPremiumRub = realPeriodManagerPremiumRub.get(m.id) ?? 0;
+      }
+      return row;
+    });
   }
 
   // Company-wide income, owner-only. Potential = if every open quote gets
