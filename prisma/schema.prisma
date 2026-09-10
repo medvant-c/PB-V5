@@ -361,6 +361,7 @@ model Manager {
   cashOrders     CashOrder[]
   quotePaymentAllocations QuotePaymentAllocation[]
   cashOpeningBalanceUpdates CashOpeningBalance[]
+  cashUnallocatedAmountUpdates CashUnallocatedAmount[]
   cashTransfersCreated CashTransfer[]
   fulfillmentOrders FulfillmentOrder[]
   completedFulfillmentServices FulfillmentOrderItemService[]
@@ -1363,8 +1364,27 @@ model CashAccount {
 
   orders          CashOrder[]
   openingBalances CashOpeningBalance[]
+  unallocatedAmount CashUnallocatedAmount?
   transfersFrom   CashTransfer[]       @relation("CashTransferFrom")
   transfersTo     CashTransfer[]       @relation("CashTransferTo")
+}
+
+// Деньги клиента, уже полученные на выкуп (через "Счёт на выкуп"), но ещё
+// физически не потраченные на закупку товара — реальные деньги на счету,
+// но не прибыль компании: как только выкуп реально совершится, эта сумма
+// уйдёт в расход. Один ряд на счёт, обновляется вручную владельцем по мере
+// изменения — тот же паттерн, что и CashOpeningBalance выше (не история
+// значений, просто текущее). Используется в "Прибыль за период" (см.
+// components/manager/tabs/cash-tab.tsx): баланс на начало периода + приход
+// − расход − эта сумма. См. PB-V5 chat 2026-09-07.
+model CashUnallocatedAmount {
+  id                 String      @id @default(cuid())
+  accountId          String      @unique
+  account            CashAccount @relation(fields: [accountId], references: [id])
+  amountCny          Decimal     @default(0)
+  updatedByManagerId String
+  updatedByManager   Manager     @relation(fields: [updatedByManagerId], references: [id])
+  updatedAt          DateTime    @updatedAt
 }
 
 // Перенос денег с одного счёта на другой (напр. "Александр передал Антону

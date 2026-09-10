@@ -546,6 +546,59 @@ function ManagerCashTab() {
     URL.revokeObjectURL(url);
   }
 
+  // --- Нераспределённая сумма (деньги клиента на выкуп, ещё не
+  // потраченные на закупку — см. CashUnallocatedAmount) + "Прибыль за
+  // период" = баланс на конец периода минус эта сумма. Без accountId (при
+  // "Все счета") бэкенд сам суммирует по всем активным счетам. См. PB-V5
+  // chat 2026-09-07.
+  const [unallocatedCny, setUnallocatedCny] = useState(0);
+  const [uaOpen, setUaOpen] = useState(false);
+  const [uaAmount, setUaAmount] = useState("0");
+  const [uaSaving, setUaSaving] = useState(false);
+  const [uaError, setUaError] = useState<string | null>(null);
+
+  const loadUnallocated = useCallback(() => {
+    const params = filterAccountId !== "all" ? `?accountId=${filterAccountId}` : "";
+    return fetch(`/api/manager-cash-unallocated${params}`)
+      .then((res) => res.json())
+      .then((data) => setUnallocatedCny(data.amountCny ?? 0));
+  }, [filterAccountId]);
+
+  useEffect(() => {
+    loadUnallocated();
+  }, [loadUnallocated]);
+
+  const profitCny = summary ? summary.closingBalanceCny - unallocatedCny : null;
+
+  function openUaDialog() {
+    if (filterAccountId === "all") return;
+    setUaAmount(String(unallocatedCny));
+    setUaError(null);
+    setUaOpen(true);
+  }
+
+  async function handleSaveUa() {
+    if (filterAccountId === "all") return;
+    setUaSaving(true);
+    setUaError(null);
+    try {
+      const res = await fetch("/api/manager-cash-unallocated", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: filterAccountId, amountCny: Number(uaAmount) }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setUaError(data.error ?? "Не удалось сохранить сумму.");
+        return;
+      }
+      setUaOpen(false);
+      await loadUnallocated();
+    } finally {
+      setUaSaving(false);
+    }
+  }
+
   // --- Opening balance dialog ---
   const [obOpen, setObOpen] = useState(false);
   const [obDate, setObDate] = useState(todayIso());
@@ -796,6 +849,26 @@ function ManagerCashTab() {
           <p className="mt-1 text-sm text-text-secondary">Кассовая книга — приход и расход по статьям, баланс в юанях.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Прибыль за период = баланс на конец периода минус
+              нераспределённая сумма (деньги клиента на выкуп, ещё не
+              потраченные на закупку) — см. состояние выше. */}
+          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5">
+            <div>
+              <p className="text-[10px] leading-tight text-text-secondary">Прибыль за период</p>
+              <p className="text-sm leading-tight font-bold text-primary">{profitCny !== null ? `¥ ${money(profitCny)}` : "—"}</p>
+            </div>
+            {filterAccountId !== "all" && (
+              <button
+                type="button"
+                onClick={openUaDialog}
+                className="text-text-secondary hover:text-text"
+                aria-label="Указать нераспределённую сумму"
+                title={`Нераспределённая сумма: ¥ ${money(unallocatedCny)} — деньги клиента на выкуп, ещё не потраченные`}
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
           <Button type="button" size="sm" variant="ghost" onClick={() => setMonth(shiftMonth(month, -1))}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -1356,6 +1429,32 @@ function ManagerCashTab() {
             </Button>
             <Button type="button" onClick={handleSaveOb} disabled={obSaving}>
               {obSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Сохранить"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={uaOpen} onOpenChange={setUaOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Нераспределённая сумма — {accounts.find((a) => a.id === filterAccountId)?.name ?? ""}</DialogTitle>
+            <DialogDescription>
+              Деньги клиента, уже полученные на выкуп, но ещё физически не потраченные на закупку товара — вычитаются из «Прибыль за период», раз это не прибыль, а обязательство перед клиентом.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Сумма, ¥</Label>
+              <Input type="number" step="0.01" value={uaAmount} onChange={(e) => setUaAmount(e.target.value)} />
+            </div>
+            {uaError && <p className="text-xs text-error">{uaError}</p>}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setUaOpen(false)}>
+              Отмена
+            </Button>
+            <Button type="button" onClick={handleSaveUa} disabled={uaSaving}>
+              {uaSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Сохранить"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -60,18 +60,52 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   }
   // Если этот ордер УЖЕ реально засчитан в прибыль (см.
   // cash-order-profit-sync.ts) — premiumRub там заморожен на момент
-  // создания, как и у «Счёта на выкуп»; редактирование суммы/категории
-  // задним числом означало бы либо тихо пересчитывать чужую уже
-  // выплаченную премию, либо расходиться с ней. Проще и безопаснее
-  // запретить редактирование целиком — удалить и завести заново (каскадно
-  // удалит и распределение, см. QuotePaymentAllocation.cashOrder onDelete:
-  // Cascade). См. PB-V5 chat 2026-08-07.
+  // создания, как и у «Счёта на выкуп»; редактирование суммы/категории/
+  // счёта/клиента/просчёта задним числом означало бы либо тихо
+  // пересчитывать чужую уже выплаченную премию, либо расходиться с ней —
+  // эти поля по-прежнему нельзя трогать. Дата/время и комментарий премии
+  // не касаются вообще (премия зависит от суммы и категории, не от даты),
+  // поэтому их разрешаем менять узким обновлением ниже, не проходя через
+  // общую логику full-record PATCH. См. PB-V5 chat 2026-08-07, 2026-09-07.
   const alreadyCreditsProfit = (await prisma.quotePaymentAllocation.count({ where: { cashOrderId: id } })) > 0;
   if (alreadyCreditsProfit) {
-    return Response.json(
-      { error: "Этот ордер уже засчитан в прибыль — редактирование недоступно, чтобы не исказить уже начисленную премию. Удалите и создайте заново." },
-      { status: 400 },
-    );
+    const incomingClientId = typeof clientId === "string" && clientId ? clientId : null;
+    const incomingQuoteId = typeof quoteId === "string" && quoteId ? quoteId : null;
+    const incomingRate = currency === "cny" ? 1 : Number(cnyToCurrencyRate);
+    const onlyDateOrCommentChanged =
+      accountId === existing.accountId &&
+      categoryId === existing.categoryId &&
+      incomingClientId === existing.clientId &&
+      incomingQuoteId === existing.quoteId &&
+      currency === existing.currency &&
+      Number(amount) === Number(existing.amount) &&
+      incomingRate === Number(existing.cnyToCurrencyRate);
+
+    if (!onlyDateOrCommentChanged) {
+      return Response.json(
+        {
+          error:
+            "Этот ордер уже засчитан в прибыль — можно изменить только дату/время и комментарий, чтобы не исказить уже начисленную премию. Остальные поля: удалите ордер и создайте заново.",
+        },
+        { status: 400 },
+      );
+    }
+
+    await prisma.cashOrder.update({
+      where: { id },
+      data: { date: parsedDate, comment: typeof comment === "string" ? comment.trim() : existing.comment },
+    });
+    const order = await prisma.cashOrder.findUnique({
+      where: { id },
+      include: {
+        account: { select: { id: true, name: true } },
+        category: true,
+        client: { select: { id: true, name: true } },
+        quote: { select: { id: true, displayId: true, productName: true } },
+        createdByManager: { select: { name: true } },
+      },
+    });
+    return Response.json({ order });
   }
   if (currency !== "cny" && currency !== "usd" && currency !== "rub") {
     return Response.json({ error: "Некорректная валюта." }, { status: 400 });
