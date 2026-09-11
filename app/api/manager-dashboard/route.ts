@@ -562,21 +562,33 @@ export async function GET(req: NextRequest) {
     if (!Number.isNaN(dashboardFrom.getTime()) && !Number.isNaN(dashboardTo.getTime())) {
       const periodQuotes = quotes.filter((q) => q.createdAt >= dashboardFrom && q.createdAt < dashboardTo);
       periodOverall = summarize(periodQuotes, cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials);
-      if (session.role === "owner" || session.role === "senior") {
-        const realPeriod = await buildPeriodReport({ from: dashboardFrom, to: dashboardTo });
-        realPeriodManagerPremiumRub = new Map(realPeriod.managerPayouts.map((p) => [p.managerId, p.owedRub]));
+      // buildPeriodReport теперь считается для ЛЮБОЙ роли — не только
+      // владельца/старшего: это же periodOverall (через data.periodOverall ??
+      // data.overall) отдаёт "Премию" и рядовому менеджеру на ЕГО собственном
+      // дашборде, а до этой правки его личная факт-премия за период всё ещё
+      // читалась из summarize(periodQuotes) — то есть по дате СОЗДАНИЯ
+      // просчёта, а не по факту (та же природа бага, что и у perManager ниже,
+      // просто в другом месте: сделка создана в августе, выкуп/оплата прошли
+      // в сентябре — период "Месяц" в сентябре показывал 0). См. PB-V5 chat
+      // 2026-09-11 (Эрик, просчёт №231/№185).
+      const realPeriod = await buildPeriodReport({ from: dashboardFrom, to: dashboardTo });
+      realPeriodManagerPremiumRub = new Map(realPeriod.managerPayouts.map((p) => [p.managerId, p.owedRub]));
 
-        if (session.role === "owner") {
-          periodExpectedIncomeRub =
-            periodOverall.potentialProscetRub + periodOverall.potentialBuyoutRub + periodOverall.potentialCargoProfitRub + periodOverall.potentialFxProfitRub - periodOverall.estimatedPremiumRub;
+      if (session.role === "owner") {
+        periodExpectedIncomeRub =
+          periodOverall.potentialProscetRub + periodOverall.potentialBuyoutRub + periodOverall.potentialCargoProfitRub + periodOverall.potentialFxProfitRub - periodOverall.estimatedPremiumRub;
 
-          periodOverall.factualProscetRub = realPeriod.proscetRub;
-          periodOverall.factualBuyoutRub = realPeriod.buyoutRub;
-          periodOverall.factualDiscountRub = realPeriod.discountRub;
-          periodOverall.factualCargoProfitRub = realPeriod.cargoProfitRub;
-          periodOverall.factualPremiumRub = realPeriod.totalManagerPremiumRub;
-          periodActualIncomeRub = realPeriod.companyProfitRub - realPeriod.totalManagerPremiumRub;
-        }
+        periodOverall.factualProscetRub = realPeriod.proscetRub;
+        periodOverall.factualBuyoutRub = realPeriod.buyoutRub;
+        periodOverall.factualDiscountRub = realPeriod.discountRub;
+        periodOverall.factualCargoProfitRub = realPeriod.cargoProfitRub;
+        periodOverall.factualPremiumRub = realPeriod.totalManagerPremiumRub;
+        periodActualIncomeRub = realPeriod.companyProfitRub - realPeriod.totalManagerPremiumRub;
+      } else {
+        // Не владелец — company-wide разбивка (проскет/выкуп/скидка/карго)
+        // им не показывается и не считается, но собственная премия за
+        // период должна быть настоящей, а не по дате создания просчёта.
+        periodOverall.factualPremiumRub = realPeriodManagerPremiumRub.get(session.managerId) ?? 0;
       }
     }
   }
