@@ -15,9 +15,14 @@ import { ClientQuotes } from "@/components/manager/tabs/clients-tab";
 function ManagerAllQuotesTab() {
   const [allManagers, setAllManagers] = useState<{ id: string; name: string }[] | null>(null);
   const [teamManagers, setTeamManagers] = useState<{ id: string; name: string }[] | null>(null);
-  const [canConfirmBuyout, setCanConfirmBuyout] = useState(false);
   const [paymentAccounts, setPaymentAccounts] = useState<{ id: string; name: string }[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Приходный/расходный ордер по своему просчёту — доступно любой сессии
+  // менеджера (см. clients-tab.tsx, тот же PB-V5 chat 2026-09-11);
+  // /api/manager-confirmations остаётся только источником teamManagers
+  // (owner/senior-only список, но нужен и рядовому менеджеру для текста
+  // "и вашей командой" ниже, если он вдруг старший).
+  const canRecordPayments = true;
 
   const [editingQuoteId, setEditingQuoteId] = useState<string | null>(null);
   const [editingClient, setEditingClient] = useState<{ id: string; name: string } | null>(null);
@@ -29,10 +34,7 @@ function ManagerAllQuotesTab() {
       .then((data) => setAllManagers(data?.managers ?? null));
     fetch("/api/manager-confirmations")
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        setCanConfirmBuyout(Boolean(data));
-        setTeamManagers(data?.teamManagers ?? null);
-      });
+      .then((data) => setTeamManagers(data?.teamManagers ?? null));
     fetch("/api/manager-payment-accounts")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => setPaymentAccounts(data?.accounts ?? []));
@@ -52,7 +54,7 @@ function ManagerAllQuotesTab() {
         refreshKey={refreshKey}
         allManagers={allManagers}
         teamManagers={teamManagers}
-        canConfirmBuyout={canConfirmBuyout}
+        canRecordPayments={canRecordPayments}
         paymentAccounts={paymentAccounts}
         onChanged={() => setRefreshKey((k) => k + 1)}
         onEdit={(quoteId, client) => {

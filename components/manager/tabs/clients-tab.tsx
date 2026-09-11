@@ -535,7 +535,7 @@ function ClientQuotes({
   onChanged,
   allManagers,
   teamManagers,
-  canConfirmBuyout,
+  canRecordPayments,
   paymentAccounts,
   clientSelfSourcedConfirmed,
   clientCreatedByManagerId,
@@ -552,7 +552,11 @@ function ClientQuotes({
   onChanged: () => void;
   allManagers: { id: string; name: string }[] | null;
   teamManagers: { id: string; name: string }[] | null;
-  canConfirmBuyout: boolean;
+  // Приходный/расходный ордер по своему просчёту — не путать с owner/
+  // senior-only self-sourced подтверждением, у которого своё, отдельное
+  // canConfirmBuyout в ManagerClientsTab (не проброшено сюда). См. PB-V5
+  // chat 2026-09-11.
+  canRecordPayments: boolean;
   paymentAccounts: { id: string; name: string }[];
   clientSelfSourcedConfirmed?: boolean;
   clientCreatedByManagerId?: string | null;
@@ -1774,7 +1778,7 @@ function ClientQuotes({
               {bulkBusy === "duplicate" ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Copy className="h-3.5 w-3.5 shrink-0" />}
               Дублировать {selectedIds.length > 0 && `(${selectedIds.length})`}
             </button>
-            {canConfirmBuyout && (
+            {canRecordPayments && (
               <button
                 type="button"
                 onClick={() => {
@@ -2554,7 +2558,7 @@ function ClientQuotes({
                       </>
                     )}
 
-                    {canConfirmBuyout && (
+                    {canRecordPayments && (
                       <div className="space-y-1.5 rounded-md bg-surface p-2.5">
                         <p className="text-xs text-text-secondary">Записать расходный ордер (спишется с выбранного счёта, ¥):</p>
                         <Select
@@ -2849,7 +2853,7 @@ function ClientQuotes({
         </DialogContent>
       </Dialog>
 
-      {canConfirmBuyout && (
+      {canRecordPayments && (
         <CreatePaymentDialog
           open={createPaymentDialogOpen}
           onOpenChange={setCreatePaymentDialogOpen}
@@ -2913,6 +2917,14 @@ function ManagerClientsTab() {
   // teamManagers query) that skips the pending-confirmation queues this
   // tab never displays — see app/api/manager-team-managers/route.ts.
   const [canConfirmBuyout, setCanConfirmBuyout] = useState(false);
+  // Приходный/расходный ордер по своему просчёту — доступно ЛЮБОЙ сессии
+  // менеджера (не только owner/senior, как canConfirmBuyout выше — та
+  // проверка используется ТОЛЬКО для self-sourced подтверждения/отмены,
+  // не путать эти два флага). Реальная граница "только свои клиенты" уже
+  // обеспечена тем, что обычный менеджер и так не видит чужих клиентов в
+  // списке, а на сервере — getVisibleManagerIds/canAccessManagerQuote в
+  // самих роутах создания ордера. См. PB-V5 chat 2026-09-11.
+  const canRecordPayments = true;
   // Manager-scoped team list (owner: everyone; senior: self + own
   // subordinates) — drives the client-level "передать менеджеру" dropdown
   // and doubles as "am I senior/owner" for the contacts-visibility toggle.
@@ -3736,7 +3748,7 @@ function ManagerClientsTab() {
                 refreshKey={quotesRefreshKey}
                 allManagers={allManagers}
                 teamManagers={teamManagers}
-                canConfirmBuyout={canConfirmBuyout}
+                canRecordPayments={canRecordPayments}
                 paymentAccounts={paymentAccounts}
                 clientSelfSourcedConfirmed={selectedClient.selfSourcedConfirmed}
                 clientCreatedByManagerId={selectedClient.createdByManagerId}

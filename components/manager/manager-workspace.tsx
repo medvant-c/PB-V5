@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { Briefcase, CheckSquare, Database, FileBarChart, FileText, Home, Loader2, LogOut, Menu, Package, Percent, Receipt, ScanSearch, Settings, Store, Tag, Trash2, UserCog, Users, UsersRound, Wallet, X } from "lucide-react";
+import { Briefcase, CheckSquare, Database, FileBarChart, FileText, Home, Loader2, LogOut, Menu, Package, Percent, Receipt, ScanSearch, Settings, Store, Tag, Trash2, TrendingUp, UserCog, Users, UsersRound, Wallet, X } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ManagerDashboard } from "@/components/manager/manager-dashboard";
@@ -35,6 +35,7 @@ const ManagerClientsTab = dynamic(() => import("@/components/manager/tabs/client
 const ManagerSuppliersTab = dynamic(() => import("@/components/manager/tabs/suppliers-tab").then((m) => m.ManagerSuppliersTab), { loading: TabLoading });
 const ManagerProductLookupTab = dynamic(() => import("@/components/manager/tabs/product-lookup-tab").then((m) => m.ManagerProductLookupTab), { loading: TabLoading });
 const ManagerAllQuotesTab = dynamic(() => import("@/components/manager/tabs/all-quotes-tab").then((m) => m.ManagerAllQuotesTab), { loading: TabLoading });
+const ManagerCashFlowReportTab = dynamic(() => import("@/components/manager/tabs/cash-flow-report-tab").then((m) => m.ManagerCashFlowReportTab), { loading: TabLoading });
 const ManagerStaffTab = dynamic(() => import("@/components/manager/tabs/staff-tab").then((m) => m.ManagerStaffTab), { loading: TabLoading });
 const ManagerPriceListTab = dynamic(() => import("@/components/manager/tabs/price-list-tab").then((m) => m.ManagerPriceListTab), { loading: TabLoading });
 const ManagerDatabaseTab = dynamic(() => import("@/components/manager/tabs/database-tab").then((m) => m.ManagerDatabaseTab), { loading: TabLoading });
@@ -106,6 +107,11 @@ const ALL_SECTIONS = [
   // with no clientId) — just flattened into one sortable/filterable list
   // instead of grouped by client. See PB-V5 chat 2026-08-01.
   { id: "all-quotes", label: "Все просчёты", icon: FileText, Component: ManagerAllQuotesTab, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
+  // Самообслуживание менеджера — приход/расход по своим просчётам плюс
+  // разбивка по клиентам за период. Видна всем ролям, каждый видит только
+  // свою зону видимости (владелец — всех, см.
+  // app/api/manager-cash-flow-report/route.ts). См. PB-V5 chat 2026-09-11.
+  { id: "cash-flow-report", label: "Отчёт о движении средств", icon: TrendingUp, Component: ManagerCashFlowReportTab, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
   { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentTab, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: false, hiddenFromOutsource: false },
   { id: "confirmations", label: "Подтверждения", icon: CheckSquare, Component: ManagerConfirmationsTab, ownerOnly: false, permissionKey: null, seniorOrOwnerOnly: true, hiddenFromOutsource: false },
   // ownerOnly here now means "owner, OR anyone the owner individually

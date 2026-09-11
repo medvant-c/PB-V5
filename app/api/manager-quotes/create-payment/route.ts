@@ -21,25 +21,24 @@ import {
 type Category = QuotePaymentCategoryValue;
 const isCategory = isQuotePaymentCategory;
 
-// Приходный ордер created straight from a quote card — owner/senior only
-// (real money + immediate premium accrual, same trust level as
-// confirm-buyout). One order can span several quotes/categories in a
-// single dialog (e.g. one bank transfer covering "услуга поиска" on 3
-// different quotes) — see QuotePaymentAllocation in prisma/schema.prisma
-// for why the split lives in its own table instead of on CashOrder
-// itself. Premium for each allocation is computed and frozen immediately
-// (see computePaymentAllocationPremiumRub in quote-profit.ts — goods/
-// china_delivery categories credit zero premium here, their real margin
-// isn't known until confirm-buyout). See PB-V5 chat 2026-08-04.
+// Приходный ордер created straight from a quote card — any manager now
+// (was owner/senior only), scoped to their OWN quotes: the quotes lookup
+// below already filters by getVisibleManagerIds(session), which for a
+// plain "manager"/"outsource_manager" role is just [session.managerId] —
+// no separate role gate needed here, that scoping alone is the security
+// boundary. See PB-V5 chat 2026-09-11. One order can span several quotes/
+// categories in a single dialog (e.g. one bank transfer covering "услуга
+// поиска" on 3 different quotes) — see QuotePaymentAllocation in
+// prisma/schema.prisma for why the split lives in its own table instead of
+// on CashOrder itself. Premium for each allocation is computed and frozen
+// immediately (see computePaymentAllocationPremiumRub in quote-profit.ts —
+// goods/china_delivery categories credit zero premium here, their real
+// margin isn't known until confirm-buyout). See PB-V5 chat 2026-08-04.
 export async function POST(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
     return Response.json({ error: "Не авторизовано." }, { status: 401 });
   }
-  if (session.role !== "owner" && session.role !== "senior") {
-    return Response.json({ error: "Создавать приходные ордера может только старший менеджер или руководитель." }, { status: 403 });
-  }
-
   let body: unknown;
   try {
     body = await req.json();

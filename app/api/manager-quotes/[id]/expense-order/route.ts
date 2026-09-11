@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
-import { canAccessManagerQuote, canViewCash } from "@/lib/manager-scope";
+import { canAccessManagerQuote } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import {
   getOrCreateExpenseCategory,
@@ -25,9 +25,6 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
     return Response.json({ error: "Не авторизовано." }, { status: 401 });
-  }
-  if (!(await canViewCash(session))) {
-    return Response.json({ error: "Нет доступа к кассе." }, { status: 403 });
   }
 
   const { id } = await params;
@@ -97,9 +94,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
     return Response.json({ error: "Не авторизовано." }, { status: 401 });
-  }
-  if (!(await canViewCash(session))) {
-    return Response.json({ error: "Нет доступа к кассе." }, { status: 403 });
   }
 
   const { id } = await params;
