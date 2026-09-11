@@ -14,10 +14,6 @@ export async function GET(req: NextRequest) {
   if (!session) {
     return Response.json({ error: "Не авторизовано." }, { status: 401 });
   }
-  if (session.role !== "owner" && session.role !== "senior") {
-    return Response.json({ error: "Доступно только старшему менеджеру и руководителю." }, { status: 403 });
-  }
-
   const quoteIdsParam = req.nextUrl.searchParams.get("quoteIds");
   const quoteIds = quoteIdsParam ? quoteIdsParam.split(",").filter(Boolean) : [];
   if (quoteIds.length === 0) {
