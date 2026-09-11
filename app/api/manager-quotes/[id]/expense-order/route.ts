@@ -64,6 +64,16 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   const real = computeRealBuyoutProfit({ allocations: quote.paymentAllocations, expenseRub: fin.buyoutExpenseRub });
   const realCargo = computeRealCargoProfit({ incomeRub: fin.cargoIncomeRub, expenseRub: fin.cargoExpenseRub });
 
+  // "Заказ закрыт" — узкая проверка ТОЛЬКО по товару: оплата клиента за сам
+  // товар (category="goods") пришла, и реальная закупка товара записана.
+  // Остальные строки счёта (доставка/поиск/производство/комиссия/доп.
+  // услуги) — 100%-маржа без затрат, к закрытию заказа не относятся (см.
+  // PB-V5 chat 2026-09-11) — поэтому не переиспользуем real.incomeRub/
+  // buyout.owedRub (те специально включают всё это для отчётов по прибыли).
+  const goodsPaidRub = quote.paymentAllocations
+    .filter((a) => a.category === "goods")
+    .reduce((sum, a) => sum + Number(a.amountRub), 0);
+
   return Response.json({
     buyout: {
       paidRub: real.incomeRub,
@@ -76,6 +86,11 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       owedRub: Number(quote.cargoDeliveryRub),
       expenseRub: realCargo.expenseRub,
       realized: CARGO_REALIZED_STATUSES.includes(quote.status),
+    },
+    goods: {
+      paidRub: goodsPaidRub,
+      expenseRub: fin.goodsExpenseRub,
+      closed: goodsPaidRub > 0 && fin.goodsExpenseRub > 0,
     },
   });
 }

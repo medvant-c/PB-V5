@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   AlertTriangle,
   ArrowLeftRight,
@@ -656,6 +657,7 @@ function ClientQuotes({
       {
         buyout: { paidRub: number; owedRub: number; expenseRub: number; realized: boolean };
         cargo: { paidRub: number; owedRub: number; expenseRub: number; realized: boolean };
+        goods: { paidRub: number; expenseRub: number; closed: boolean };
       }
     >
   >({});
@@ -1425,6 +1427,7 @@ function ClientQuotes({
         }),
       });
       if (res.ok) {
+        toast.success("Данные по выкупу сохранены и создан расходный ордер");
         setExpenseDrafts((current) => ({ ...current, [quoteId]: { goodsCny: "", chinaCny: "", cargoCny: "", accountId: draft.accountId } }));
         await Promise.all([load(), loadPaymentProgress(quoteId)]);
       }
@@ -2553,6 +2556,16 @@ function ClientQuotes({
                       <p className="text-xs text-text-secondary">Загрузка…</p>
                     ) : (
                       <>
+                        {progress?.goods.closed && (
+                          <div className="flex items-center gap-1.5 rounded-md bg-success/10 px-2.5 py-1.5 text-xs font-semibold text-success">
+                            <Check className="h-3.5 w-3.5" /> Заказ закрыт — товар оплачен и закуплен
+                          </div>
+                        )}
+                        {progress?.goods && (progress.goods.paidRub > 0 || progress.goods.expenseRub > 0) && (
+                          <p className="text-xs text-text-secondary">
+                            Оплата за товар: {fmtRub(progress.goods.paidRub)}₽ · Закупка: {fmtRub(progress.goods.expenseRub)}₽
+                          </p>
+                        )}
                         {progressBlock("Выкуп", progress?.buyout)}
                         {Number(quote.cargoDeliveryRub) > 0 && progressBlock("Карго", progress?.cargo)}
                       </>

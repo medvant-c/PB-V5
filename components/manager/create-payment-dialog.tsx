@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Loader2, X } from "lucide-react";
+import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -184,6 +185,7 @@ function CreatePaymentDialog({ open, onOpenChange, quoteIds, onSaved }: CreatePa
         setError(data.error ?? "Не удалось создать приходный ордер.");
         return;
       }
+      toast.success("Приходный ордер создан");
       onSaved();
       onOpenChange(false);
     } catch {

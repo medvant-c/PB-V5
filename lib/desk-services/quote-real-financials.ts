@@ -32,6 +32,15 @@ import { loadCnyRateHistory, cnyRateRubAsOf, usdRateRubAsOf } from "@/lib/desk-s
 interface QuoteRealFinancials {
   buyoutExpenseRub: number;
   buyoutExpenseCny: number;
+  // Подмножество buyoutExpenseRub/Cny — только "Закупка товара", без
+  // "Доставки по Китаю". Нужно отдельно для признака "заказ закрыт" на
+  // карточке просчёта: закрытым считаем именно факт покупки товара (оплата
+  // клиента за товар vs реальная закупка), а не весь блок "Выкуп" целиком —
+  // остальные строки счёта (доставка/поиск/производство/комиссия/доп.
+  // услуги) это готовая маржа без затрат, к покупке товара отношения не
+  // имеют. См. PB-V5 chat 2026-09-11.
+  goodsExpenseRub: number;
+  goodsExpenseCny: number;
   cargoIncomeRub: number;
   cargoExpenseRub: number;
   cargoIncomeUsd: number;
@@ -39,7 +48,16 @@ interface QuoteRealFinancials {
 }
 
 function emptyQuoteRealFinancials(): QuoteRealFinancials {
-  return { buyoutExpenseRub: 0, buyoutExpenseCny: 0, cargoIncomeRub: 0, cargoExpenseRub: 0, cargoIncomeUsd: 0, cargoExpenseUsd: 0 };
+  return {
+    buyoutExpenseRub: 0,
+    buyoutExpenseCny: 0,
+    goodsExpenseRub: 0,
+    goodsExpenseCny: 0,
+    cargoIncomeRub: 0,
+    cargoExpenseRub: 0,
+    cargoIncomeUsd: 0,
+    cargoExpenseUsd: 0,
+  };
 }
 
 async function fetchQuoteRealFinancials(quoteIds: string[]): Promise<Map<string, QuoteRealFinancials>> {
@@ -54,6 +72,7 @@ async function fetchQuoteRealFinancials(quoteIds: string[]): Promise<Map<string,
     loadCnyRateHistory(),
   ]);
   const buyoutExpenseCategoryIds = new Set([goodsCategory?.id, chinaCategory?.id].filter((id): id is string => Boolean(id)));
+  const goodsExpenseCategoryId = goodsCategory?.id ?? null;
   const cargoExpenseCategoryId = cargoExpenseCategory?.id ?? null;
   const cargoIncomeCategoryId = cargoIncomeCategory?.id ?? null;
   const relevantCategoryIds = [...buyoutExpenseCategoryIds, cargoExpenseCategoryId, cargoIncomeCategoryId].filter(
@@ -98,6 +117,10 @@ async function fetchQuoteRealFinancials(quoteIds: string[]): Promise<Map<string,
     if (buyoutExpenseCategoryIds.has(order.categoryId)) {
       entry.buyoutExpenseRub += rub;
       entry.buyoutExpenseCny += cny;
+      if (order.categoryId === goodsExpenseCategoryId) {
+        entry.goodsExpenseRub += rub;
+        entry.goodsExpenseCny += cny;
+      }
     } else if (order.categoryId === cargoExpenseCategoryId) {
       entry.cargoExpenseRub += rub;
       entry.cargoExpenseUsd += usd;
