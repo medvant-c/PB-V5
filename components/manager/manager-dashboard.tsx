@@ -995,12 +995,13 @@ function NewRequestsWidget({ refreshKey, onOpenQuote }: QuoteWidgetProps) {
   );
 }
 
-type DashboardPeriod = "day" | "week" | "month" | "all";
+type DashboardPeriod = "day" | "week" | "month" | "last_month" | "all";
 
 const DASHBOARD_PERIOD_LABEL: Record<DashboardPeriod, string> = {
   day: "День",
   week: "Неделя",
   month: "Месяц",
+  last_month: "Прошлый месяц",
   all: "Всё время",
 };
 
@@ -1012,8 +1013,22 @@ const DASHBOARD_PERIOD_LABEL: Record<DashboardPeriod, string> = {
 // сигнал не отправлять from/to вообще: тогда бэкенд не строит periodOverall,
 // и все карточки сами берут данные за всё время (см. data.periodOverall ??
 // data.overall в /api/manager-dashboard/route.ts). См. PB-V5 chat 2026-08-07.
+// "last_month" — единственный период с фиксированным (не "по сейчас") концом:
+// нужен, чтобы после закрытия месяца можно было ещё увидеть его факт-премию
+// и выплатить её, не дожидаясь и не пересчитывая текущий месяц. См. PB-V5
+// chat 2026-09-11.
 function dashboardPeriodRange(period: DashboardPeriod): { from: string; to: string } | null {
   if (period === "all") return null;
+  if (period === "last_month") {
+    const from = new Date();
+    from.setHours(0, 0, 0, 0);
+    from.setDate(1);
+    from.setMonth(from.getMonth() - 1);
+    const to = new Date();
+    to.setHours(0, 0, 0, 0);
+    to.setDate(1);
+    return { from: from.toISOString(), to: to.toISOString() };
+  }
   const to = new Date();
   const from = new Date();
   from.setHours(0, 0, 0, 0);
@@ -1096,7 +1111,7 @@ function ManagerDashboard() {
         </div>
 
         <div className="flex gap-1 rounded-xl border border-border bg-bg p-1 sm:w-fit">
-          {(["day", "week", "month", "all"] as const).map((p) => (
+          {(["day", "week", "month", "last_month", "all"] as const).map((p) => (
             <button
               key={p}
               type="button"
