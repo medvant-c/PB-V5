@@ -77,6 +77,10 @@ enum DeskFileTab {
   // Supplier id, любой тип файла (не только картинки). См. PB-V5 chat
   // 2026-08-27.
   supplier_document
+  // Фото карточки товара клиента фулфилмента — один слот на карточку (как
+  // quote_wechat_qr), relatedId — FulfillmentProductCard id. См. PB-V5 chat
+  // 2026-09-11.
+  fulfillment_product_card
 }
 
 model DeskFile {
@@ -149,8 +153,28 @@ enum ClientStatus {
   no_active_requests
 }
 
+// Разделяет клиентов на просчёт (закупка под заказ) и клиентов фулфилмента
+// (склад/обработка/отгрузка своих партий) — это ОДНА и та же таблица
+// Client (контакты/история не дублируются), просто список в UI фильтруется
+// по этому полю. Перевод клиента из одной базы в другую — обычный UPDATE
+// этого поля, не миграция данных. См. PB-V5 chat 2026-09-11.
+enum ClientKind {
+  procurement
+  fulfillment
+}
+
 model Client {
   id           String   @id @default(cuid())
+  // См. ClientKind выше. Новые клиенты по умолчанию — просчётные (это уже
+  // существующий поток); фулфилмент выбирается явно при создании или
+  // переводом существующего клиента.
+  kind         ClientKind @default(procurement)
+  // Присваивается вручную менеджером только клиентам фулфилмента — 4 цифры
+  // + 2 заглавные латинские буквы (например "1234AB"), печатается в наряде
+  // для кладовщика. NULL у просчётных клиентов не конфликтует с @unique —
+  // SQLite не считает NULL равным NULL для уникального индекса. См. PB-V5
+  // chat 2026-09-11.
+  fulfillmentCode String? @unique
   // Short human-friendly number shown in the desk UI ("Клиент №N") — the
   // cuid `id` above stays the real primary key/foreign key everywhere else.
   // Assigned in app code (lib/display-ids.ts) as max(displayId)+1, since
@@ -242,6 +266,7 @@ model Client {
   quotes       Quote[]
   cashOrders   CashOrder[]
   fulfillmentOrders FulfillmentOrder[]
+  productCards FulfillmentProductCard[]
   quoteDraftRequests QuoteDraftRequest[]
   dailyPlanItems DailyPlanItem[]
   issuedInvoices IssuedInvoice[]
@@ -365,6 +390,7 @@ model Manager {
   cashTransfersCreated CashTransfer[]
   fulfillmentOrders FulfillmentOrder[]
   completedFulfillmentServices FulfillmentOrderItemService[]
+  fulfillmentOrderPrintLogs FulfillmentOrderPrintLog[]
   quoteDraftRequests QuoteDraftRequest[]
   dailyPlanItems DailyPlanItem[]
   issuedInvoices IssuedInvoice[]
@@ -1621,22 +1647,78 @@ model CashOpeningBalance {
 // yet). Per-service completion (below) is still the atomic unit of
 // physical work; FulfillmentOrder.status is a coarser, manually-set
 // summary for the order as a whole (see PB-V5 chat 2026-07-30).
+// ¥ — основная валюта ввода (закупка/услуги в Китае считаются в юанях),
+// priceRub — производная, для показа в прайс-листе, пересчитывается по
+// текущему TariffSettings.cnyRateRub при каждом создании/правке строки
+// каталога (НЕ заморожена — в отличие от цены на уже созданном заказе,
+// см. FulfillmentOrder.cnyRateUsed ниже). См. PB-V5 chat 2026-09-11.
 model FulfillmentServiceItem {
   id            String                        @id @default(cuid())
   name          String
+  priceCny      Decimal
   priceRub      Decimal
   createdAt     DateTime                      @default(now())
   itemServices  FulfillmentOrderItemService[]
+  cardServices  FulfillmentProductCardService[]
+}
+
+// Персистентная карточка товара клиента фулфилмента — в отличие от
+// FulfillmentOrderItem (см. ниже, order-scoped, каждый заказ с нуля), это
+// шаблон, который менеджер заводит один раз (фото/габариты/фасовка/
+// список услуг по умолчанию) и дальше просто выбирает при создании
+// заказа — товар и его услуги копируются (снэпшотом) в
+// FulfillmentOrderItem/FulfillmentOrderItemService, ничего не тянется
+// вживую из карточки после создания заказа. См. PB-V5 chat 2026-09-11.
+model FulfillmentProductCard {
+  id              String   @id @default(cuid())
+  clientId        String
+  client          Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name            String
+  sku             String?
+  description     String?
+  dimensions      String?
+  weightPerUnitKg Decimal?
+  // "Фасовка" — свободный текст (например "по 10 шт в коробке").
+  packaging       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now()) @updatedAt
+  services        FulfillmentProductCardService[]
+  orderItems      FulfillmentOrderItem[]
+
+  @@index([clientId])
+}
+
+// Услуга по умолчанию на карточке товара — снэпшот с глобального
+// каталога (FulfillmentServiceItem) на момент привязки, не живая ссылка:
+// правка цены в каталоге позже не меняет задним числом уже привязанные к
+// карточке строки. serviceItemId — мягкая ссылка только для истории
+// происхождения строки (SetNull при удалении каталожной услуги).
+model FulfillmentProductCardService {
+  id            String                   @id @default(cuid())
+  cardId        String
+  card          FulfillmentProductCard   @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  serviceItemId String?
+  serviceItem   FulfillmentServiceItem?  @relation(fields: [serviceItemId], references: [id], onDelete: SetNull)
+  name          String
+  priceCny      Decimal
+  priceRub      Decimal
+  createdAt     DateTime                 @default(now())
+
+  @@index([cardId])
 }
 
 // Free-form, not a blocking pipeline — same "pick any status" philosophy as
 // QuoteStatus, just a much shorter list since a fulfillment order's own
 // lifecycle is simple (no cargo/buyout side effects to gate on).
+// shipped_paid/shipped_unpaid заменили единый "paid" — отгрузка и оплата
+// не всегда совпадают по времени, нужно различать явно. См. PB-V5 chat
+// 2026-09-11.
 enum FulfillmentOrderStatus {
-  new_order // новый
-  in_progress // в работе
-  done // выполнен
-  paid // оплачен
+  new_order // новая
+  in_progress // принято в работу
+  done // выполнено
+  shipped_paid // отгружено/оплачено
+  shipped_unpaid // отгружено/не оплачено
 }
 
 model FulfillmentOrder {
@@ -1661,8 +1743,21 @@ model FulfillmentOrder {
   // detail below is for the warehouse and the order's own record, not
   // anything the premium math depends on.
   totalRub  Decimal
+  // Курс ¥→₽, зафиксированный на момент создания заказа (читается из
+  // TariffSettings.cnyRateRub один раз) — тот же принцип, что и
+  // Quote.cnyRateUsed: все priceCny→priceRub на этом заказе (позиции,
+  // услуги позиций, услуги на партию целиком) считаются по ЭТОМУ курсу,
+  // а не по текущему тарифу, чтобы сумма заказа не "плыла" при смене
+  // курса задним числом. См. PB-V5 chat 2026-09-11.
+  cnyRateUsed Decimal
+  // Выставляются менеджером вручную, независимо от status — когда товар
+  // реально приняли на складе и когда обработанную партию нужно отгрузить.
+  receivedAt    DateTime?
+  plannedShipAt DateTime?
   createdAt DateTime @default(now())
-  items     FulfillmentOrderItem[]
+  items         FulfillmentOrderItem[]
+  orderServices FulfillmentOrderService[]
+  printLogs     FulfillmentOrderPrintLog[]
 
   @@index([clientId])
   @@index([managerId])
@@ -1682,10 +1777,24 @@ model FulfillmentOrderItem {
   name       String
   sku        String?
   dimensions String?
+  // Сколько единиц должно приехать по плану — вводится при создании
+  // заказа. Сколько реально приняли на складе — заполняется позже,
+  // отдельно (см. app/api/manager-fulfillment-order-items/[id]/receive),
+  // null пока склад не подтвердил факт.
+  plannedQuantity  Int @default(1)
+  receivedQuantity Int?
+  // Чисто для подтяжки фото карточки товара в наряд/PDF — НЕ живая ссылка
+  // для name/sku/dimensions (те остаются снэпшотом на этой строке, как и
+  // раньше). SetNull при удалении карточки: удалённая карточка не должна
+  // ломать уже размещённые заказы. Null — если позиция создана вручную,
+  // без выбора карточки (это по-прежнему полностью поддерживается).
+  productCardId String?
+  productCard   FulfillmentProductCard? @relation(fields: [productCardId], references: [id], onDelete: SetNull)
   createdAt  DateTime @default(now())
   services   FulfillmentOrderItemService[]
 
   @@index([orderId])
+  @@index([productCardId])
 }
 
 // One warehouse task (one catalog service) on one item — the atomic unit
@@ -1707,6 +1816,7 @@ model FulfillmentOrderItemService {
   serviceItemId         String?
   serviceItem           FulfillmentServiceItem? @relation(fields: [serviceItemId], references: [id], onDelete: SetNull)
   name                  String
+  priceCny              Decimal
   priceRub              Decimal
   quantity              Int
   completedAt           DateTime?
@@ -1714,6 +1824,38 @@ model FulfillmentOrderItemService {
   completedByManager    Manager?                @relation(fields: [completedByManagerId], references: [id])
 
   @@index([itemId])
+}
+
+// Услуга на ВЕСЬ заказ целиком, не привязанная ни к одной позиции —
+// например "доставка со склада ФФ на этот объём" или "заявка на
+// маркетплейс на эту поставку". Сиблинг FulfillmentOrderItemService, но
+// order-scoped. См. PB-V5 chat 2026-09-11.
+model FulfillmentOrderService {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     FulfillmentOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  name      String
+  priceCny  Decimal
+  priceRub  Decimal
+  quantity  Int
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+}
+
+// Лог печати наряда — одна строка на каждый хит PDF-роута, без
+// дедупликации: наряд можно печатать повторно, и должно быть видно всю
+// историю (кто и когда), а не только последний раз. См. PB-V5 chat
+// 2026-09-11.
+model FulfillmentOrderPrintLog {
+  id                 String   @id @default(cuid())
+  orderId            String
+  order              FulfillmentOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  printedByManagerId String
+  printedByManager   Manager  @relation(fields: [printedByManagerId], references: [id])
+  printedAt          DateTime @default(now())
+
+  @@index([orderId])
 }
 
 // A lightweight "don't forget to build this quote" note — the client asked

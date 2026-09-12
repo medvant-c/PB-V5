@@ -3,6 +3,7 @@ import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { canAccessManagerClient } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { normalizePhone } from "@/lib/phone";
+import { normalizeFulfillmentCode } from "@/lib/fulfillment-client-code";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -45,6 +46,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     transferToManagerId,
     contactsHiddenFromManager,
     vladShareRatePercentOverride,
+    kind,
+    fulfillmentCode,
   } = (body as {
     name?: unknown;
     company?: unknown;
@@ -56,6 +59,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     transferToManagerId?: unknown;
     contactsHiddenFromManager?: unknown;
     vladShareRatePercentOverride?: unknown;
+    kind?: unknown;
+    fulfillmentCode?: unknown;
   }) ?? {};
 
   // Owner or senior; senior can only hand off to their own subordinate —
@@ -128,6 +133,36 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     }
   }
   if (typeof archived === "boolean") data.archivedAt = archived ? new Date() : null;
+
+  // Перевод клиента между "Клиенты" (просчёт) и "Фулфилмент" — значимая
+  // переклассификация, тот же уровень прав, что у transferToManagerId.
+  if (kind !== undefined) {
+    if (session.role !== "owner" && session.role !== "senior") {
+      return Response.json({ error: "Менять раздел клиента может только старший менеджер или руководитель." }, { status: 403 });
+    }
+    if (kind !== "procurement" && kind !== "fulfillment") {
+      return Response.json({ error: "Некорректный раздел клиента." }, { status: 400 });
+    }
+    data.kind = kind;
+  }
+
+  // Код клиента фулфилмента — доступен тому, кто уже видит этого клиента
+  // (canAccessManagerClient выше уже проверен на весь запрос).
+  if (fulfillmentCode !== undefined) {
+    if (fulfillmentCode === null || fulfillmentCode === "") {
+      data.fulfillmentCode = null;
+    } else {
+      const normalized = normalizeFulfillmentCode(fulfillmentCode);
+      if (!normalized) {
+        return Response.json({ error: "Код клиента должен быть в формате: 4 цифры + 2 латинские буквы, например 1234AB." }, { status: 400 });
+      }
+      const conflict = await prisma.client.findUnique({ where: { fulfillmentCode: normalized } });
+      if (conflict && conflict.id !== id) {
+        return Response.json({ error: "Клиент с таким кодом уже существует." }, { status: 409 });
+      }
+      data.fulfillmentCode = normalized;
+    }
+  }
 
   // Owner-only, same as everywhere else "Доля партнёров" shows up — a
   // senior manager can transfer clients and hide contacts above, but never

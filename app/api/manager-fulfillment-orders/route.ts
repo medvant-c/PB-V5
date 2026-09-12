@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
-import { getVisibleManagerIds } from "@/lib/manager-scope";
+import { getVisibleManagerIds, canAccessManagerClient } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { nextFulfillmentOrderDisplayId } from "@/lib/display-ids";
+import { parseItems, parseOrderServices, itemsTotalRub, orderServicesTotalRub } from "@/lib/desk-services/fulfillment-order-input";
 
 // Scoped the same as every other manager-cabinet list — a plain manager
 // sees only their own orders, senior also sees their team's.
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
     },
     orderBy: { createdAt: "desc" },
     include: {
-      client: { select: { id: true, name: true, company: true } },
+      client: { select: { id: true, name: true, company: true, fulfillmentCode: true } },
       manager: { select: { id: true, name: true } },
       quote: { select: { id: true, displayId: true, productName: true } },
       items: {
@@ -32,67 +33,20 @@ export async function GET(req: NextRequest) {
           services: { include: { completedByManager: { select: { id: true, name: true } } } },
         },
       },
+      orderServices: { orderBy: { createdAt: "asc" } },
+      printLogs: { orderBy: { printedAt: "desc" }, include: { printedByManager: { select: { id: true, name: true } } } },
     },
   });
 
   return Response.json({ orders });
 }
 
-interface ParsedServiceInput {
-  serviceItemId: string | null;
-  name: string;
-  priceRub: number;
-  quantity: number;
-}
-
-interface ParsedItemInput {
-  name: string;
-  sku: string | null;
-  dimensions: string | null;
-  services: ParsedServiceInput[];
-}
-
-function parseItems(raw: unknown): ParsedItemInput[] | { error: string } {
-  if (!Array.isArray(raw) || raw.length === 0) {
-    return { error: "Добавьте хотя бы один товар." };
-  }
-  const items: ParsedItemInput[] = [];
-  for (const rawItem of raw) {
-    const item = rawItem as { name?: unknown; sku?: unknown; dimensions?: unknown; services?: unknown };
-    const name = typeof item.name === "string" ? item.name.trim() : "";
-    if (!name) return { error: "Укажите название товара." };
-    if (!Array.isArray(item.services) || item.services.length === 0) {
-      return { error: `У товара «${name}» не выбрано ни одной услуги.` };
-    }
-    const services: ParsedServiceInput[] = [];
-    for (const rawService of item.services) {
-      const service = rawService as { serviceItemId?: unknown; name?: unknown; priceRub?: unknown; quantity?: unknown };
-      const serviceName = typeof service.name === "string" ? service.name.trim() : "";
-      const priceRub = Number(service.priceRub);
-      const quantity = Number(service.quantity);
-      if (!serviceName || !Number.isFinite(priceRub) || priceRub < 0 || !Number.isInteger(quantity) || quantity <= 0) {
-        return { error: `Некорректная услуга у товара «${name}».` };
-      }
-      services.push({
-        serviceItemId: typeof service.serviceItemId === "string" && service.serviceItemId ? service.serviceItemId : null,
-        name: serviceName,
-        priceRub,
-        quantity,
-      });
-    }
-    items.push({
-      name,
-      sku: typeof item.sku === "string" && item.sku.trim() ? item.sku.trim() : null,
-      dimensions: typeof item.dimensions === "string" && item.dimensions.trim() ? item.dimensions.trim() : null,
-      services,
-    });
-  }
-  return items;
-}
-
-// Any manager can create one — this is day-to-day warehouse work, not
-// something needing senior/owner sign-off (no self-report risk: the price
-// list is fixed, quantities are visible/auditable on the order itself).
+// Доступ — только менеджер, закреплённый за клиентом (canAccessManagerClient,
+// та же граница видимости, что и у карточек товара) может создавать заказ
+// для него; ЗАКАЗ при этом всегда кредитуется session.managerId (тот, кто
+// реально его завёл), тем же способом, что и Quote.managerId при создании
+// просчёта — эти два поля намеренно не обязаны совпадать. См. PB-V5 chat
+// 2026-09-11.
 export async function POST(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
@@ -105,13 +59,24 @@ export async function POST(req: NextRequest) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { clientId, quoteId, items: rawItems } = (body as { clientId?: unknown; quoteId?: unknown; items?: unknown }) ?? {};
+  const { clientId, quoteId, items: rawItems, orderServices: rawOrderServices, receivedAt, plannedShipAt } =
+    (body as {
+      clientId?: unknown;
+      quoteId?: unknown;
+      items?: unknown;
+      orderServices?: unknown;
+      receivedAt?: unknown;
+      plannedShipAt?: unknown;
+    }) ?? {};
 
   if (typeof clientId !== "string" || !clientId) {
     return Response.json({ error: "Укажите клиента." }, { status: 400 });
   }
-  const client = await prisma.client.findUnique({ where: { id: clientId } });
+  const client = await prisma.client.findUnique({ where: { id: clientId }, select: { id: true, createdByManagerId: true } });
   if (!client) return Response.json({ error: "Клиент не найден." }, { status: 404 });
+  if (!(await canAccessManagerClient(session, client))) {
+    return Response.json({ error: "Этот клиент вне вашей зоны видимости." }, { status: 403 });
+  }
 
   let resolvedQuoteId: string | null = null;
   if (typeof quoteId === "string" && quoteId) {
@@ -126,11 +91,28 @@ export async function POST(req: NextRequest) {
   if ("error" in items) {
     return Response.json({ error: items.error }, { status: 400 });
   }
+  const orderServices = parseOrderServices(rawOrderServices);
+  if ("error" in orderServices) {
+    return Response.json({ error: orderServices.error }, { status: 400 });
+  }
 
-  const totalRub = items.reduce(
-    (orderSum, item) => orderSum + item.services.reduce((itemSum, s) => itemSum + s.priceRub * s.quantity, 0),
-    0,
-  );
+  const cardIds = [...new Set(items.map((i) => i.productCardId).filter((v): v is string => Boolean(v)))];
+  if (cardIds.length > 0) {
+    const cards = await prisma.fulfillmentProductCard.findMany({ where: { id: { in: cardIds }, clientId } });
+    if (cards.length !== cardIds.length) {
+      return Response.json({ error: "Одна из выбранных карточек товара не найдена у этого клиента." }, { status: 400 });
+    }
+  }
+
+  // Курс фиксируется здесь, один раз — все priceCny→priceRub на этом заказе
+  // считаются по НЕМУ, а не по текущему тарифу (см. FulfillmentOrder.cnyRateUsed).
+  const tariff = await prisma.tariffSettings.findFirst({ orderBy: { createdAt: "desc" } });
+  const cnyRateUsed = tariff ? Number(tariff.cnyRateRub) : 0;
+  if (!cnyRateUsed) {
+    return Response.json({ error: "Не задан курс юаня в Тарифах — обратитесь к руководителю." }, { status: 400 });
+  }
+
+  const totalRub = itemsTotalRub(items, cnyRateUsed) + orderServicesTotalRub(orderServices, cnyRateUsed);
 
   const order = await prisma.fulfillmentOrder.create({
     data: {
@@ -139,20 +121,42 @@ export async function POST(req: NextRequest) {
       quoteId: resolvedQuoteId,
       managerId: session.managerId,
       totalRub,
+      cnyRateUsed,
+      receivedAt: typeof receivedAt === "string" && receivedAt ? new Date(receivedAt) : null,
+      plannedShipAt: typeof plannedShipAt === "string" && plannedShipAt ? new Date(plannedShipAt) : null,
       items: {
         create: items.map((item) => ({
           name: item.name,
           sku: item.sku,
           dimensions: item.dimensions,
-          services: { create: item.services },
+          plannedQuantity: item.plannedQuantity,
+          productCardId: item.productCardId,
+          services: {
+            create: item.services.map((s) => ({
+              serviceItemId: s.serviceItemId,
+              name: s.name,
+              priceCny: s.priceCny,
+              priceRub: s.priceCny * cnyRateUsed,
+              quantity: s.quantity,
+            })),
+          },
+        })),
+      },
+      orderServices: {
+        create: orderServices.map((s) => ({
+          name: s.name,
+          priceCny: s.priceCny,
+          priceRub: s.priceCny * cnyRateUsed,
+          quantity: s.quantity,
         })),
       },
     },
     include: {
-      client: { select: { id: true, name: true, company: true } },
+      client: { select: { id: true, name: true, company: true, fulfillmentCode: true } },
       manager: { select: { id: true, name: true } },
       quote: { select: { id: true, displayId: true, productName: true } },
       items: { include: { services: true } },
+      orderServices: true,
     },
   });
 

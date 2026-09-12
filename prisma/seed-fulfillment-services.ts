@@ -9,14 +9,17 @@ const prisma = new PrismaClient({
   adapter: new PrismaBetterSqlite3({ url: process.env.DESK_DATABASE_URL! }),
 });
 
-const SERVICES: { name: string; priceRub: number }[] = [
-  { name: "Приёмка", priceRub: 5 },
-  { name: "Сортировка", priceRub: 10 },
-  { name: "Проверка на брак", priceRub: 15 },
-  { name: "Маркировка стикер", priceRub: 6 },
-  { name: "Маркировка 2 стикера", priceRub: 10 },
-  { name: "Маркировка ЧЗ", priceRub: 9 },
-  { name: "Маркировка 2 ЧЗ", priceRub: 14 },
+// ¥-цены — грубая оценка (курс ~13₽/¥ на момент, когда были заведены
+// исходные ₽-цены ниже), это лишь начальное заполнение прайс-листа,
+// который менеджер и так правит вручную. См. PB-V5 chat 2026-09-11.
+const SERVICES: { name: string; priceCny: number; priceRub: number }[] = [
+  { name: "Приёмка", priceCny: 0.38, priceRub: 5 },
+  { name: "Сортировка", priceCny: 0.77, priceRub: 10 },
+  { name: "Проверка на брак", priceCny: 1.15, priceRub: 15 },
+  { name: "Маркировка стикер", priceCny: 0.46, priceRub: 6 },
+  { name: "Маркировка 2 стикера", priceCny: 0.77, priceRub: 10 },
+  { name: "Маркировка ЧЗ", priceCny: 0.69, priceRub: 9 },
+  { name: "Маркировка 2 ЧЗ", priceCny: 1.08, priceRub: 14 },
 ];
 
 async function main() {

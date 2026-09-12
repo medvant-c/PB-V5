@@ -1,7 +1,7 @@
 import "server-only";
 import { readFile } from "fs/promises";
 import path from "path";
-import { Document, Page, View, Text, StyleSheet, Font, renderToBuffer } from "@react-pdf/renderer";
+import { Document, Page, View, Text, Image, StyleSheet, Font, renderToBuffer } from "@react-pdf/renderer";
 
 // Same registration approach (and same reasoning — no Cyrillic/₽ glyphs in
 // react-pdf's built-in fonts) as quote-pdf.tsx/quotes-list-pdf.tsx —
@@ -36,8 +36,12 @@ const styles = StyleSheet.create({
   title: { fontSize: 18, fontWeight: 700, marginBottom: 4 },
   metaLine: { fontSize: 9.5, color: "#63666f", marginBottom: 14 },
   itemBlock: { marginBottom: 16 },
+  itemHeaderRow: { flexDirection: "row", alignItems: "flex-start", marginBottom: 2 },
+  itemPhoto: { width: 32, height: 32, marginRight: 8, objectFit: "cover" },
   itemHeader: { fontSize: 12, fontWeight: 700, marginBottom: 2 },
   itemMeta: { fontSize: 9, color: "#63666f", marginBottom: 6 },
+  orderServicesBlock: { marginTop: 4, marginBottom: 16 },
+  orderServicesTitle: { fontSize: 12, fontWeight: 700, marginBottom: 6 },
   tableHeader: {
     flexDirection: "row",
     borderBottomWidth: 1,
@@ -75,12 +79,14 @@ interface FulfillmentOrderPdfProps {
     totalRub: number;
     createdAt: Date;
   };
-  client: { name: string; company: string | null };
+  client: { name: string; company: string | null; fulfillmentCode: string | null };
   manager: { name: string };
   items: {
     name: string;
     sku: string | null;
     dimensions: string | null;
+    plannedQuantity: number;
+    photoBuffer: Buffer | null;
     services: {
       name: string;
       priceRub: number;
@@ -88,31 +94,38 @@ interface FulfillmentOrderPdfProps {
       completedAt: Date | null;
     }[];
   }[];
+  // Услуги на партию целиком (FulfillmentOrderService) — не привязаны ни к
+  // одной позиции, показываются отдельным блоком после всех товаров.
+  orderServices: { name: string; priceRub: number; quantity: number }[];
 }
 
-function FulfillmentOrderPdfDocument({ order, client, manager, items }: FulfillmentOrderPdfProps) {
+function FulfillmentOrderPdfDocument({ order, client, manager, items, orderServices }: FulfillmentOrderPdfProps) {
   return (
     <Document>
       <Page size="A4" style={styles.page}>
         <Text style={styles.title}>Наряд-задание — Фулфилмент №{order.displayId}</Text>
         <Text style={styles.metaLine}>
           Клиент: {client.name}
-          {client.company ? ` (${client.company})` : ""} · Менеджер: {manager.name} ·{" "}
+          {client.company ? ` (${client.company})` : ""}
+          {client.fulfillmentCode ? ` · Код: ${client.fulfillmentCode}` : ""} · Менеджер: {manager.name} ·{" "}
           {order.createdAt.toLocaleDateString("ru-RU")}
         </Text>
 
         {items.map((item, itemIndex) => (
           <View key={itemIndex} style={styles.itemBlock} wrap={false}>
-            <Text style={styles.itemHeader}>
-              {itemIndex + 1}. {item.name}
-            </Text>
-            {(item.sku || item.dimensions) && (
-              <Text style={styles.itemMeta}>
-                {item.sku ? `Артикул: ${item.sku}` : ""}
-                {item.sku && item.dimensions ? " · " : ""}
-                {item.dimensions ? `Габариты: ${item.dimensions}` : ""}
-              </Text>
-            )}
+            <View style={styles.itemHeaderRow}>
+              {item.photoBuffer && <Image src={item.photoBuffer} style={styles.itemPhoto} cache={false} />}
+              <View>
+                <Text style={styles.itemHeader}>
+                  {itemIndex + 1}. {item.name}
+                </Text>
+                <Text style={styles.itemMeta}>
+                  План: {item.plannedQuantity} шт.
+                  {item.sku ? ` · Артикул: ${item.sku}` : ""}
+                  {item.dimensions ? ` · Габариты: ${item.dimensions}` : ""}
+                </Text>
+              </View>
+            </View>
             <View style={styles.tableHeader}>
               <Text style={[styles.tableHeaderCell, styles.colCheck]} />
               <Text style={[styles.tableHeaderCell, styles.colName]}>Услуга</Text>
@@ -133,6 +146,28 @@ function FulfillmentOrderPdfDocument({ order, client, manager, items }: Fulfillm
             ))}
           </View>
         ))}
+
+        {orderServices.length > 0 && (
+          <View style={styles.orderServicesBlock} wrap={false}>
+            <Text style={styles.orderServicesTitle}>Услуги на партию целиком</Text>
+            <View style={styles.tableHeader}>
+              <Text style={[styles.tableHeaderCell, styles.colCheck]} />
+              <Text style={[styles.tableHeaderCell, styles.colName]}>Услуга</Text>
+              <Text style={[styles.tableHeaderCell, styles.colQty]}>Кол-во</Text>
+              <Text style={[styles.tableHeaderCell, styles.colPrice]}>Цена</Text>
+              <Text style={[styles.tableHeaderCell, styles.colSum]}>Сумма</Text>
+            </View>
+            {orderServices.map((service, index) => (
+              <View key={index} style={styles.row}>
+                <View style={styles.colCheck} />
+                <Text style={styles.colName}>{service.name}</Text>
+                <Text style={styles.colQty}>{service.quantity}</Text>
+                <Text style={styles.colPrice}>{fmt(service.priceRub)} ₽</Text>
+                <Text style={styles.colSum}>{fmt(service.priceRub * service.quantity)} ₽</Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>ИТОГО</Text>

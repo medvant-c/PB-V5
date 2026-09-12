@@ -4,6 +4,7 @@ import { getVisibleManagerIds, clientVisibilityWhere } from "@/lib/manager-scope
 import { prisma } from "@/lib/prisma";
 import { nextClientDisplayId } from "@/lib/display-ids";
 import { normalizePhone } from "@/lib/phone";
+import { normalizeFulfillmentCode } from "@/lib/fulfillment-client-code";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -20,11 +21,18 @@ export async function GET(req: NextRequest) {
 
   const visibleManagerIds = await getVisibleManagerIds(session);
   const includeArchived = req.nextUrl.searchParams.get("includeArchived") === "1";
+  // ?kind= — фильтр для разделения списков "Клиенты" (просчёт) и
+  // "Фулфилмент" в UI; сама Client — одна и та же таблица (см. схема,
+  // ClientKind). Без параметра — все клиенты, для обратной совместимости
+  // с существующими вызовами.
+  const kindParam = req.nextUrl.searchParams.get("kind");
+  const kindFilter = kindParam === "procurement" || kindParam === "fulfillment" ? kindParam : null;
 
   const clients = await prisma.client.findMany({
     where: {
       ...clientVisibilityWhere(visibleManagerIds),
       ...(includeArchived ? {} : { archivedAt: null }),
+      ...(kindFilter ? { kind: kindFilter } : {}),
     },
     orderBy: { createdAt: "desc" },
     select: {
@@ -37,6 +45,8 @@ export async function GET(req: NextRequest) {
       phone: true,
       source: true,
       status: true,
+      kind: true,
+      fulfillmentCode: true,
       createdByManagerId: true,
       createdByManager: { select: { name: true } },
       updatedAt: true,
@@ -90,7 +100,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
 
-  const { name, company, phone, messenger, email, source, selfSourced } =
+  const { name, company, phone, messenger, email, source, selfSourced, kind, fulfillmentCode } =
     (body as {
       name?: unknown;
       company?: unknown;
@@ -99,6 +109,8 @@ export async function POST(req: NextRequest) {
       email?: unknown;
       source?: unknown;
       selfSourced?: unknown;
+      kind?: unknown;
+      fulfillmentCode?: unknown;
     }) ?? {};
 
   if (typeof name !== "string" || !name.trim()) {
@@ -140,6 +152,22 @@ export async function POST(req: NextRequest) {
   // separate follow-up click.
   const isSelfSourced = selfSourced === true;
 
+  // По умолчанию — просчётный клиент (существующий поток без изменений).
+  // "fulfillment" выбирается явно в форме создания на вкладке Фулфилмент.
+  const clientKind = kind === "fulfillment" ? "fulfillment" : "procurement";
+
+  let normalizedFulfillmentCode: string | null = null;
+  if (fulfillmentCode !== undefined && fulfillmentCode !== null && fulfillmentCode !== "") {
+    normalizedFulfillmentCode = normalizeFulfillmentCode(fulfillmentCode);
+    if (!normalizedFulfillmentCode) {
+      return Response.json({ error: "Код клиента должен быть в формате: 4 цифры + 2 латинские буквы, например 1234AB." }, { status: 400 });
+    }
+    const existingCode = await prisma.client.findUnique({ where: { fulfillmentCode: normalizedFulfillmentCode } });
+    if (existingCode) {
+      return Response.json({ error: "Клиент с таким кодом уже существует." }, { status: 409 });
+    }
+  }
+
   const client = await prisma.client.create({
     data: {
       displayId: await nextClientDisplayId(),
@@ -150,6 +178,8 @@ export async function POST(req: NextRequest) {
       phone: normalizedPhone,
       source: normalizedSource as never,
       createdByManagerId: session.managerId,
+      kind: clientKind,
+      fulfillmentCode: normalizedFulfillmentCode,
       ...(isSelfSourced ? { selfSourcedClaimed: true, selfSourcedClaimedAt: new Date() } : {}),
     },
   });
