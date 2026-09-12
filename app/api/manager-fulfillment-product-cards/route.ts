@@ -82,6 +82,9 @@ export async function POST(req: NextRequest) {
   if (weightPerUnitKg !== null && (!Number.isFinite(weightPerUnitKg) || weightPerUnitKg < 0)) {
     return Response.json({ error: "Некорректный вес за единицу." }, { status: 400 });
   }
+  const marketplaceFlowRaw = formData.get("marketplaceFlow");
+  const marketplaceFlow =
+    marketplaceFlowRaw === "fbs" || marketplaceFlowRaw === "fbo" || marketplaceFlowRaw === "both" ? marketplaceFlowRaw : null;
 
   const card = await prisma.fulfillmentProductCard.create({
     data: {
@@ -92,6 +95,7 @@ export async function POST(req: NextRequest) {
       dimensions: str("dimensions"),
       weightPerUnitKg,
       packaging: str("packaging"),
+      marketplaceFlow,
       barcodeWb: str("barcodeWb"),
       barcodeOzon: str("barcodeOzon"),
       barcodeYm: str("barcodeYm"),

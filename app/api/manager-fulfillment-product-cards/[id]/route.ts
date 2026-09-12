@@ -67,6 +67,10 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     const value = str(key);
     if (value !== undefined) data[key] = value;
   }
+  if (formData.has("marketplaceFlow")) {
+    const raw = formData.get("marketplaceFlow");
+    data.marketplaceFlow = raw === "fbs" || raw === "fbo" || raw === "both" ? raw : null;
+  }
   if (formData.has("weightPerUnitKg")) {
     const raw = formData.get("weightPerUnitKg");
     const weight = typeof raw === "string" && raw.trim() ? Number(raw) : null;

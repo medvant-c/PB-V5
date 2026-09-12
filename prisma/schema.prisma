@@ -1669,6 +1669,16 @@ model FulfillmentServiceItem {
 // заказа — товар и его услуги копируются (снэпшотом) в
 // FulfillmentOrderItem/FulfillmentOrderItemService, ничего не тянется
 // вживую из карточки после создания заказа. См. PB-V5 chat 2026-09-11.
+// Какой маркетплейс-флоу использует этот товар — нужно менеджеру, чтобы
+// сразу видеть, какие услуги/штрихкоды актуальны (FBS и FBO у одного и
+// того же товара обычно требуют разного набора операций). null — не
+// указано (обычный склад/фулфилмент без привязки к конкретному флоу).
+enum FulfillmentMarketplaceFlow {
+  fbs
+  fbo
+  both
+}
+
 model FulfillmentProductCard {
   id              String   @id @default(cuid())
   clientId        String
@@ -1677,6 +1687,7 @@ model FulfillmentProductCard {
   sku             String?
   description     String?
   dimensions      String?
+  marketplaceFlow FulfillmentMarketplaceFlow?
   weightPerUnitKg Decimal?
   // "Фасовка" — свободный текст (например "по 10 шт в коробке").
   packaging       String?

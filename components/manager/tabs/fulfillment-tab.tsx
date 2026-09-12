@@ -81,6 +81,20 @@ interface ProductCardServiceRecord {
   priceRub: string;
 }
 
+type MarketplaceFlow = "fbs" | "fbo" | "both";
+
+const MARKETPLACE_FLOW_LABEL: Record<MarketplaceFlow, string> = {
+  fbs: "FBS",
+  fbo: "FBO",
+  both: "FBS + FBO",
+};
+
+const MARKETPLACE_FLOW_BADGE_CLASSES: Record<MarketplaceFlow, string> = {
+  fbs: "bg-primary/10 text-primary",
+  fbo: "bg-purple-500/10 text-purple-600",
+  both: "bg-gradient-to-r from-primary/10 to-purple-500/10 text-text",
+};
+
 interface ProductCardRecord {
   id: string;
   clientId: string;
@@ -88,6 +102,7 @@ interface ProductCardRecord {
   sku: string | null;
   description: string | null;
   dimensions: string | null;
+  marketplaceFlow: MarketplaceFlow | null;
   weightPerUnitKg: string | null;
   packaging: string | null;
   barcodeWb: string | null;
@@ -411,6 +426,7 @@ function ManagerFulfillmentTab() {
   const [cardSku, setCardSku] = useState("");
   const [cardDescription, setCardDescription] = useState("");
   const [cardDimensions, setCardDimensions] = useState("");
+  const [cardMarketplaceFlow, setCardMarketplaceFlow] = useState<MarketplaceFlow | null>(null);
   const [cardWeight, setCardWeight] = useState("");
   const [cardPackaging, setCardPackaging] = useState("");
   const [cardBarcodeWb, setCardBarcodeWb] = useState("");
@@ -421,6 +437,22 @@ function ManagerFulfillmentTab() {
   const [cardServiceDrafts, setCardServiceDrafts] = useState<ServiceLine[]>([]);
   const [savingCard, setSavingCard] = useState(false);
   const [cardFormError, setCardFormError] = useState<string | null>(null);
+
+  // Массовый выбор карточек товара — для быстрого создания заявки на
+  // обработку сразу по нескольким товарам клиента (без ручного добавления
+  // каждой позиции через форму ниже). См. PB-V5 chat 2026-09-12.
+  const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set());
+  const [creatingRequestFromCards, setCreatingRequestFromCards] = useState(false);
+  const [requestFromCardsError, setRequestFromCardsError] = useState<string | null>(null);
+
+  function toggleCardSelection(cardId: string) {
+    setSelectedCardIds((current) => {
+      const next = new Set(current);
+      if (next.has(cardId)) next.delete(cardId);
+      else next.add(cardId);
+      return next;
+    });
+  }
 
   const loadProductCards = useCallback(async (clientId: string) => {
     setLoadingCards(true);
@@ -434,6 +466,7 @@ function ManagerFulfillmentTab() {
   }, []);
 
   useEffect(() => {
+    setSelectedCardIds(new Set());
     if (selectedClientId) loadProductCards(selectedClientId);
     else setProductCards([]);
   }, [selectedClientId, loadProductCards]);
@@ -444,6 +477,7 @@ function ManagerFulfillmentTab() {
     setCardSku("");
     setCardDescription("");
     setCardDimensions("");
+    setCardMarketplaceFlow(null);
     setCardWeight("");
     setCardPackaging("");
     setCardBarcodeWb("");
@@ -462,6 +496,7 @@ function ManagerFulfillmentTab() {
     setCardSku(card.sku ?? "");
     setCardDescription(card.description ?? "");
     setCardDimensions(card.dimensions ?? "");
+    setCardMarketplaceFlow(card.marketplaceFlow);
     setCardWeight(card.weightPerUnitKg ?? "");
     setCardPackaging(card.packaging ?? "");
     setCardBarcodeWb(card.barcodeWb ?? "");
@@ -490,6 +525,7 @@ function ManagerFulfillmentTab() {
       if (cardSku.trim()) formData.set("sku", cardSku.trim());
       if (cardDescription.trim()) formData.set("description", cardDescription.trim());
       if (cardDimensions.trim()) formData.set("dimensions", cardDimensions.trim());
+      formData.set("marketplaceFlow", cardMarketplaceFlow ?? "");
       if (cardWeight.trim()) formData.set("weightPerUnitKg", cardWeight.trim());
       if (cardPackaging.trim()) formData.set("packaging", cardPackaging.trim());
       if (cardBarcodeWb.trim()) formData.set("barcodeWb", cardBarcodeWb.trim());
@@ -550,6 +586,54 @@ function ManagerFulfillmentTab() {
     if (res.ok) await loadProductCards(selectedClientId);
   }
 
+  // Быстрый путь: галочки на карточках товара → одна кнопка → заявка на
+  // обработку сразу по всем отмеченным товарам, с их сохранёнными
+  // услугами по умолчанию (кол-во услуг = 1, план по товару = 1 — оба
+  // редактируются после создания в самой заявке). Ручная форма ниже
+  // (с датами/услугами на партию/произвольным кол-вом) остаётся для
+  // случаев, когда нужно больше контроля при создании.
+  async function handleCreateOrderFromSelectedCards() {
+    if (!selectedClientId || selectedCardIds.size === 0) return;
+    setCreatingRequestFromCards(true);
+    setRequestFromCardsError(null);
+    try {
+      const items = productCards
+        .filter((card) => selectedCardIds.has(card.id))
+        .map((card) => ({
+          name: card.name,
+          sku: card.sku ?? undefined,
+          dimensions: card.dimensions ?? undefined,
+          plannedQuantity: 1,
+          productCardId: card.id,
+          services: card.services.map((s) => ({
+            serviceItemId: s.serviceItemId,
+            name: s.name,
+            priceCny: Number(s.priceCny),
+            quantity: 1,
+          })),
+        }));
+      const emptyItem = items.find((item) => item.services.length === 0);
+      if (emptyItem) {
+        setRequestFromCardsError(`У товара «${emptyItem.name}» нет услуг по умолчанию — добавьте их в карточку или создайте заявку вручную.`);
+        return;
+      }
+      const res = await fetch("/api/manager-fulfillment-orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: selectedClientId, items, orderServices: [] }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setRequestFromCardsError(data.error ?? "Не удалось создать заявку.");
+        return;
+      }
+      setSelectedCardIds(new Set());
+      await loadOrders();
+    } finally {
+      setCreatingRequestFromCards(false);
+    }
+  }
+
   // --- Каталог услуг (общий, не привязан к клиенту) ---
   const [services, setServices] = useState<ServiceItemRecord[]>([]);
 
@@ -573,6 +657,10 @@ function ManagerFulfillmentTab() {
   const [busyReceiveItemId, setBusyReceiveItemId] = useState<string | null>(null);
   const [receiveDrafts, setReceiveDrafts] = useState<Record<string, string>>({});
 
+  // Ручная форма (даты, произвольные позиции, услуги на партию целиком) —
+  // свёрнута по умолчанию: основной путь теперь галочки на карточках товара
+  // выше. Разворачивается сама при редактировании существующей заявки.
+  const [showManualOrderForm, setShowManualOrderForm] = useState(false);
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [quoteId, setQuoteId] = useState("");
   const [clientQuotes, setClientQuotes] = useState<QuoteOption[]>([]);
@@ -722,6 +810,7 @@ function ManagerFulfillmentTab() {
 
   function handleEditOrder(order: FulfillmentOrderRecord) {
     setSelectedClientId(order.client.id);
+    setShowManualOrderForm(true);
     setEditingOrderId(order.id);
     setQuoteId(order.quote?.id ?? "");
     setReceivedAt(order.receivedAt ? order.receivedAt.slice(0, 10) : "");
@@ -754,6 +843,7 @@ function ManagerFulfillmentTab() {
   }
 
   function handleCancelEdit() {
+    setShowManualOrderForm(false);
     setEditingOrderId(null);
     setDraftItems([blankDraftItem()]);
     setDraftOrderServices([]);
@@ -796,6 +886,20 @@ function ManagerFulfillmentTab() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
+      });
+      if (res.ok) await loadOrders();
+    } finally {
+      setBusyOrderActionId(null);
+    }
+  }
+
+  async function handleUpdateOrderDates(id: string, patch: { receivedAt?: string | null; plannedShipAt?: string | null }) {
+    setBusyOrderActionId(id);
+    try {
+      const res = await fetch(`/api/manager-fulfillment-orders/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
       });
       if (res.ok) await loadOrders();
     } finally {
@@ -846,71 +950,13 @@ function ManagerFulfillmentTab() {
     });
   }, [orders, selectedClientId, filterPeriod]);
 
-  // --- Service price-list management (collapsed by default) ---
-  const [showServicePanel, setShowServicePanel] = useState(false);
-  const [serviceDrafts, setServiceDrafts] = useState<Record<string, { name: string; priceCny: string }>>({});
-  const [busyServiceId, setBusyServiceId] = useState<string | null>(null);
-  const [newServiceName, setNewServiceName] = useState("");
-  const [newServicePrice, setNewServicePrice] = useState("");
-  const [servicePanelError, setServicePanelError] = useState<string | null>(null);
-
-  async function handleSaveService(id: string, original: ServiceItemRecord) {
-    const draft = serviceDrafts[id];
-    if (!draft || (draft.name === original.name && draft.priceCny === original.priceCny)) return;
-    setBusyServiceId(id);
-    setServicePanelError(null);
-    try {
-      const res = await fetch(`/api/manager-fulfillment-services/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: draft.name, priceCny: Number(draft.priceCny) }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setServicePanelError(data.error ?? "Не удалось сохранить услугу.");
-        return;
-      }
-      await loadServices();
-    } finally {
-      setBusyServiceId(null);
-    }
-  }
-
-  async function handleDeleteService(id: string) {
-    if (!window.confirm("Удалить эту услугу из прайс-листа?")) return;
-    setBusyServiceId(id);
-    try {
-      const res = await fetch(`/api/manager-fulfillment-services/${id}`, { method: "DELETE" });
-      if (res.ok) await loadServices();
-    } finally {
-      setBusyServiceId(null);
-    }
-  }
-
-  async function handleCreateService() {
-    if (!newServiceName.trim() || !newServicePrice) return;
-    setServicePanelError(null);
-    const res = await fetch("/api/manager-fulfillment-services", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newServiceName.trim(), priceCny: Number(newServicePrice) }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setServicePanelError(data.error ?? "Не удалось добавить услугу.");
-      return;
-    }
-    setNewServiceName("");
-    setNewServicePrice("");
-    await loadServices();
-  }
-
   return (
     <div className="space-y-4">
       <div>
         <h2 className="text-sm font-bold text-text">Фулфилмент</h2>
         <p className="mt-1 text-sm text-text-secondary">
-          Клиенты фулфилмента, их карточки товаров и заказы на складскую обработку.
+          Клиенты фулфилмента, их карточки товаров и заявки на складскую обработку. Базовые цены на услуги — в
+          «Настройки → Фулфилмент».
         </p>
       </div>
 
@@ -1053,6 +1099,24 @@ function ManagerFulfillmentTab() {
                       <Input placeholder="Название товара" value={cardName} onChange={(e) => setCardName(e.target.value)} />
                       <Input placeholder="Артикул" value={cardSku} onChange={(e) => setCardSku(e.target.value)} />
                       <Input placeholder="Габариты" value={cardDimensions} onChange={(e) => setCardDimensions(e.target.value)} />
+                      <div className="flex items-center gap-1.5">
+                        <Label className="shrink-0 text-xs text-text-secondary">Маркетплейс:</Label>
+                        <div className="flex gap-1 rounded-lg border border-border bg-surface p-0.5">
+                          {(["fbs", "fbo", "both"] as const).map((flow) => (
+                            <button
+                              key={flow}
+                              type="button"
+                              onClick={() => setCardMarketplaceFlow(cardMarketplaceFlow === flow ? null : flow)}
+                              className={cn(
+                                "rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                                cardMarketplaceFlow === flow ? MARKETPLACE_FLOW_BADGE_CLASSES[flow] : "text-text-secondary hover:text-text",
+                              )}
+                            >
+                              {MARKETPLACE_FLOW_LABEL[flow]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                       <Input type="number" step="0.01" placeholder="Вес за единицу, кг" value={cardWeight} onChange={(e) => setCardWeight(e.target.value)} />
                       <Input placeholder="Фасовка" value={cardPackaging} onChange={(e) => setCardPackaging(e.target.value)} />
                       <Input type="file" accept="image/*" onChange={(e) => setCardPhotoFile(e.target.files?.[0] ?? null)} className="text-xs" />
@@ -1090,9 +1154,38 @@ function ManagerFulfillmentTab() {
                 ) : productCards.length === 0 ? (
                   <p className="text-xs text-text-secondary">У этого клиента пока нет карточек товара.</p>
                 ) : (
-                  <div className="grid gap-2 sm:grid-cols-2">
+                  <>
+                    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border bg-bg px-3 py-2">
+                      <label className="flex items-center gap-1.5 text-xs text-text-secondary">
+                        <input
+                          type="checkbox"
+                          checked={selectedCardIds.size === productCards.length}
+                          onChange={(e) => setSelectedCardIds(e.target.checked ? new Set(productCards.map((c) => c.id)) : new Set())}
+                        />
+                        Выбрать все ({selectedCardIds.size}/{productCards.length})
+                      </label>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="ml-auto"
+                        disabled={selectedCardIds.size === 0 || creatingRequestFromCards}
+                        onClick={handleCreateOrderFromSelectedCards}
+                      >
+                        {creatingRequestFromCards ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                        Создать заявку на обработку
+                      </Button>
+                    </div>
+                    {requestFromCardsError && <p className="text-xs text-error">{requestFromCardsError}</p>}
+                    <div className="grid gap-2 sm:grid-cols-2">
                     {productCards.map((card) => (
-                      <div key={card.id} className="flex gap-2 rounded-lg border border-border bg-bg p-2.5">
+                      <div key={card.id} className={cn("flex gap-2 rounded-lg border bg-bg p-2.5", selectedCardIds.has(card.id) ? "border-primary" : "border-border")}>
+                        <input
+                          type="checkbox"
+                          checked={selectedCardIds.has(card.id)}
+                          onChange={() => toggleCardSelection(card.id)}
+                          className="mt-1 shrink-0"
+                          aria-label={`Выбрать ${card.name}`}
+                        />
                         {card.photoId ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
@@ -1106,7 +1199,14 @@ function ManagerFulfillmentTab() {
                           </div>
                         )}
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-text">{card.name}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="truncate text-sm font-medium text-text">{card.name}</p>
+                            {card.marketplaceFlow && (
+                              <span className={cn("shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold", MARKETPLACE_FLOW_BADGE_CLASSES[card.marketplaceFlow])}>
+                                {MARKETPLACE_FLOW_LABEL[card.marketplaceFlow]}
+                              </span>
+                            )}
+                          </div>
                           <p className="truncate text-[11px] text-text-secondary">
                             {[card.sku, card.dimensions, card.packaging].filter(Boolean).join(" · ") || "—"}
                           </p>
@@ -1134,20 +1234,24 @@ function ManagerFulfillmentTab() {
                         </div>
                       </div>
                     ))}
-                  </div>
+                    </div>
+                  </>
                 )}
               </Card>
 
-              {/* Форма заказа */}
+              {/* Форма заказа (свёрнута по умолчанию — основной путь теперь галочки на карточках выше) */}
+              {!showManualOrderForm ? (
+                <Button type="button" variant="outline" size="sm" onClick={() => setShowManualOrderForm(true)}>
+                  <Plus className="h-3.5 w-3.5" /> Создать заявку вручную
+                </Button>
+              ) : (
               <Card className="p-4 space-y-4">
-                {editingOrderId && (
-                  <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary">
-                    <span>Редактирование заказа</span>
-                    <button type="button" onClick={handleCancelEdit} className="flex items-center gap-1 hover:underline">
-                      <X className="h-3.5 w-3.5" /> Отменить
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-medium text-primary">
+                  <span>{editingOrderId ? "Редактирование заявки" : "Новая заявка на обработку"}</span>
+                  <button type="button" onClick={handleCancelEdit} className="flex items-center gap-1 hover:underline">
+                    <X className="h-3.5 w-3.5" /> {editingOrderId ? "Отменить" : "Свернуть"}
+                  </button>
+                </div>
 
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="space-y-1.5">
@@ -1250,8 +1354,13 @@ function ManagerFulfillmentTab() {
                 </div>
                 {formError && <p className="text-xs text-error">{formError}</p>}
               </Card>
+              )}
 
-              {/* Список заказов клиента */}
+              {/* Заявки на обработку */}
+              <div>
+                <p className="text-sm font-bold text-text">Заявки на обработку</p>
+                <p className="mt-0.5 text-xs text-text-secondary">Товар, сумма услуг и статус обработки по каждой заявке.</p>
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="flex gap-1 rounded-lg border border-border bg-surface p-0.5">
                   {PERIOD_OPTIONS.map((opt) => (
@@ -1329,13 +1438,6 @@ function ManagerFulfillmentTab() {
                                     ))}
                                   </SelectContent>
                                 </Select>
-                                {(order.receivedAt || order.plannedShipAt) && (
-                                  <span className="text-[11px] text-text-secondary">
-                                    {order.receivedAt && `Принят: ${new Date(order.receivedAt).toLocaleDateString("ru-RU")}`}
-                                    {order.receivedAt && order.plannedShipAt && " · "}
-                                    {order.plannedShipAt && `Отгрузка: ${new Date(order.plannedShipAt).toLocaleDateString("ru-RU")}`}
-                                  </span>
-                                )}
                               </div>
                               <div className="flex items-center gap-1.5">
                                 <a
@@ -1373,46 +1475,80 @@ function ManagerFulfillmentTab() {
                               </div>
                             </div>
 
-                            {order.printLogs.length > 0 && (
-                              <div>
-                                <button
-                                  type="button"
-                                  onClick={() => setExpandedPrintLogId(expandedPrintLogId === order.id ? null : order.id)}
-                                  className="flex items-center gap-1 text-[11px] text-text-secondary hover:text-text"
-                                >
-                                  <Printer className="h-3 w-3" /> Печатался {order.printLogs.length} раз(а)
-                                  <ChevronDown className={cn("h-3 w-3 transition-transform", expandedPrintLogId === order.id && "rotate-180")} />
-                                </button>
-                                {expandedPrintLogId === order.id && (
-                                  <ul className="mt-1 space-y-0.5 pl-4 text-[11px] text-text-secondary">
-                                    {order.printLogs.map((log) => (
-                                      <li key={log.id}>
-                                        {log.printedByManager.name} — {new Date(log.printedAt).toLocaleString("ru-RU")}
-                                      </li>
+                            {/* Детали — даты приёмки/отгрузки, факт по количеству, история печати.
+                                Свёрнуто по умолчанию: это логистическая справка, не то, с чем
+                                менеджер/склад работает каждый день (см. PB-V5 chat 2026-09-12). */}
+                            <div>
+                              <button
+                                type="button"
+                                onClick={() => setExpandedPrintLogId(expandedPrintLogId === order.id ? null : order.id)}
+                                className="flex items-center gap-1 text-[11px] text-text-secondary hover:text-text"
+                              >
+                                Детали (даты, приёмка по факту{order.printLogs.length > 0 ? ", печать" : ""})
+                                <ChevronDown className={cn("h-3 w-3 transition-transform", expandedPrintLogId === order.id && "rotate-180")} />
+                              </button>
+                              {expandedPrintLogId === order.id && (
+                                <div className="mt-1.5 space-y-2 rounded-lg border border-dashed border-border bg-bg p-2.5">
+                                  <div className="grid gap-2 sm:grid-cols-2">
+                                    <div className="space-y-1">
+                                      <Label className="text-[11px] text-text-secondary">Принято на складе</Label>
+                                      <Input
+                                        type="date"
+                                        value={order.receivedAt ? order.receivedAt.slice(0, 10) : ""}
+                                        onChange={(e) => handleUpdateOrderDates(order.id, { receivedAt: e.target.value || null })}
+                                        className="h-7 text-xs"
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label className="text-[11px] text-text-secondary">Плановая отгрузка</Label>
+                                      <Input
+                                        type="date"
+                                        value={order.plannedShipAt ? order.plannedShipAt.slice(0, 10) : ""}
+                                        onChange={(e) => handleUpdateOrderDates(order.id, { plannedShipAt: e.target.value || null })}
+                                        className="h-7 text-xs"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label className="text-[11px] text-text-secondary">Принято по факту (шт.)</Label>
+                                    {order.items.map((item) => (
+                                      <div key={item.id} className="flex items-center gap-2 text-xs text-text-secondary">
+                                        <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                                        <span>план {item.plannedQuantity} · факт</span>
+                                        <Input
+                                          type="number"
+                                          min={0}
+                                          step="1"
+                                          value={receiveDrafts[item.id] ?? (item.receivedQuantity ?? "")}
+                                          onChange={(e) => setReceiveDrafts((c) => ({ ...c, [item.id]: e.target.value }))}
+                                          onBlur={() => handleSaveReceivedQuantity(item.id)}
+                                          disabled={busyReceiveItemId === item.id}
+                                          className="h-6 w-16 text-xs"
+                                        />
+                                      </div>
                                     ))}
-                                  </ul>
-                                )}
-                              </div>
-                            )}
+                                  </div>
+                                  {order.printLogs.length > 0 && (
+                                    <div>
+                                      <Label className="text-[11px] text-text-secondary">История печати наряда</Label>
+                                      <ul className="mt-0.5 space-y-0.5 text-[11px] text-text-secondary">
+                                        {order.printLogs.map((log) => (
+                                          <li key={log.id}>
+                                            {log.printedByManager.name} — {new Date(log.printedAt).toLocaleString("ru-RU")}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
 
                             {order.items.map((item) => (
                               <div key={item.id} className="rounded-lg border border-border bg-bg p-2.5">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <div className="text-sm font-medium text-text">{item.name}</div>
-                                  <div className="flex items-center gap-1.5 text-xs text-text-secondary">
-                                    <span>План: {item.plannedQuantity}</span>
-                                    <span>· Факт:</span>
-                                    <Input
-                                      type="number"
-                                      min={0}
-                                      step="1"
-                                      value={receiveDrafts[item.id] ?? (item.receivedQuantity ?? "")}
-                                      onChange={(e) => setReceiveDrafts((c) => ({ ...c, [item.id]: e.target.value }))}
-                                      onBlur={() => handleSaveReceivedQuantity(item.id)}
-                                      disabled={busyReceiveItemId === item.id}
-                                      className="h-6 w-16 text-xs"
-                                    />
-                                  </div>
+                                  <span className="shrink-0 text-[11px] text-text-secondary">План: {item.plannedQuantity} шт.</span>
                                 </div>
                                 {(item.sku || item.dimensions) && (
                                   <div className="text-xs text-text-secondary">
@@ -1466,60 +1602,6 @@ function ManagerFulfillmentTab() {
             </>
           )}
         </div>
-      </div>
-
-      <div className="border-t border-border pt-4">
-        <button
-          type="button"
-          onClick={() => setShowServicePanel((v) => !v)}
-          className="flex items-center gap-1 text-xs font-semibold text-text-secondary hover:text-text"
-        >
-          <Package className="h-3.5 w-3.5" />
-          {showServicePanel ? "Скрыть прайс-лист услуг" : "Управлять прайс-листом услуг"}
-          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showServicePanel ? "rotate-180" : ""}`} />
-        </button>
-        {showServicePanel && (
-          <div className="mt-3 space-y-1.5">
-            {services.map((s) => (
-              <div key={s.id} className="flex items-center gap-2 rounded-lg border border-border bg-bg px-2.5 py-1.5">
-                <Input
-                  value={serviceDrafts[s.id]?.name ?? s.name}
-                  onChange={(e) => setServiceDrafts((c) => ({ ...c, [s.id]: { name: e.target.value, priceCny: c[s.id]?.priceCny ?? s.priceCny } }))}
-                  onBlur={() => handleSaveService(s.id, s)}
-                  disabled={busyServiceId === s.id}
-                  className="h-8 min-w-0 flex-1 text-sm"
-                />
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={serviceDrafts[s.id]?.priceCny ?? s.priceCny}
-                  onChange={(e) => setServiceDrafts((c) => ({ ...c, [s.id]: { name: c[s.id]?.name ?? s.name, priceCny: e.target.value } }))}
-                  onBlur={() => handleSaveService(s.id, s)}
-                  disabled={busyServiceId === s.id}
-                  className="h-8 w-24 shrink-0 text-sm"
-                />
-                <span className="shrink-0 text-xs text-text-secondary">≈{money(Number(s.priceRub))} ₽</span>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteService(s.id)}
-                  disabled={busyServiceId === s.id}
-                  className="shrink-0 text-text-secondary hover:text-error disabled:opacity-50"
-                  aria-label="Удалить услугу"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ))}
-            <div className="flex gap-2 pt-1">
-              <Input placeholder="Название услуги" value={newServiceName} onChange={(e) => setNewServiceName(e.target.value)} className="h-8 text-sm" />
-              <Input type="number" step="0.01" placeholder="¥" value={newServicePrice} onChange={(e) => setNewServicePrice(e.target.value)} className="h-8 w-24 shrink-0 text-sm" />
-              <Button type="button" size="sm" onClick={handleCreateService}>
-                <Plus className="h-4 w-4" />
-              </Button>
-            </div>
-            {servicePanelError && <p className="text-xs text-error">{servicePanelError}</p>}
-          </div>
-        )}
       </div>
     </div>
   );
