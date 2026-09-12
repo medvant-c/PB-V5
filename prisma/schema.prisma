@@ -1652,9 +1652,22 @@ model CashOpeningBalance {
 // текущему TariffSettings.cnyRateRub при каждом создании/правке строки
 // каталога (НЕ заморожена — в отличие от цены на уже созданном заказе,
 // см. FulfillmentOrder.cnyRateUsed ниже). См. PB-V5 chat 2026-09-11.
+// Два разных прайс-листа в одном каталоге — scope решает, где услуга
+// показывается: "item" — привязана к конкретному товару (карточка товара
+// / позиция заявки, например "Приёмка и сортировка"), "order" — относится
+// к заявке в целом, когда результат известен только после обработки
+// товара (например "Формирование короба" — сколько коробов вышло,
+// становится ясно только когда товар уже обработан). См. PB-V5 chat
+// 2026-09-12.
+enum FulfillmentServiceScope {
+  item
+  order
+}
+
 model FulfillmentServiceItem {
   id            String                        @id @default(cuid())
   name          String
+  scope         FulfillmentServiceScope        @default(item)
   priceCny      Decimal
   priceRub      Decimal
   createdAt     DateTime                      @default(now())

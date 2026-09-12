@@ -4,6 +4,7 @@ import { getVisibleManagerIds, canAccessManagerClient } from "@/lib/manager-scop
 import { prisma } from "@/lib/prisma";
 import { nextFulfillmentOrderDisplayId } from "@/lib/display-ids";
 import { parseItems, parseOrderServices, itemsTotalRub, orderServicesTotalRub } from "@/lib/desk-services/fulfillment-order-input";
+import { withItemPhotoIds } from "@/lib/desk-services/fulfillment-order-photos";
 
 // Scoped the same as every other manager-cabinet list — a plain manager
 // sees only their own orders, senior also sees their team's.
@@ -38,7 +39,7 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  return Response.json({ orders });
+  return Response.json({ orders: await withItemPhotoIds(orders) });
 }
 
 // Доступ — только менеджер, закреплённый за клиентом (canAccessManagerClient,
@@ -160,5 +161,6 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  return Response.json({ order }, { status: 201 });
+  const [orderWithPhotos] = await withItemPhotoIds([order]);
+  return Response.json({ order: orderWithPhotos }, { status: 201 });
 }

@@ -7,13 +7,27 @@ import { prisma } from "@/lib/prisma";
 // его может любая сессия менеджера — реальная защита данных клиента живёт
 // в scoping заказов/клиентов, не в этом справочнике. См. PB-V5 chat
 // 2026-09-11.
+//
+// scope — "item" (услуги к товару: приёмка, маркировка единицы и т.п.) или
+// "order" (услуги к заявке целиком, результат которых известен только
+// после обработки — например "Формирование короба"). Один каталог, а не
+// два — существующие связи (FulfillmentOrderItemService.serviceItemId,
+// FulfillmentProductCardService.serviceItemId) продолжают работать
+// одинаково для обоих scope, разница только в том, где услуга
+// предлагается в UI. См. PB-V5 chat 2026-09-12.
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
     return Response.json({ error: "Не авторизовано." }, { status: 401 });
   }
 
-  const items = await prisma.fulfillmentServiceItem.findMany({ orderBy: { createdAt: "asc" } });
+  const scopeParam = req.nextUrl.searchParams.get("scope");
+  const scope = scopeParam === "item" || scopeParam === "order" ? scopeParam : null;
+
+  const items = await prisma.fulfillmentServiceItem.findMany({
+    where: scope ? { scope } : {},
+    orderBy: { createdAt: "asc" },
+  });
   return Response.json({ items });
 }
 
@@ -29,7 +43,7 @@ export async function POST(req: NextRequest) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { name, priceCny } = (body as { name?: unknown; priceCny?: unknown }) ?? {};
+  const { name, priceCny, scope } = (body as { name?: unknown; priceCny?: unknown; scope?: unknown }) ?? {};
   if (typeof name !== "string" || !name.trim()) {
     return Response.json({ error: "Укажите название услуги." }, { status: 400 });
   }
@@ -37,6 +51,7 @@ export async function POST(req: NextRequest) {
   if (!Number.isFinite(priceCnyNum) || priceCnyNum < 0) {
     return Response.json({ error: "Укажите цену, ¥." }, { status: 400 });
   }
+  const resolvedScope = scope === "order" ? "order" : "item";
 
   // priceRub — не заморожена, просто пересчитывается по текущему курсу
   // тарифа для показа в прайс-листе; актуальный расход/доход конкретного
@@ -45,7 +60,7 @@ export async function POST(req: NextRequest) {
   const rate = tariff ? Number(tariff.cnyRateRub) : 0;
 
   const item = await prisma.fulfillmentServiceItem.create({
-    data: { name: name.trim(), priceCny: priceCnyNum, priceRub: priceCnyNum * rate },
+    data: { name: name.trim(), scope: resolvedScope, priceCny: priceCnyNum, priceRub: priceCnyNum * rate },
   });
   return Response.json({ item }, { status: 201 });
 }

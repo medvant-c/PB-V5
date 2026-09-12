@@ -11,9 +11,12 @@ interface SystemSettingsRecord {
   updatedAt: string;
 }
 
+type ServiceScope = "item" | "order";
+
 interface ServiceItemRecord {
   id: string;
   name: string;
+  scope: ServiceScope;
   priceCny: string;
   priceRub: string;
 }
@@ -22,6 +25,16 @@ function money(value: number): string {
   return Math.round(value).toLocaleString("ru-RU");
 }
 
+const SCOPE_TITLE: Record<ServiceScope, string> = {
+  item: "Услуги к товару",
+  order: "Услуги к заявке",
+};
+
+const SCOPE_HINT: Record<ServiceScope, string> = {
+  item: "Привязаны к конкретному товару — приёмка, маркировка единицы и т.п. Доступны в карточке товара и в позициях заявки.",
+  order: "Относятся к заявке в целом, результат известен только после обработки — например «Формирование короба». Доступны в разделе «Услуги на партию целиком».",
+};
+
 // Прайс-лист услуг фулфилмента — намеренно НЕ гейтится canEdit выше (это
 // owner-only настройка премии менеджеру), у каталога услуг своя, более
 // широкая граница доступа: любая сессия менеджера может читать и править
@@ -29,8 +42,10 @@ function money(value: number): string {
 // данных клиента живёт в scoping заказов/клиентов, не в этом справочнике.
 // Раньше жил прямо во вкладке «Фулфилмент» (свёрнутая панель внизу) —
 // перенесено сюда по просьбе пользователя, там же, где остальные базовые
-// цены/тарифы. См. PB-V5 chat 2026-09-12.
-function FulfillmentServicePriceList() {
+// цены/тарифы. Два прайс-листа (scope) вместо одного — услуги к товару и
+// услуги к заявке целиком — разные наборы для разных экранов создания
+// заявки. См. PB-V5 chat 2026-09-12.
+function FulfillmentServicePriceList({ scope }: { scope: ServiceScope }) {
   const [services, setServices] = useState<ServiceItemRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [serviceDrafts, setServiceDrafts] = useState<Record<string, { name: string; priceCny: string }>>({});
@@ -42,13 +57,13 @@ function FulfillmentServicePriceList() {
   const loadServices = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/manager-fulfillment-services");
+      const res = await fetch(`/api/manager-fulfillment-services?scope=${scope}`);
       const data = await res.json();
       if (res.ok) setServices(data.items);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [scope]);
 
   useEffect(() => {
     loadServices();
@@ -93,7 +108,7 @@ function FulfillmentServicePriceList() {
     const res = await fetch("/api/manager-fulfillment-services", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newServiceName.trim(), priceCny: Number(newServicePrice) }),
+      body: JSON.stringify({ name: newServiceName.trim(), priceCny: Number(newServicePrice), scope }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -108,10 +123,8 @@ function FulfillmentServicePriceList() {
   return (
     <div className="space-y-3 rounded-xl border border-dashed border-border bg-bg p-3">
       <div>
-        <h3 className="text-sm font-semibold text-text">Прайс-лист услуг фулфилмента</h3>
-        <p className="mt-0.5 text-xs text-text-secondary">
-          Цены в ¥ — ₽ пересчитывается автоматически по текущему курсу. Доступно любому менеджеру.
-        </p>
+        <h3 className="text-sm font-semibold text-text">{SCOPE_TITLE[scope]}</h3>
+        <p className="mt-0.5 text-xs text-text-secondary">{SCOPE_HINT[scope]} Цены в ¥ — ₽ пересчитывается автоматически по текущему курсу.</p>
       </div>
       {loading ? (
         <p className="text-sm text-text-secondary">Загрузка…</p>
@@ -274,7 +287,8 @@ function ManagerFulfillmentSettingsTab() {
         </form>
       )}
 
-      <FulfillmentServicePriceList />
+      <FulfillmentServicePriceList scope="item" />
+      <FulfillmentServicePriceList scope="order" />
     </div>
   );
 }

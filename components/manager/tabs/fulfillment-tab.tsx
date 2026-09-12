@@ -51,9 +51,12 @@ function periodStart(period: PeriodFilter): Date | null {
 
 const CODE_RE = /^\d{4}[A-Za-z]{2}$/;
 
+type ServiceScope = "item" | "order";
+
 interface ServiceItemRecord {
   id: string;
   name: string;
+  scope: ServiceScope;
   priceCny: string;
   priceRub: string;
 }
@@ -62,9 +65,13 @@ interface ClientOption {
   id: string;
   name: string;
   company: string | null;
+  phone: string | null;
+  messenger: string | null;
+  email: string | null;
   fulfillmentCode: string | null;
   createdByManagerId: string | null;
   createdByManager: { name: string } | null;
+  archivedAt: string | null;
 }
 
 interface QuoteOption {
@@ -132,6 +139,7 @@ interface OrderItemRecord {
   plannedQuantity: number;
   receivedQuantity: number | null;
   productCardId: string | null;
+  photoId: string | null;
   services: OrderServiceRecord[];
 }
 
@@ -201,8 +209,18 @@ function money(value: number): string {
   return Math.round(value).toLocaleString("ru-RU");
 }
 
+// ¥ — основная валюта в заявке (менеджер и заводит услуги в юанях), ₽ —
+// только справочно, тем же способом, что и прайс-лист в Настройках.
+function moneyCny(cnyValue: number, rubValue: number): string {
+  return `${cnyValue.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ¥ · ≈${money(rubValue)} ₽`;
+}
+
 function serviceLineTotalRub(line: ServiceLine, cnyRateRub: number): number {
   return (Number(line.priceCny) || 0) * cnyRateRub * (Number(line.quantity) || 0);
+}
+
+function serviceLineTotalCny(line: ServiceLine): number {
+  return (Number(line.priceCny) || 0) * (Number(line.quantity) || 0);
 }
 
 // Строка "услуга": каталожный пикер (auto-подставляет имя/цену) + своё имя/
@@ -278,7 +296,7 @@ function ServiceLineEditor({
             onChange={(e) => update(line.key, { quantity: e.target.value })}
             className="h-8 w-16 shrink-0 text-xs"
           />
-          <span className="shrink-0 text-xs text-text-secondary">{money(serviceLineTotalRub(line, cnyRateRub))} ₽</span>
+          <span className="shrink-0 text-xs text-text-secondary">{moneyCny(serviceLineTotalCny(line), serviceLineTotalRub(line, cnyRateRub))}</span>
           <button
             type="button"
             onClick={() => remove(line.key)}
@@ -313,19 +331,30 @@ function ManagerFulfillmentTab() {
   const [reassigningClientId, setReassigningClientId] = useState<string | null>(null);
   const [codeDraft, setCodeDraft] = useState<string | null>(null);
   const [savingCode, setSavingCode] = useState(false);
+  const [showArchivedClients, setShowArchivedClients] = useState(false);
+
+  // Редактирование карточки клиента (имя/компания/контакты) и архивирование
+  // — тот же паттерн, что и в «Клиенты» (clients-tab.tsx): жёсткого
+  // удаления клиента в системе нет вообще, только архив (мягкое скрытие,
+  // история не теряется). См. PB-V5 chat 2026-09-12.
+  const [editingClient, setEditingClient] = useState(false);
+  const [editDraft, setEditDraft] = useState({ name: "", company: "", phone: "", messenger: "", email: "" });
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [archivingClientId, setArchivingClientId] = useState<string | null>(null);
 
   const [cnyRateRub, setCnyRateRub] = useState<number>(0);
 
   const loadClients = useCallback(async () => {
     setLoadingClients(true);
     try {
-      const res = await fetch("/api/manager-clients?kind=fulfillment");
+      const res = await fetch(`/api/manager-clients?kind=fulfillment${showArchivedClients ? "&includeArchived=1" : ""}`);
       const data = await res.json();
       if (res.ok) setClients(data.clients);
     } finally {
       setLoadingClients(false);
     }
-  }, []);
+  }, [showArchivedClients]);
 
   useEffect(() => {
     loadClients();
@@ -414,6 +443,67 @@ function ManagerFulfillmentTab() {
       }
     } finally {
       setReassigningClientId(null);
+    }
+  }
+
+  function startEditingClient(client: ClientOption) {
+    setEditDraft({
+      name: client.name,
+      company: client.company ?? "",
+      phone: client.phone ?? "",
+      messenger: client.messenger ?? "",
+      email: client.email ?? "",
+    });
+    setEditError(null);
+    setEditingClient(true);
+  }
+
+  async function handleSaveClientEdit(clientId: string) {
+    if (!editDraft.name.trim()) {
+      setEditError("Укажите имя клиента.");
+      return;
+    }
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const res = await fetch(`/api/manager-clients/${clientId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editDraft.name.trim(),
+          company: editDraft.company.trim(),
+          phone: editDraft.phone.trim(),
+          messenger: editDraft.messenger.trim(),
+          email: editDraft.email.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setEditError(data.error ?? "Не удалось сохранить.");
+        return;
+      }
+      setEditingClient(false);
+      await loadClients();
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  async function handleToggleArchiveClient(client: ClientOption) {
+    if (!client.archivedAt && !window.confirm(`Отправить клиента «${client.name}» в архив? Жёсткого удаления нет — историю можно будет вернуть.`)) return;
+    setArchivingClientId(client.id);
+    try {
+      const res = await fetch(`/api/manager-clients/${client.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: !client.archivedAt }),
+      });
+      if (res.ok) {
+        await loadClients();
+        if (client.archivedAt === null) setSelectedClientId(null);
+      }
+    } finally {
+      setArchivingClientId(null);
     }
   }
 
@@ -634,13 +724,21 @@ function ManagerFulfillmentTab() {
     }
   }
 
-  // --- Каталог услуг (общий, не привязан к клиенту) ---
-  const [services, setServices] = useState<ServiceItemRecord[]>([]);
+  // --- Каталог услуг (общий, не привязан к клиенту) — два прайс-листа:
+  // "к товару" (карточка товара, позиции заявки) и "к заявке целиком"
+  // (результат известен только после обработки, например "Формирование
+  // короба"). См. PB-V5 chat 2026-09-12.
+  const [itemServices, setItemServices] = useState<ServiceItemRecord[]>([]);
+  const [orderLevelServices, setOrderLevelServices] = useState<ServiceItemRecord[]>([]);
 
   const loadServices = useCallback(async () => {
-    const res = await fetch("/api/manager-fulfillment-services");
-    const data = await res.json();
-    if (res.ok) setServices(data.items);
+    const [itemRes, orderRes] = await Promise.all([
+      fetch("/api/manager-fulfillment-services?scope=item"),
+      fetch("/api/manager-fulfillment-services?scope=order"),
+    ]);
+    const [itemData, orderData] = await Promise.all([itemRes.json(), orderRes.json()]);
+    if (itemRes.ok) setItemServices(itemData.items);
+    if (orderRes.ok) setOrderLevelServices(orderData.items);
   }, []);
 
   useEffect(() => {
@@ -704,12 +802,23 @@ function ManagerFulfillmentTab() {
     return item.services.reduce((sum, line) => sum + serviceLineTotalRub(line, cnyRateRub), 0);
   }
 
+  function itemTotalCny(item: DraftItem): number {
+    return item.services.reduce((sum, line) => sum + serviceLineTotalCny(line), 0);
+  }
+
   const orderTotalRub = useMemo(
     () =>
       draftItems.reduce((sum, item) => sum + itemTotalRub(item), 0) +
       draftOrderServices.reduce((sum, line) => sum + serviceLineTotalRub(line, cnyRateRub), 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [draftItems, draftOrderServices, cnyRateRub],
+  );
+
+  const orderTotalCny = useMemo(
+    () =>
+      draftItems.reduce((sum, item) => sum + itemTotalCny(item), 0) +
+      draftOrderServices.reduce((sum, line) => sum + serviceLineTotalCny(line), 0),
+    [draftItems, draftOrderServices],
   );
 
   function updateDraftItem(key: string, patch: Partial<DraftItem>) {
@@ -998,6 +1107,10 @@ function ManagerFulfillmentTab() {
                 <Plus className="h-3.5 w-3.5" /> Новый клиент
               </Button>
             )}
+            <label className="flex items-center gap-1.5 text-xs text-text-secondary">
+              <input type="checkbox" checked={showArchivedClients} onChange={(e) => setShowArchivedClients(e.target.checked)} />
+              Показывать архивных
+            </label>
           </div>
           <div className="flex-1 overflow-y-auto">
             {loadingClients ? (
@@ -1014,11 +1127,13 @@ function ManagerFulfillmentTab() {
                       className={cn(
                         "flex w-full flex-col items-start gap-0.5 border-b border-border px-3 py-2 text-left transition-colors hover:bg-bg",
                         selectedClientId === c.id && "bg-primary/5",
+                        c.archivedAt && "opacity-60",
                       )}
                     >
                       <span className="truncate text-sm font-medium text-text">
                         {c.name}
                         {c.company ? ` (${c.company})` : ""}
+                        {c.archivedAt && <span className="ml-1.5 text-[10px] font-normal text-error">архив</span>}
                       </span>
                       {c.fulfillmentCode && <span className="text-[11px] text-text-secondary">Код: {c.fulfillmentCode}</span>}
                     </button>
@@ -1080,6 +1195,49 @@ function ManagerFulfillmentTab() {
                     className="h-7 w-28 text-xs"
                   />
                 </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <Button type="button" size="sm" variant="outline" onClick={() => startEditingClient(selectedClient)}>
+                    <Pencil className="h-3.5 w-3.5" /> Редактировать
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleToggleArchiveClient(selectedClient)}
+                    disabled={archivingClientId === selectedClient.id}
+                  >
+                    {archivingClientId === selectedClient.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : selectedClient.archivedAt ? (
+                      <ArchiveRestore className="h-3.5 w-3.5" />
+                    ) : (
+                      <Archive className="h-3.5 w-3.5" />
+                    )}
+                    {selectedClient.archivedAt ? "Из архива" : "В архив"}
+                  </Button>
+                </div>
+
+                {editingClient && (
+                  <div className="space-y-2 rounded-lg bg-bg p-3">
+                    <p className="text-xs font-semibold text-text-secondary">Редактирование клиента</p>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Input placeholder="Имя клиента" value={editDraft.name} onChange={(e) => setEditDraft((d) => ({ ...d, name: e.target.value }))} />
+                      <Input placeholder="Компания" value={editDraft.company} onChange={(e) => setEditDraft((d) => ({ ...d, company: e.target.value }))} />
+                      <Input placeholder="Телефон" value={editDraft.phone} onChange={(e) => setEditDraft((d) => ({ ...d, phone: e.target.value }))} />
+                      <Input placeholder="Telegram / WeChat" value={editDraft.messenger} onChange={(e) => setEditDraft((d) => ({ ...d, messenger: e.target.value }))} />
+                      <Input type="email" placeholder="Email" value={editDraft.email} onChange={(e) => setEditDraft((d) => ({ ...d, email: e.target.value }))} />
+                    </div>
+                    {editError && <p className="text-xs text-error">{editError}</p>}
+                    <div className="flex gap-2">
+                      <Button type="button" size="sm" onClick={() => handleSaveClientEdit(selectedClient.id)} disabled={editSaving}>
+                        {editSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Сохранить"}
+                      </Button>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => setEditingClient(false)}>
+                        Отмена
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </Card>
 
               {/* Карточки товара */}
@@ -1134,8 +1292,17 @@ function ManagerFulfillmentTab() {
                     <div>
                       <Label className="text-xs text-text-secondary">Услуги по умолчанию для этого товара</Label>
                       <div className="mt-1.5">
-                        <ServiceLineEditor lines={cardServiceDrafts} services={services} cnyRateRub={cnyRateRub} onChange={setCardServiceDrafts} />
+                        <ServiceLineEditor lines={cardServiceDrafts} services={itemServices} cnyRateRub={cnyRateRub} onChange={setCardServiceDrafts} />
                       </div>
+                      {cardServiceDrafts.length > 0 && (
+                        <p className="mt-1 text-right text-xs font-medium text-text-secondary">
+                          Итого:{" "}
+                          {moneyCny(
+                            cardServiceDrafts.reduce((sum, line) => sum + serviceLineTotalCny(line), 0),
+                            cardServiceDrafts.reduce((sum, line) => sum + serviceLineTotalRub(line, cnyRateRub), 0),
+                          )}
+                        </p>
+                      )}
                     </div>
                     {cardFormError && <p className="text-xs text-error">{cardFormError}</p>}
                     <div className="flex gap-2">
@@ -1328,11 +1495,11 @@ function ManagerFulfillmentTab() {
 
                       <ServiceLineEditor
                         lines={item.services}
-                        services={services}
+                        services={itemServices}
                         cnyRateRub={cnyRateRub}
                         onChange={(lines) => updateDraftItem(item.key, { services: lines })}
                       />
-                      <p className="text-right text-xs text-text-secondary">Товар: {money(itemTotalRub(item))} ₽</p>
+                      <p className="text-right text-xs text-text-secondary">Товар: {moneyCny(itemTotalCny(item), itemTotalRub(item))}</p>
                     </div>
                   ))}
                 </div>
@@ -1343,11 +1510,11 @@ function ManagerFulfillmentTab() {
 
                 <div className="space-y-1.5 border-t border-border pt-3">
                   <Label className="text-xs text-text-secondary">Услуги на партию целиком (не привязаны к товару)</Label>
-                  <ServiceLineEditor lines={draftOrderServices} services={services} cnyRateRub={cnyRateRub} onChange={setDraftOrderServices} />
+                  <ServiceLineEditor lines={draftOrderServices} services={orderLevelServices} cnyRateRub={cnyRateRub} onChange={setDraftOrderServices} />
                 </div>
 
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
-                  <p className="text-sm font-bold text-text">Итого: {money(orderTotalRub)} ₽</p>
+                  <p className="text-sm font-bold text-text">Итого: {moneyCny(orderTotalCny, orderTotalRub)}</p>
                   <Button type="button" onClick={handleCreateOrEditOrder} disabled={saving}>
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : editingOrderId ? "Сохранить изменения" : "Сохранить заказ"}
                   </Button>
@@ -1417,7 +1584,9 @@ function ManagerFulfillmentTab() {
                           <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold", FULFILLMENT_ORDER_STATUS_BADGE_CLASSES[order.status])}>
                             {FULFILLMENT_ORDER_STATUS_LABEL[order.status]}
                           </span>
-                          <span className="shrink-0 text-sm font-bold text-text">{money(Number(order.totalRub))} ₽</span>
+                          <span className="shrink-0 text-sm font-bold text-text">
+                            {(Number(order.totalRub) / Number(order.cnyRateUsed)).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ¥
+                          </span>
                           <ChevronDown className={cn("h-4 w-4 shrink-0 text-text-secondary transition-transform", isOpen && "rotate-180")} />
                         </button>
 
@@ -1545,18 +1714,28 @@ function ManagerFulfillmentTab() {
                             </div>
 
                             {order.items.map((item) => (
-                              <div key={item.id} className="rounded-lg border border-border bg-bg p-2.5">
+                              <div key={item.id} className="flex gap-2 rounded-lg border border-border bg-bg p-2.5">
+                                {item.photoId ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img
+                                    src={`/api/manager-fulfillment-product-cards/photos/${item.photoId}`}
+                                    alt={item.name}
+                                    className="h-10 w-10 shrink-0 rounded-md object-cover"
+                                  />
+                                ) : (
+                                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-surface text-text-secondary">
+                                    <ImageIcon className="h-4 w-4" />
+                                  </div>
+                                )}
+                                <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <div className="text-sm font-medium text-text">{item.name}</div>
                                   <span className="shrink-0 text-[11px] text-text-secondary">План: {item.plannedQuantity} шт.</span>
                                 </div>
-                                {(item.sku || item.dimensions) && (
-                                  <div className="text-xs text-text-secondary">
-                                    {item.sku ? `Артикул: ${item.sku}` : ""}
-                                    {item.sku && item.dimensions ? " · " : ""}
-                                    {item.dimensions ? `Габариты: ${item.dimensions}` : ""}
-                                  </div>
-                                )}
+                                <div className="text-xs text-text-secondary">
+                                  Артикул: {item.sku || "—"}
+                                  {item.dimensions ? ` · Габариты: ${item.dimensions}` : ""}
+                                </div>
                                 <div className="mt-1.5 space-y-1">
                                   {item.services.map((service) => (
                                     <label key={service.id} className="flex items-center gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-surface">
@@ -1569,10 +1748,13 @@ function ManagerFulfillmentTab() {
                                       <span className={cn("min-w-0 flex-1 truncate", service.completedAt && "text-text-secondary line-through")}>
                                         {service.name} ×{service.quantity}
                                       </span>
-                                      <span className="shrink-0 text-xs text-text-secondary">{money(Number(service.priceRub) * service.quantity)} ₽</span>
+                                      <span className="shrink-0 text-xs text-text-secondary">
+                                        {moneyCny(Number(service.priceCny) * service.quantity, Number(service.priceRub) * service.quantity)}
+                                      </span>
                                       {service.completedAt && <span className="shrink-0 text-[11px] text-text-secondary">{service.completedByManager?.name}</span>}
                                     </label>
                                   ))}
+                                </div>
                                 </div>
                               </div>
                             ))}
@@ -1586,7 +1768,9 @@ function ManagerFulfillmentTab() {
                                       <span className="min-w-0 flex-1 truncate text-text">
                                         {s.name} ×{s.quantity}
                                       </span>
-                                      <span className="shrink-0 text-xs text-text-secondary">{money(Number(s.priceRub) * s.quantity)} ₽</span>
+                                      <span className="shrink-0 text-xs text-text-secondary">
+                                        {moneyCny(Number(s.priceCny) * s.quantity, Number(s.priceRub) * s.quantity)}
+                                      </span>
                                     </div>
                                   ))}
                                 </div>

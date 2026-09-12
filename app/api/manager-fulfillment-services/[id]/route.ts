@@ -19,9 +19,10 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { name, priceCny } = (body as { name?: unknown; priceCny?: unknown }) ?? {};
+  const { name, priceCny, scope } = (body as { name?: unknown; priceCny?: unknown; scope?: unknown }) ?? {};
   const data: Record<string, unknown> = {};
   if (typeof name === "string" && name.trim()) data.name = name.trim();
+  if (scope === "item" || scope === "order") data.scope = scope;
   if (priceCny !== undefined) {
     const priceCnyNum = Number(priceCny);
     if (!Number.isFinite(priceCnyNum) || priceCnyNum < 0) {

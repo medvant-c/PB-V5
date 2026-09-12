@@ -10,6 +10,7 @@ import {
   type ParsedItemInput,
   type ParsedOrderServiceInput,
 } from "@/lib/desk-services/fulfillment-order-input";
+import { withItemPhotoIds } from "@/lib/desk-services/fulfillment-order-photos";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -203,7 +204,8 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     },
   });
 
-  return Response.json({ order });
+  const [orderWithPhotos] = await withItemPhotoIds([order]);
+  return Response.json({ order: orderWithPhotos });
 }
 
 // Hard delete — cascade removes items/services/orderServices/printLogs (see
