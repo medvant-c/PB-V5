@@ -1325,6 +1325,7 @@ model IssuedInvoice {
   createdAt DateTime @default(now())
 
   quotes IssuedInvoiceQuote[]
+  fulfillmentOrders IssuedInvoiceFulfillmentOrder[]
 
   @@index([clientId])
   @@index([managerId])
@@ -1344,6 +1345,21 @@ model IssuedInvoiceQuote {
 
   @@index([invoiceId])
   @@index([quoteId])
+}
+
+// Тот же паттерн, что IssuedInvoiceQuote выше, но для заявок фулфилмента
+// (у FulfillmentOrder своя собственная сумма/валюта, никак не связанная с
+// Quote — отдельная join-таблица, а не переиспользование
+// IssuedInvoiceQuote). См. PB-V5 chat 2026-09-12.
+model IssuedInvoiceFulfillmentOrder {
+  id                 String           @id @default(cuid())
+  invoiceId          String
+  invoice            IssuedInvoice    @relation(fields: [invoiceId], references: [id])
+  fulfillmentOrderId String
+  fulfillmentOrder   FulfillmentOrder @relation(fields: [fulfillmentOrderId], references: [id])
+
+  @@index([invoiceId])
+  @@index([fulfillmentOrderId])
 }
 
 // Owner's manual daily cash ledger ("Отчёты по дням") — a real-money
@@ -1790,6 +1806,7 @@ model FulfillmentOrder {
   items         FulfillmentOrderItem[]
   orderServices FulfillmentOrderService[]
   printLogs     FulfillmentOrderPrintLog[]
+  issuedInvoices IssuedInvoiceFulfillmentOrder[]
 
   @@index([clientId])
   @@index([managerId])

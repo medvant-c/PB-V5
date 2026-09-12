@@ -1,13 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Calculator, Crown, FileText, History, Package, Percent, Truck } from "lucide-react";
+import { Calculator, Crown, FileText, History, Percent, Truck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ManagerTariffsTab } from "@/components/manager/tabs/tariffs-tab";
 import { ManagerCargoSettingsTab } from "@/components/manager/tabs/settings/cargo-settings-tab";
 import { ManagerLeadershipTab } from "@/components/manager/tabs/settings/leadership-section";
 import { ManagerQuotesBuyoutSettingsTab } from "@/components/manager/tabs/settings/quotes-buyout-section";
-import { ManagerFulfillmentSettingsTab } from "@/components/manager/tabs/settings/fulfillment-section";
 import { ManagerTextsSettingsTab } from "@/components/manager/tabs/settings/texts-section";
 import { ManagerUpdatesTab } from "@/components/manager/tabs/settings/updates-section";
 
@@ -33,7 +32,6 @@ const SUB_TABS = [
   { id: "tariffs", label: "Тарифы", icon: Calculator, Component: ManagerTariffsTab, ownerOnly: false, hiddenFromOutsource: true },
   { id: "leadership", label: "Руководящий состав", icon: Crown, Component: ManagerLeadershipTab, ownerOnly: true, hiddenFromOutsource: false },
   { id: "quotes-buyout", label: "Просчёты и выкуп", icon: Percent, Component: ManagerQuotesBuyoutSettingsTab, ownerOnly: false, hiddenFromOutsource: false },
-  { id: "fulfillment", label: "Фулфилмент", icon: Package, Component: ManagerFulfillmentSettingsTab, ownerOnly: false, hiddenFromOutsource: false },
   { id: "cargo", label: "Карго", icon: Truck, Component: ManagerCargoSettingsTab, ownerOnly: false, hiddenFromOutsource: false },
   { id: "texts", label: "Тексты", icon: FileText, Component: ManagerTextsSettingsTab, ownerOnly: true, hiddenFromOutsource: false },
   { id: "updates", label: "Обновления", icon: History, Component: ManagerUpdatesTab, ownerOnly: true, hiddenFromOutsource: false },

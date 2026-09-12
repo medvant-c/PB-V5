@@ -28,6 +28,7 @@ interface InvoiceRecord {
   client: { id: string; name: string; company: string | null };
   manager: { id: string; name: string };
   quotes: { id: string; displayId: number }[];
+  fulfillmentOrders: { id: string; displayId: number }[];
 }
 
 const TYPE_LABEL: Record<IssuedInvoiceType, string> = { buyout: "Счёт на выкуп", services: "Счёт на услуги" };
@@ -43,7 +44,14 @@ function fmtDate(value: string): string {
   return new Date(value).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
 }
 
-function ManagerIssuedInvoicesTab() {
+// kindFilter — используется вкладкой «Выставленные счета» внутри
+// Фулфилмента (см. components/manager/tabs/fulfillment/invoices-section.tsx):
+// без пропса — исходное поведение (company-wide лог счетов на выкуп по
+// просчётам, canViewInvoices-гейт на бэкенде); с kindFilter="fulfillment" —
+// счета по заявкам фулфилмента, в рамках собственной зоны видимости
+// (см. app/api/manager-issued-invoices/route.ts). См. PB-V5 chat
+// 2026-09-12.
+function ManagerIssuedInvoicesTab({ kindFilter }: { kindFilter?: "procurement" | "fulfillment" } = {}) {
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,7 +75,7 @@ function ManagerIssuedInvoicesTab() {
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    return fetch("/api/manager-issued-invoices")
+    return fetch(`/api/manager-issued-invoices${kindFilter ? `?kind=${kindFilter}` : ""}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.error) {
@@ -78,7 +86,7 @@ function ManagerIssuedInvoicesTab() {
       })
       .catch(() => setError("Не удалось связаться с сервером."))
       .finally(() => setLoading(false));
-  }, []);
+  }, [kindFilter]);
 
   useEffect(() => {
     load();
@@ -109,7 +117,8 @@ function ManagerIssuedInvoicesTab() {
       inv.client.name.toLowerCase().includes(query) ||
       (inv.client.company ?? "").toLowerCase().includes(query) ||
       inv.note.toLowerCase().includes(query) ||
-      inv.quotes.some((q) => String(q.displayId).includes(query))
+      inv.quotes.some((q) => String(q.displayId).includes(query)) ||
+      inv.fulfillmentOrders.some((o) => String(o.displayId).includes(query))
     );
   });
 
@@ -164,8 +173,9 @@ function ManagerIssuedInvoicesTab() {
       <div>
         <h2 className="text-sm font-bold text-text">Выставленные счета</h2>
         <p className="mt-1 text-xs text-text-secondary">
-          Журнал всех выставленных счетов на выкуп и на услуги — с возможностью пересмотреть, переcкачать или отменить.
-          Оплата отдельно отслеживается в «Кассе» и статусах просчётов — здесь только сам факт, что счёт был выставлен.
+          {kindFilter === "fulfillment"
+            ? "Журнал счетов, выставленных по заявкам на обработку — с возможностью пересмотреть, перескачать или отменить."
+            : "Журнал всех выставленных счетов на выкуп и на услуги — с возможностью пересмотреть, переcкачать или отменить. Оплата отдельно отслеживается в «Кассе» и статусах просчётов — здесь только сам факт, что счёт был выставлен."}
         </p>
       </div>
 
@@ -260,7 +270,11 @@ function ManagerIssuedInvoicesTab() {
                 <div className="text-xs text-text-secondary">
                   {inv.client.name}
                   {inv.client.company ? ` · ${inv.client.company}` : ""} · менеджер {inv.manager.name} ·{" "}
-                  {inv.quotes.length > 0 ? `просчёты №${inv.quotes.map((q) => q.displayId).join(", №")}` : "без просчётов"}
+                  {inv.quotes.length > 0
+                    ? `просчёты №${inv.quotes.map((q) => q.displayId).join(", №")}`
+                    : inv.fulfillmentOrders.length > 0
+                      ? `заявки №${inv.fulfillmentOrders.map((o) => o.displayId).join(", №")}`
+                      : "без привязки"}
                 </div>
                 <div className="mt-0.5 text-xs text-text-secondary">
                   {fmtDate(inv.createdAt)}

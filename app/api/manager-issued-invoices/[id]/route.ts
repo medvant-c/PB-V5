@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
-import { canViewInvoices } from "@/lib/manager-scope";
+import { canViewInvoices, canAccessManagerClient } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 
 interface RouteParams {
@@ -12,19 +12,31 @@ interface RouteParams {
 // quotes/file) is never edited in place — a mistake gets cancelled and a
 // fresh счёт issued instead, so the stored PDF/Excel always matches what
 // was actually sent.
+//
+// Доступ: canViewInvoices (owner/senior company-wide право) ИЛИ — для
+// счетов клиентов фулфилмента — обычный scoping по видимости клиента
+// (canAccessManagerClient), тот же принцип, что и у остальных
+// fulfillment-роутов, иначе рядовой менеджер не мог бы отменить/поправить
+// заметку на СВОЁМ же выставленном счёте. См. PB-V5 chat 2026-09-12.
 export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const session = await getManagerSessionFromRequest(req);
   if (!session) {
     return Response.json({ error: "Не авторизовано." }, { status: 401 });
   }
-  if (!(await canViewInvoices(session))) {
-    return Response.json({ error: "Нет доступа к этому разделу." }, { status: 403 });
-  }
 
   const { id } = await params;
-  const existing = await prisma.issuedInvoice.findUnique({ where: { id } });
+  const existing = await prisma.issuedInvoice.findUnique({
+    where: { id },
+    include: { client: { select: { id: true, kind: true, createdByManagerId: true } } },
+  });
   if (!existing) {
     return Response.json({ error: "Счёт не найден." }, { status: 404 });
+  }
+  const allowed =
+    (await canViewInvoices(session)) ||
+    (existing.client.kind === "fulfillment" && (await canAccessManagerClient(session, existing.client)));
+  if (!allowed) {
+    return Response.json({ error: "Нет доступа к этому разделу." }, { status: 403 });
   }
 
   let body: unknown;

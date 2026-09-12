@@ -20,7 +20,12 @@ interface RecordIssuedInvoiceParams {
   clientId: string;
   managerId: string;
   amountTotal: number;
-  quoteIds: string[];
+  quoteIds?: string[];
+  // Заявки фулфилмента — отдельная join-таблица от quoteIds (у
+  // FulfillmentOrder своя сумма/валюта, никак не связанная с Quote). См.
+  // IssuedInvoiceFulfillmentOrder в prisma/schema.prisma. PB-V5 chat
+  // 2026-09-12.
+  fulfillmentOrderIds?: string[];
   storageKey: string;
   fileName: string;
   mimeType: string;
@@ -39,7 +44,8 @@ async function recordIssuedInvoice(params: RecordIssuedInvoiceParams): Promise<v
       fileName: params.fileName,
       storageKey: params.storageKey,
       mimeType: params.mimeType,
-      quotes: { create: params.quoteIds.map((quoteId) => ({ quoteId })) },
+      quotes: { create: (params.quoteIds ?? []).map((quoteId) => ({ quoteId })) },
+      fulfillmentOrders: { create: (params.fulfillmentOrderIds ?? []).map((fulfillmentOrderId) => ({ fulfillmentOrderId })) },
     },
   });
 }
