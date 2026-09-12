@@ -90,6 +90,10 @@ interface ProductCardRecord {
   dimensions: string | null;
   weightPerUnitKg: string | null;
   packaging: string | null;
+  barcodeWb: string | null;
+  barcodeOzon: string | null;
+  barcodeYm: string | null;
+  barcodeAmazon: string | null;
   photoId: string | null;
   services: ProductCardServiceRecord[];
 }
@@ -409,6 +413,10 @@ function ManagerFulfillmentTab() {
   const [cardDimensions, setCardDimensions] = useState("");
   const [cardWeight, setCardWeight] = useState("");
   const [cardPackaging, setCardPackaging] = useState("");
+  const [cardBarcodeWb, setCardBarcodeWb] = useState("");
+  const [cardBarcodeOzon, setCardBarcodeOzon] = useState("");
+  const [cardBarcodeYm, setCardBarcodeYm] = useState("");
+  const [cardBarcodeAmazon, setCardBarcodeAmazon] = useState("");
   const [cardPhotoFile, setCardPhotoFile] = useState<File | null>(null);
   const [cardServiceDrafts, setCardServiceDrafts] = useState<ServiceLine[]>([]);
   const [savingCard, setSavingCard] = useState(false);
@@ -438,6 +446,10 @@ function ManagerFulfillmentTab() {
     setCardDimensions("");
     setCardWeight("");
     setCardPackaging("");
+    setCardBarcodeWb("");
+    setCardBarcodeOzon("");
+    setCardBarcodeYm("");
+    setCardBarcodeAmazon("");
     setCardPhotoFile(null);
     setCardServiceDrafts([]);
     setCardFormError(null);
@@ -452,6 +464,10 @@ function ManagerFulfillmentTab() {
     setCardDimensions(card.dimensions ?? "");
     setCardWeight(card.weightPerUnitKg ?? "");
     setCardPackaging(card.packaging ?? "");
+    setCardBarcodeWb(card.barcodeWb ?? "");
+    setCardBarcodeOzon(card.barcodeOzon ?? "");
+    setCardBarcodeYm(card.barcodeYm ?? "");
+    setCardBarcodeAmazon(card.barcodeAmazon ?? "");
     setCardPhotoFile(null);
     setCardServiceDrafts(
       card.services.map((s) => ({ key: crypto.randomUUID(), serviceItemId: s.serviceItemId, name: s.name, priceCny: s.priceCny, quantity: "1" })),
@@ -476,6 +492,10 @@ function ManagerFulfillmentTab() {
       if (cardDimensions.trim()) formData.set("dimensions", cardDimensions.trim());
       if (cardWeight.trim()) formData.set("weightPerUnitKg", cardWeight.trim());
       if (cardPackaging.trim()) formData.set("packaging", cardPackaging.trim());
+      if (cardBarcodeWb.trim()) formData.set("barcodeWb", cardBarcodeWb.trim());
+      if (cardBarcodeOzon.trim()) formData.set("barcodeOzon", cardBarcodeOzon.trim());
+      if (cardBarcodeYm.trim()) formData.set("barcodeYm", cardBarcodeYm.trim());
+      if (cardBarcodeAmazon.trim()) formData.set("barcodeAmazon", cardBarcodeAmazon.trim());
       if (cardPhotoFile) formData.set("photo", cardPhotoFile);
 
       const res = await fetch(
@@ -1039,6 +1059,15 @@ function ManagerFulfillmentTab() {
                     </div>
                     <Input placeholder="Описание" value={cardDescription} onChange={(e) => setCardDescription(e.target.value)} />
                     <div>
+                      <Label className="text-xs text-text-secondary">Штрихкоды маркетплейсов</Label>
+                      <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+                        <Input placeholder="Штрихкод WB" value={cardBarcodeWb} onChange={(e) => setCardBarcodeWb(e.target.value)} />
+                        <Input placeholder="Штрихкод OZON" value={cardBarcodeOzon} onChange={(e) => setCardBarcodeOzon(e.target.value)} />
+                        <Input placeholder="Штрихкод YM" value={cardBarcodeYm} onChange={(e) => setCardBarcodeYm(e.target.value)} />
+                        <Input placeholder="Штрихкод AMAZON" value={cardBarcodeAmazon} onChange={(e) => setCardBarcodeAmazon(e.target.value)} />
+                      </div>
+                    </div>
+                    <div>
                       <Label className="text-xs text-text-secondary">Услуги по умолчанию для этого товара</Label>
                       <div className="mt-1.5">
                         <ServiceLineEditor lines={cardServiceDrafts} services={services} cnyRateRub={cnyRateRub} onChange={setCardServiceDrafts} />
@@ -1082,6 +1111,18 @@ function ManagerFulfillmentTab() {
                             {[card.sku, card.dimensions, card.packaging].filter(Boolean).join(" · ") || "—"}
                           </p>
                           <p className="text-[11px] text-text-secondary">{card.services.length} услуг(и) по умолчанию</p>
+                          {(card.barcodeWb || card.barcodeOzon || card.barcodeYm || card.barcodeAmazon) && (
+                            <p className="truncate text-[11px] text-text-secondary">
+                              {[
+                                card.barcodeWb && `WB: ${card.barcodeWb}`,
+                                card.barcodeOzon && `OZON: ${card.barcodeOzon}`,
+                                card.barcodeYm && `YM: ${card.barcodeYm}`,
+                                card.barcodeAmazon && `AMAZON: ${card.barcodeAmazon}`,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
+                          )}
                         </div>
                         <div className="flex shrink-0 flex-col gap-1">
                           <button type="button" onClick={() => handleEditCard(card)} className="text-text-secondary hover:text-primary" aria-label="Редактировать">

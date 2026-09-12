@@ -92,6 +92,10 @@ export async function POST(req: NextRequest) {
       dimensions: str("dimensions"),
       weightPerUnitKg,
       packaging: str("packaging"),
+      barcodeWb: str("barcodeWb"),
+      barcodeOzon: str("barcodeOzon"),
+      barcodeYm: str("barcodeYm"),
+      barcodeAmazon: str("barcodeAmazon"),
     },
     include: { services: true },
   });

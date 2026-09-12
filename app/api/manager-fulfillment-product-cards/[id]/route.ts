@@ -63,7 +63,7 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     if (!name) return Response.json({ error: "Укажите название товара." }, { status: 400 });
     data.name = name;
   }
-  for (const key of ["sku", "description", "dimensions", "packaging"] as const) {
+  for (const key of ["sku", "description", "dimensions", "packaging", "barcodeWb", "barcodeOzon", "barcodeYm", "barcodeAmazon"] as const) {
     const value = str(key);
     if (value !== undefined) data[key] = value;
   }

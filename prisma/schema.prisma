@@ -1680,6 +1680,14 @@ model FulfillmentProductCard {
   weightPerUnitKg Decimal?
   // "Фасовка" — свободный текст (например "по 10 шт в коробке").
   packaging       String?
+  // Штрихкоды маркетплейсов для этого товара — нужны кладовщику при
+  // маркировке/приёмке на конкретный маркетплейс (FBS/FBO), не связаны
+  // между собой (один товар может иметь разные штрихкоды на разных
+  // площадках). См. PB-V5 chat 2026-09-12.
+  barcodeWb       String?
+  barcodeOzon     String?
+  barcodeYm       String?
+  barcodeAmazon   String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @default(now()) @updatedAt
   services        FulfillmentProductCardService[]
