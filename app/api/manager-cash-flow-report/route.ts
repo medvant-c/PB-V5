@@ -3,6 +3,7 @@ import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { getVisibleManagerIds } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { fetchQuoteReserveRows } from "@/lib/desk-services/quote-reserve";
+import { buildPeriodReport } from "@/lib/desk-services/period-report";
 
 function parseMonthRange(monthParam: string | null): [Date, Date] {
   const match = monthParam?.match(/^(\d{4})-(\d{2})$/);
@@ -144,6 +145,22 @@ export async function GET(req: NextRequest) {
     if (bucket) bucket.reservedCny += row.reservedCny;
   }
 
+  // "Доход с выкупа за месяц" — ЭТО база расчёта премии менеджера, поэтому
+  // должен быть ровно тем же числом, что дашборд уже показывает в "Выкуп:
+  // поступило/потратили" (periodOverall, см. app/api/manager-dashboard/
+  // route.ts) — тот же buildPeriodReport, по датам реальных событий, а не
+  // сырой приход/расход за месяц минус резерв "на сейчас" (это было два
+  // разных числа для одной и той же базы премии). См. PB-V5 chat
+  // 2026-09-13.
+  const realPeriod = await buildPeriodReport({ from: monthStart, to: monthEnd });
+  const visibleFlows =
+    visibleManagerIds === "all" ? realPeriod.managerFlows : realPeriod.managerFlows.filter((f) => visibleManagerIds.includes(f.managerId));
+  const realBuyoutIncomeRub = visibleFlows.reduce((sum, f) => sum + f.buyoutIncomeRub, 0);
+  const realBuyoutExpenseRub = visibleFlows.reduce((sum, f) => sum + f.buyoutExpenseRub, 0);
+  const cnyRateRub = realPeriod.cnyRateRub ?? 1;
+  const realBuyoutIncomeCny = realBuyoutIncomeRub / cnyRateRub;
+  const realBuyoutExpenseCny = realBuyoutExpenseRub / cnyRateRub;
+
   for (const inv of invoices) {
     const bucket = byClientId.get(inv.clientId);
     if (!bucket) continue;
@@ -208,5 +225,5 @@ export async function GET(req: NextRequest) {
 
   const reservedCny = clients.reduce((sum, c) => sum + c.reservedCny, 0);
 
-  return Response.json({ clients, reservedCny, reserveRows });
+  return Response.json({ clients, reservedCny, reserveRows, realBuyoutIncomeCny, realBuyoutExpenseCny });
 }

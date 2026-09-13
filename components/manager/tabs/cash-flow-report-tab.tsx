@@ -89,6 +89,8 @@ function ManagerCashFlowReportTab() {
   const [reservedCny, setReservedCny] = useState(0);
   const [reserveRows, setReserveRows] = useState<ReserveRow[]>([]);
   const [reserveOpen, setReserveOpen] = useState(false);
+  const [realBuyoutIncomeCny, setRealBuyoutIncomeCny] = useState(0);
+  const [realBuyoutExpenseCny, setRealBuyoutExpenseCny] = useState(0);
   const [loading, setLoading] = useState(true);
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null);
 
@@ -100,6 +102,8 @@ function ManagerCashFlowReportTab() {
         setClients(data.clients ?? []);
         setReservedCny(data.reservedCny ?? 0);
         setReserveRows(data.reserveRows ?? []);
+        setRealBuyoutIncomeCny(data.realBuyoutIncomeCny ?? 0);
+        setRealBuyoutExpenseCny(data.realBuyoutExpenseCny ?? 0);
       })
       .finally(() => setLoading(false));
   }, [month]);
@@ -140,10 +144,10 @@ function ManagerCashFlowReportTab() {
         </div>
         <div className="rounded-xl border border-border bg-surface p-4">
           <p className="text-xs text-text-secondary">Доход с выкупа за месяц</p>
-          <p className="mt-1 text-lg font-bold text-primary">¥ {money(totalIncomeCny - totalExpenseCny - reservedCny)}</p>
-          {reservedCny > 0 && (
-            <p className="mt-1 text-[11px] text-text-secondary">(за вычетом резерва под выкуп ¥ {money(reservedCny)})</p>
-          )}
+          <p className="mt-1 text-lg font-bold text-primary">¥ {money(realBuyoutIncomeCny - realBuyoutExpenseCny)}</p>
+          <p className="mt-1 text-[11px] text-text-secondary">
+            это база расчёта премии — та же цифра, что и на Главной («Выкуп: поступило/потратили»)
+          </p>
         </div>
       </div>
 
@@ -154,7 +158,7 @@ function ManagerCashFlowReportTab() {
           className="w-full rounded-xl border border-dashed border-border bg-surface p-3 text-left text-xs text-text-secondary underline decoration-dotted hover:text-text"
         >
           ¥ {money(reservedCny)} из общего прихода по вашим клиентам ещё не потрачено на закупку (клиент оплатил, но
-          товар ещё не куплен, или указан остаток к доплате поставщику) — уже вычтено из «Дохода с выкупа» выше, это
+          товар ещё не куплен, или указан остаток к доплате поставщику) — уже учтено в «Доходе с выкупа» выше, это
           не прибыль. Резерв — состояние на сейчас по всем открытым просчётам, не зависит от выбранного месяца, в
           отличие от прихода/расхода за месяц рядом. Нажмите, чтобы увидеть по каким просчётам.
         </button>
