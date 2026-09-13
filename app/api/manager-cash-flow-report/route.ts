@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { getVisibleManagerIds } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
+import { fetchQuoteReserveRows } from "@/lib/desk-services/quote-reserve";
 
 function parseMonthRange(monthParam: string | null): [Date, Date] {
   const match = monthParam?.match(/^(\d{4})-(\d{2})$/);
@@ -111,13 +112,36 @@ export async function GET(req: NextRequest) {
       }[];
       incomeCny: number;
       expenseCny: number;
+      // Резерв под выкуп — сколько из incomeCny этого клиента ещё реально
+      // не потрачено на закупку (та же формула, что и в Кассе, см.
+      // lib/desk-services/quote-reserve.ts). Не зависит от выбранного
+      // месяца — это "на сейчас" состояние по открытым просчётам клиента,
+      // не сумма движений за период. Добавлено, чтобы рядовому менеджеру
+      // не приходилось идти в Кассу, чтобы понять, почему "поступило" по
+      // клиенту не равно уже заработанной прибыли. См. PB-V5 chat
+      // 2026-09-13.
+      reservedCny: number;
     }
   >();
 
   for (const q of quotes) {
     if (!byClientId.has(q.clientId)) {
-      byClientId.set(q.clientId, { clientId: q.clientId, clientName: q.client.name, invoices: [], orders: [], incomeCny: 0, expenseCny: 0 });
+      byClientId.set(q.clientId, {
+        clientId: q.clientId,
+        clientName: q.client.name,
+        invoices: [],
+        orders: [],
+        incomeCny: 0,
+        expenseCny: 0,
+        reservedCny: 0,
+      });
     }
+  }
+
+  const { rows: reserveRows } = await fetchQuoteReserveRows(managerScope);
+  for (const row of reserveRows) {
+    const bucket = byClientId.get(row.clientId);
+    if (bucket) bucket.reservedCny += row.reservedCny;
   }
 
   for (const inv of invoices) {
@@ -176,8 +200,13 @@ export async function GET(req: NextRequest) {
 
   const clients = [...byClientId.values()]
     .map((c) => ({ ...c, orders: c.orders.sort((a, b) => (a.date < b.date ? 1 : -1)), netCny: c.incomeCny - c.expenseCny }))
-    .filter((c) => c.invoices.length > 0 || c.orders.length > 0)
+    // Резерв — состояние "на сейчас", а не движение за выбранный месяц,
+    // поэтому клиент с резервом остаётся в списке, даже если в этом
+    // месяце по нему не было ни счетов, ни ордеров.
+    .filter((c) => c.invoices.length > 0 || c.orders.length > 0 || c.reservedCny > 0)
     .sort((a, b) => b.netCny - a.netCny);
 
-  return Response.json({ clients });
+  const reservedCny = clients.reduce((sum, c) => sum + c.reservedCny, 0);
+
+  return Response.json({ clients, reservedCny });
 }

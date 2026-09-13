@@ -36,6 +36,10 @@ interface ClientFlowRow {
   incomeCny: number;
   expenseCny: number;
   netCny: number;
+  // Резерв под выкуп по этому клиенту — сколько из incomeCny ещё реально
+  // не потрачено на закупку (см. lib/desk-services/quote-reserve.ts). Не
+  // зависит от выбранного месяца — состояние "на сейчас".
+  reservedCny: number;
 }
 
 const INVOICE_TYPE_LABEL: Record<string, string> = { buyout: "Выкуп", services: "Услуги" };
@@ -69,6 +73,7 @@ function formatDateTime(value: string): string {
 function ManagerCashFlowReportTab() {
   const [month, setMonth] = useState(todayIso());
   const [clients, setClients] = useState<ClientFlowRow[]>([]);
+  const [reservedCny, setReservedCny] = useState(0);
   const [loading, setLoading] = useState(true);
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null);
 
@@ -76,7 +81,10 @@ function ManagerCashFlowReportTab() {
     setLoading(true);
     return fetch(`/api/manager-cash-flow-report?month=${month}`)
       .then((res) => res.json())
-      .then((data) => setClients(data.clients ?? []))
+      .then((data) => {
+        setClients(data.clients ?? []);
+        setReservedCny(data.reservedCny ?? 0);
+      })
       .finally(() => setLoading(false));
   }, [month]);
 
@@ -120,6 +128,14 @@ function ManagerCashFlowReportTab() {
         </div>
       </div>
 
+      {reservedCny > 0 && (
+        <p className="rounded-xl border border-dashed border-border bg-surface p-3 text-xs text-text-secondary">
+          Из общего прихода по вашим клиентам ¥ {money(reservedCny)} ещё не потрачено на закупку — это резерв под
+          выкуп, не прибыль (клиент оплатил, но товар ещё не куплен, или указан остаток к доплате поставщику). Не
+          зависит от выбранного месяца.
+        </p>
+      )}
+
       {loading ? (
         <p className="flex items-center gap-1.5 text-xs text-text-secondary">
           <Loader2 className="h-3.5 w-3.5 animate-spin" /> Загрузка…
@@ -145,6 +161,11 @@ function ManagerCashFlowReportTab() {
                     <span className="text-success">+¥ {money(c.incomeCny)}</span>
                     <span className="text-error">−¥ {money(c.expenseCny)}</span>
                     <span className="font-bold text-primary">= ¥ {money(c.netCny)}</span>
+                    {c.reservedCny > 0 && (
+                      <span className="text-warning" title="Резерв под выкуп — оплачено, но ещё не потрачено на закупку">
+                        резерв ¥ {money(c.reservedCny)}
+                      </span>
+                    )}
                   </div>
                 </button>
 
