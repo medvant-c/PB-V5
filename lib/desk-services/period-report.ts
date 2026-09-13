@@ -70,6 +70,15 @@ interface ProfitEvent {
   managerId: string;
   client: { vladShareRatePercentOverride: unknown };
   profitRub: number;
+  // Сырой приход/расход за этим же событием — для дашбордной строки
+  // "Выкуп/Карго: поступило/потратили" по реальным датам событий (то же
+  // самое несоответствие creation-date vs event-date, что уже исправлено
+  // для profitRub/managerPremiumRub ниже, только для income/expense оно
+  // раньше не применялось вовсе — periodOverall молча брал creation-date-
+  // scoped значения). НЕ используется в распределении премии/долей — то
+  // по-прежнему только profitRub. См. PB-V5 chat 2026-09-13.
+  incomeRub: number;
+  expenseRub: number;
   managerPremiumRub: number;
   // Only cargo events carry cargo-share info for flat_per_cargo_kg
   // investors (Юра) — everything else is null.
@@ -181,6 +190,8 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
       managerId: a.quote.managerId,
       client: a.quote.client,
       profitRub: allocationAmountRub,
+      incomeRub: allocationAmountRub, // 100%-маржа, без расхода
+      expenseRub: 0,
       managerPremiumRub: Number(a.premiumRub),
       cargo: null,
       breakdown: {
@@ -208,6 +219,11 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
     const residualProscetRub = Math.max(0, proscetRub - alreadyPaidProfit.proscetRub);
     const residualBuyoutRub = Math.max(0, buyoutRub + discountRub - alreadyPaidProfit.buyoutRub);
     const profitRub = residualProscetRub + residualBuyoutRub + fx;
+    // Легаси: приход = расход + прибыль (та же форма, что в manager-
+    // dashboard/route.ts) — расход тут не может быть "ещё не потрачен",
+    // подтверждение факта выкупа само по себе фиксирует, что деньги на
+    // закупку уже реально ушли.
+    const legacyExpenseRub = Number(q.actualBuyoutCny) * Number(q.actualBuyoutRateUsed);
 
     const alreadyPaidPremium = sumAlreadyPaidPremium(q.paymentAllocations);
     const fullPremiumRub = factualManagerPremiumRub(
@@ -225,6 +241,8 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
       managerId: q.managerId,
       client: q.client,
       profitRub,
+      incomeRub: residualProscetRub + residualBuyoutRub + legacyExpenseRub,
+      expenseRub: legacyExpenseRub,
       managerPremiumRub: residualPremiumRub,
       cargo: null,
       breakdown: {
@@ -292,11 +310,20 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
       const residualProfitRub = real.profitRub - alreadyPaidProfit.buyoutRub;
       const fullPremiumRub = Math.max(0, real.profitRub) * (buyoutRate / 100);
       const residualPremiumRub = Math.max(0, fullPremiumRub - alreadyPaidPremium.buyoutRub);
+      // realizedIncomeRub (не incomeRub) — не считает "поступившей" часть,
+      // на которую ещё вообще не потратили ни рубля (см.
+      // computeRealBuyoutProfit); минус alreadyPaidProfit.buyoutRub — та
+      // же анти-задвоение поправка, что и у residualProfitRub выше (это
+      // построено так, что residualIncomeRub - expenseRub - owedRub всегда
+      // равно residualProfitRub).
+      const residualIncomeRub = real.realizedIncomeRub - alreadyPaidProfit.buyoutRub;
 
       events.push({
         managerId: q.managerId,
         client: q.client,
         profitRub: residualProfitRub,
+        incomeRub: residualIncomeRub,
+        expenseRub: financials.buyoutExpenseRub,
         managerPremiumRub: residualPremiumRub,
         cargo: null,
         breakdown: { proscetRub: 0, buyoutRub: residualProfitRub, discountRub: 0, cargoRub: 0 },
@@ -352,6 +379,8 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
       managerId: q.managerId,
       client: q.client,
       profitRub: cargo,
+      incomeRub: Number(q.cargoDeliveryRub),
+      expenseRub: Number(q.cargoCostRub),
       managerPremiumRub: cargoBonusRub,
       cargo: { totalWeightKg: q.totalWeightKg, usdRateUsed: q.usdRateUsed },
       breakdown: { proscetRub: 0, buyoutRub: 0, discountRub: 0, cargoRub: cargo },
@@ -371,6 +400,15 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
   // what's left, matching how a real cargo delivery actually gets divided.
   // See PB-V5 chat 2026-08-06.
   const managerPremiumByManagerId = new Map<string, number>();
+  // По менеджеру — иначе рядовой менеджер (не owner/senior) получил бы на
+  // своём дашборде company-wide сумму buyoutIncomeRub вместо только своей
+  // доли (см. использование ниже в manager-dashboard/route.ts).
+  const buyoutIncomeByManagerId = new Map<string, number>();
+  const buyoutExpenseByManagerId = new Map<string, number>();
+  const cargoIncomeByManagerId = new Map<string, number>();
+  const cargoExpenseByManagerId = new Map<string, number>();
+  const addToManagerMap = (map: Map<string, number>, managerId: string, amountRub: number) =>
+    map.set(managerId, (map.get(managerId) ?? 0) + amountRub);
   let companyProfitRub = 0;
   let totalManagerPremiumRub = 0;
   // Реальными датами событий — та же связка полей, что показывает главный
@@ -381,6 +419,18 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
   let buyoutRub = 0;
   let discountRub = 0;
   let cargoProfitTotalRub = 0;
+  // "Поступило"/"потратили" по реальным датам событий — то же, что дают
+  // proscetRub/buyoutRub/... выше для прибыли, только сырой приход/расход
+  // до вычитания себестоимости, для дашбордной строки "Выкуп: поступило/
+  // потратили" (которая раньше молча читала creation-date-scoped
+  // periodOverall и расходилась с этим же отчётом, см. PB-V5 chat
+  // 2026-09-13). buyoutIncomeRub использует realizedIncomeRub, не
+  // incomeRub — согласовано с profitRub (не 0-расходную часть не считает
+  // поступившей, см. computeRealBuyoutProfit).
+  let buyoutIncomeRub = 0;
+  let buyoutExpenseRub = 0;
+  let cargoIncomeRub = 0;
+  let cargoExpenseRub = 0;
   const investorShareById = new Map<string, number>();
   const addInvestorShare = (id: string, amountRub: number) => investorShareById.set(id, (investorShareById.get(id) ?? 0) + amountRub);
 
@@ -400,6 +450,18 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
     buyoutRub += ev.breakdown.buyoutRub;
     discountRub += ev.breakdown.discountRub;
     cargoProfitTotalRub += ev.breakdown.cargoRub;
+
+    if (ev.cargo) {
+      cargoIncomeRub += ev.incomeRub;
+      cargoExpenseRub += ev.expenseRub;
+      addToManagerMap(cargoIncomeByManagerId, ev.managerId, ev.incomeRub);
+      addToManagerMap(cargoExpenseByManagerId, ev.managerId, ev.expenseRub);
+    } else {
+      buyoutIncomeRub += ev.incomeRub;
+      buyoutExpenseRub += ev.expenseRub;
+      addToManagerMap(buyoutIncomeByManagerId, ev.managerId, ev.incomeRub);
+      addToManagerMap(buyoutExpenseByManagerId, ev.managerId, ev.expenseRub);
+    }
 
     const percentInvestors = percentInvestorsBase.map((inv) => ({
       id: inv.id,
@@ -496,6 +558,17 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
   });
   const investorPoolRub = investorPayouts.reduce((sum, row) => sum + Math.max(0, row.owedRub), 0);
 
+  // По менеджеру — так рядовой менеджер (не owner/senior) может прочитать
+  // ТОЛЬКО свою строку вместо company-wide buyoutIncomeRub/... выше (см.
+  // manager-dashboard/route.ts, периодный дашборд).
+  const managerFlows = managers.map((m) => ({
+    managerId: m.id,
+    buyoutIncomeRub: buyoutIncomeByManagerId.get(m.id) ?? 0,
+    buyoutExpenseRub: buyoutExpenseByManagerId.get(m.id) ?? 0,
+    cargoIncomeRub: cargoIncomeByManagerId.get(m.id) ?? 0,
+    cargoExpenseRub: cargoExpenseByManagerId.get(m.id) ?? 0,
+  }));
+
   return {
     period: { from: from.toISOString(), to: to.toISOString() },
     companyProfitRub,
@@ -506,6 +579,16 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
     buyoutRub,
     discountRub,
     cargoProfitRub: cargoProfitTotalRub,
+    // "Выкуп/Карго: поступило/потратили" по реальным датам событий — для
+    // дашбордной строки, которая раньше молча брала эти же поля из
+    // periodOverall (по дате СОЗДАНИЯ просчёта, не по дате события) и
+    // расходилась с "Отчётом о движении средств". См. PB-V5 chat
+    // 2026-09-13.
+    buyoutIncomeRub,
+    buyoutExpenseRub,
+    cargoIncomeRub,
+    cargoExpenseRub,
+    managerFlows,
     investorPoolRub,
     managerPayouts,
     investorPayouts,

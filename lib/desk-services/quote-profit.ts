@@ -383,9 +383,19 @@ function factualManagerPremiumRub(
 // явное решение, см. PB-V5 chat 2026-08-11 (раньше курсовая разница шла
 // только Владу/инвесторам, доля менеджера была строго 0%).
 interface RealBlockResult {
+  // Реально пришедшие деньги по этому блоку — сырая сумма, для "Оплачено
+  // X из Y" на карточке просчёта (clients-tab.tsx) и т.п.: клиент правда
+  // заплатил это, независимо от того, потрачено ли уже на закупку.
   incomeRub: number;
   expenseRub: number;
   profitRub: number;
+  // То же самое "поступило", но согласованное с profitRub: если товарная
+  // часть ещё не отработана (см. profitRub ниже), она не в счёт — иначе
+  // "Выкуп: поступило" на дашборде показывало бы полную оплату клиента,
+  // а "Выкуп: прибыль" рядом — 0, что выглядит как баг. Всегда равно
+  // profitRub + expenseRub + owedRub по построению. См. PB-V5 chat
+  // 2026-09-13.
+  realizedIncomeRub: number;
 }
 
 interface RealBuyoutInputs {
@@ -430,7 +440,7 @@ function computeRealBuyoutProfit(q: RealBuyoutInputs): RealBlockResult {
   const costBearingIncomeRub = alreadyPaid.goods + alreadyPaid.chinaDelivery;
   const costBearingProfitRub = q.expenseRub === 0 && owedRub === 0 ? 0 : costBearingIncomeRub - q.expenseRub - owedRub;
   const profitRub = pureMarginIncomeRub + costBearingProfitRub;
-  return { incomeRub, expenseRub: q.expenseRub, profitRub };
+  return { incomeRub, expenseRub: q.expenseRub, profitRub, realizedIncomeRub: profitRub + q.expenseRub + owedRub };
 }
 
 interface RealCargoInputs {
@@ -443,7 +453,7 @@ interface RealCargoInputs {
 }
 
 function computeRealCargoProfit(q: RealCargoInputs): RealBlockResult {
-  return { incomeRub: q.incomeRub, expenseRub: q.expenseRub, profitRub: q.incomeRub - q.expenseRub };
+  return { incomeRub: q.incomeRub, expenseRub: q.expenseRub, profitRub: q.incomeRub - q.expenseRub, realizedIncomeRub: q.incomeRub };
 }
 
 interface PlannedBuyoutInputs {
@@ -466,10 +476,10 @@ function computePlannedBuyoutProfit(
   attachedServicesTotalRub: number,
   estimatedFxProfitRub: number,
 ): RealBlockResult {
-  if (q.isCargoOnly) return { incomeRub: 0, expenseRub: 0, profitRub: 0 };
+  if (q.isCargoOnly) return { incomeRub: 0, expenseRub: 0, profitRub: 0, realizedIncomeRub: 0 };
   const incomeRub = Number(q.totalPriceRub) + Number(q.chinaDeliveryRub) + Number(q.buyoutCommissionRub) + attachedServicesTotalRub;
   const expenseRub = Number(q.totalPriceRub) + Number(q.chinaDeliveryRub) - estimatedFxProfitRub;
-  return { incomeRub, expenseRub, profitRub: incomeRub - expenseRub };
+  return { incomeRub, expenseRub, profitRub: incomeRub - expenseRub, realizedIncomeRub: incomeRub };
 }
 
 interface PlannedCargoInputs {
@@ -483,7 +493,7 @@ interface PlannedCargoInputs {
 function computePlannedCargoProfit(q: PlannedCargoInputs): RealBlockResult {
   const incomeRub = Number(q.cargoDeliveryRub);
   const expenseRub = Number(q.cargoCostRub);
-  return { incomeRub, expenseRub, profitRub: incomeRub - expenseRub };
+  return { incomeRub, expenseRub, profitRub: incomeRub - expenseRub, realizedIncomeRub: incomeRub };
 }
 
 // A "flat_per_cargo_kg"-type investor (e.g. Юра) — flat $/kg on delivered

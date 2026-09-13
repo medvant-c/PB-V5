@@ -283,12 +283,16 @@ function summarize(
           owedRub: goodsOwedRubByQuoteId.get(q.id),
         });
         factualBuyoutRub += real.profitRub;
-        // Приход — товар/доставка/комиссия/доп. услуги (real.incomeRub),
-        // плюс просчёт (search_service/custom_production), уже учтённый
-        // строкой выше через alreadyPaidProfit.proscetRub — вместе дают
-        // приход по ВСЕМУ "Счёту на выкуп". Расход — реально потраченное на
-        // закупку/доставку.
-        factualBuyoutIncomeRub += real.incomeRub;
+        // Приход — товар/доставка/комиссия/доп. услуги, НО согласованно с
+        // прибылью (real.realizedIncomeRub, не real.incomeRub): если на
+        // закупку ещё вообще ничего не потрачено, эта часть не считается
+        // "поступившей" для дашборда — иначе "поступило" показывало бы
+        // полную оплату клиента при "прибыли" = 0, что выглядит багом. См.
+        // computeRealBuyoutProfit. Плюс просчёт (search_service/custom_
+        // production), уже учтённый строкой выше через alreadyPaidProfit.
+        // proscetRub — вместе дают приход по ВСЕМУ "Счёту на выкуп". Расход
+        // — реально потраченное на закупку/доставку.
+        factualBuyoutIncomeRub += real.realizedIncomeRub;
         factualBuyoutExpenseRub += financials.buyoutExpenseRub;
         // Никогда не ниже того, что уже заморожено на отдельных
         // QuotePaymentAllocation ДО того, как сделка перешла в "факт" —
@@ -596,11 +600,29 @@ export async function GET(req: NextRequest) {
         periodOverall.factualCargoProfitRub = realPeriod.cargoProfitRub;
         periodOverall.factualPremiumRub = realPeriod.totalManagerPremiumRub;
         periodActualIncomeRub = realPeriod.companyProfitRub - realPeriod.totalManagerPremiumRub;
+        // "Выкуп/Карго: поступило/потратили" тоже по реальным датам событий
+        // — иначе тултип "Премия менеджерам"/"Доход компании (факт)" на
+        // дашборде показывал creation-date-scoped числа, расходящиеся с
+        // Отчётом о движении средств (тот всегда по дате реального
+        // движения денег). См. PB-V5 chat 2026-09-13.
+        periodOverall.factualBuyoutIncomeRub = realPeriod.buyoutIncomeRub;
+        periodOverall.factualBuyoutExpenseRub = realPeriod.buyoutExpenseRub;
+        periodOverall.factualCargoIncomeRub = realPeriod.cargoIncomeRub;
+        periodOverall.factualCargoExpenseRub = realPeriod.cargoExpenseRub;
       } else {
         // Не владелец — company-wide разбивка (проскет/выкуп/скидка/карго)
-        // им не показывается и не считается, но собственная премия за
-        // период должна быть настоящей, а не по дате создания просчёта.
+        // им не показывается и не считается, но собственная премия и
+        // поступило/потратили за период должны быть настоящими, а не по
+        // дате создания просчёта — только СВОЯ строка из managerFlows, не
+        // company-wide totals выше (те утекли бы чужие цифры).
         periodOverall.factualPremiumRub = realPeriodManagerPremiumRub.get(session.managerId) ?? 0;
+        const ownFlows = realPeriod.managerFlows.find((f) => f.managerId === session.managerId);
+        if (ownFlows) {
+          periodOverall.factualBuyoutIncomeRub = ownFlows.buyoutIncomeRub;
+          periodOverall.factualBuyoutExpenseRub = ownFlows.buyoutExpenseRub;
+          periodOverall.factualCargoIncomeRub = ownFlows.cargoIncomeRub;
+          periodOverall.factualCargoExpenseRub = ownFlows.cargoExpenseRub;
+        }
       }
     }
   }
