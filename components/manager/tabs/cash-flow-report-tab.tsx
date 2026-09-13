@@ -89,8 +89,11 @@ function ManagerCashFlowReportTab() {
   const [reservedCny, setReservedCny] = useState(0);
   const [reserveRows, setReserveRows] = useState<ReserveRow[]>([]);
   const [reserveOpen, setReserveOpen] = useState(false);
-  const [realBuyoutIncomeCny, setRealBuyoutIncomeCny] = useState(0);
-  const [realBuyoutExpenseCny, setRealBuyoutExpenseCny] = useState(0);
+  // Резерв, относящийся именно к этому месяцу (только просчёты, по
+  // которым оплата товара пришла в выбранном месяце) — используется для
+  // "Дохода с выкупа", в отличие от reservedCny выше (резерв "на сейчас"
+  // по вообще всем открытым просчётам, для аннотации/диалога).
+  const [reservedThisMonthCny, setReservedThisMonthCny] = useState(0);
   const [loading, setLoading] = useState(true);
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null);
 
@@ -102,8 +105,7 @@ function ManagerCashFlowReportTab() {
         setClients(data.clients ?? []);
         setReservedCny(data.reservedCny ?? 0);
         setReserveRows(data.reserveRows ?? []);
-        setRealBuyoutIncomeCny(data.realBuyoutIncomeCny ?? 0);
-        setRealBuyoutExpenseCny(data.realBuyoutExpenseCny ?? 0);
+        setReservedThisMonthCny(data.reservedThisMonthCny ?? 0);
       })
       .finally(() => setLoading(false));
   }, [month]);
@@ -144,10 +146,8 @@ function ManagerCashFlowReportTab() {
         </div>
         <div className="rounded-xl border border-border bg-surface p-4">
           <p className="text-xs text-text-secondary">Доход с выкупа за месяц</p>
-          <p className="mt-1 text-lg font-bold text-primary">¥ {money(realBuyoutIncomeCny - realBuyoutExpenseCny)}</p>
-          <p className="mt-1 text-[11px] text-text-secondary">
-            это база расчёта премии — та же цифра, что и на Главной («Выкуп: поступило/потратили»)
-          </p>
+          <p className="mt-1 text-lg font-bold text-primary">¥ {money(totalIncomeCny - totalExpenseCny - reservedThisMonthCny)}</p>
+          <p className="mt-1 text-[11px] text-text-secondary">это база расчёта премии — за резерв премия не начисляется</p>
         </div>
       </div>
 
@@ -157,10 +157,10 @@ function ManagerCashFlowReportTab() {
           onClick={() => setReserveOpen(true)}
           className="w-full rounded-xl border border-dashed border-border bg-surface p-3 text-left text-xs text-text-secondary underline decoration-dotted hover:text-text"
         >
-          ¥ {money(reservedCny)} из общего прихода по вашим клиентам ещё не потрачено на закупку (клиент оплатил, но
-          товар ещё не куплен, или указан остаток к доплате поставщику) — уже учтено в «Доходе с выкупа» выше, это
-          не прибыль. Резерв — состояние на сейчас по всем открытым просчётам, не зависит от выбранного месяца, в
-          отличие от прихода/расхода за месяц рядом. Нажмите, чтобы увидеть по каким просчётам.
+          ¥ {money(reservedCny)} — резерв под выкуп на сейчас по всем вашим открытым просчётам (клиент оплатил, но
+          товар ещё не куплен, или указан остаток к доплате поставщику), из них ¥ {money(reservedThisMonthCny)}{" "}
+          относится к этому месяцу и уже вычтено из «Дохода с выкупа» выше. Резерв — не прибыль и не входит в базу
+          премии. Нажмите, чтобы увидеть по каким просчётам.
         </button>
       )}
 

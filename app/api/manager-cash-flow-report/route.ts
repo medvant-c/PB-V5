@@ -3,7 +3,6 @@ import { getManagerSessionFromRequest } from "@/lib/manager-auth";
 import { getVisibleManagerIds } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { fetchQuoteReserveRows } from "@/lib/desk-services/quote-reserve";
-import { buildPeriodReport } from "@/lib/desk-services/period-report";
 
 function parseMonthRange(monthParam: string | null): [Date, Date] {
   const match = monthParam?.match(/^(\d{4})-(\d{2})$/);
@@ -145,21 +144,19 @@ export async function GET(req: NextRequest) {
     if (bucket) bucket.reservedCny += row.reservedCny;
   }
 
-  // "Доход с выкупа за месяц" — ЭТО база расчёта премии менеджера, поэтому
-  // должен быть ровно тем же числом, что дашборд уже показывает в "Выкуп:
-  // поступило/потратили" (periodOverall, см. app/api/manager-dashboard/
-  // route.ts) — тот же buildPeriodReport, по датам реальных событий, а не
-  // сырой приход/расход за месяц минус резерв "на сейчас" (это было два
-  // разных числа для одной и той же базы премии). См. PB-V5 chat
-  // 2026-09-13.
-  const realPeriod = await buildPeriodReport({ from: monthStart, to: monthEnd });
-  const visibleFlows =
-    visibleManagerIds === "all" ? realPeriod.managerFlows : realPeriod.managerFlows.filter((f) => visibleManagerIds.includes(f.managerId));
-  const realBuyoutIncomeRub = visibleFlows.reduce((sum, f) => sum + f.buyoutIncomeRub, 0);
-  const realBuyoutExpenseRub = visibleFlows.reduce((sum, f) => sum + f.buyoutExpenseRub, 0);
-  const cnyRateRub = realPeriod.cnyRateRub ?? 1;
-  const realBuyoutIncomeCny = realBuyoutIncomeRub / cnyRateRub;
-  const realBuyoutExpenseCny = realBuyoutExpenseRub / cnyRateRub;
+  // "Доход с выкупа за месяц" = приход минус расход минус резерв — но
+  // резерв нужно брать только по тем просчётам, у которых оплата товара
+  // пришла ИМЕННО в этом месяце: резерв сам по себе — состояние "на
+  // сейчас" по всем открытым просчётам, а не движение за период, поэтому
+  // вычитать ВЕСЬ текущий резерв из каждого просматриваемого месяца
+  // давало бы для месяцев без этой активности отрицательные бессмысленные
+  // числа (сентябрьский резерв "утяжелял" бы и август, и июль). Премия
+  // менеджера считается от этой же цифры — за резерв премия не
+  // начисляется. См. PB-V5 chat 2026-09-13.
+  const quoteIdsWithIncomeThisMonth = new Set(incomeAllocations.map((a) => a.quoteId));
+  const reservedThisMonthCny = reserveRows
+    .filter((row) => quoteIdsWithIncomeThisMonth.has(row.quoteId))
+    .reduce((sum, row) => sum + row.reservedCny, 0);
 
   for (const inv of invoices) {
     const bucket = byClientId.get(inv.clientId);
@@ -225,5 +222,5 @@ export async function GET(req: NextRequest) {
 
   const reservedCny = clients.reduce((sum, c) => sum + c.reservedCny, 0);
 
-  return Response.json({ clients, reservedCny, reserveRows, realBuyoutIncomeCny, realBuyoutExpenseCny });
+  return Response.json({ clients, reservedCny, reserveRows, reservedThisMonthCny });
 }
