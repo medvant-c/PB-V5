@@ -416,7 +416,21 @@ function computeRealBuyoutProfit(q: RealBuyoutInputs): RealBlockResult {
   const alreadyPaid = sumAlreadyPaidRubByCategory(q.allocations);
   const incomeRub = alreadyPaid.goods + alreadyPaid.chinaDelivery + alreadyPaid.buyoutCommission + alreadyPaid.attachedServices;
   const owedRub = q.owedRub ?? 0;
-  return { incomeRub, expenseRub: q.expenseRub, profitRub: incomeRub - q.expenseRub - owedRub };
+  // buyout_commission/attached_services — 100% маржа без себестоимости,
+  // всегда прибыль целиком. goods/china_delivery — деньги под реальную
+  // закупку, их можно засчитать в прибыль только относительно того, что
+  // реально потрачено. Если расхода ещё вообще не было (expenseRub === 0)
+  // И остаток явно не указан (owedRub === 0) — мы просто ещё не знаем
+  // фактическую себестоимость, это НЕ 100%-я прибыль, а деньги под ещё не
+  // сделанную закупку (тот же принцип, что и "Резерв под выкуп" — см.
+  // app/api/manager-cash-reserved-for-buyout/route.ts). Как только
+  // появляется хоть один расход или явный остаток — считаем как раньше.
+  // См. PB-V5 chat 2026-09-13.
+  const pureMarginIncomeRub = alreadyPaid.buyoutCommission + alreadyPaid.attachedServices;
+  const costBearingIncomeRub = alreadyPaid.goods + alreadyPaid.chinaDelivery;
+  const costBearingProfitRub = q.expenseRub === 0 && owedRub === 0 ? 0 : costBearingIncomeRub - q.expenseRub - owedRub;
+  const profitRub = pureMarginIncomeRub + costBearingProfitRub;
+  return { incomeRub, expenseRub: q.expenseRub, profitRub };
 }
 
 interface RealCargoInputs {
