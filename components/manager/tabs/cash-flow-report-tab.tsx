@@ -5,6 +5,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, FileText, Loader2, TrendingUp }
 import { EmptyState } from "@/components/desk/empty-state";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 interface InvoiceRow {
@@ -42,6 +43,18 @@ interface ClientFlowRow {
   reservedCny: number;
 }
 
+interface ReserveRow {
+  quoteId: string;
+  quoteDisplayId: number;
+  productName: string;
+  clientId: string;
+  clientName: string;
+  clientDisplayId: number;
+  paidCny: number;
+  expenseCny: number;
+  reservedCny: number;
+}
+
 const INVOICE_TYPE_LABEL: Record<string, string> = { buyout: "Выкуп", services: "Услуги" };
 const CURRENCY_LABEL: Record<string, string> = { rub: "₽", usd: "$", usdt: "USDT", cny: "¥" };
 
@@ -74,6 +87,8 @@ function ManagerCashFlowReportTab() {
   const [month, setMonth] = useState(todayIso());
   const [clients, setClients] = useState<ClientFlowRow[]>([]);
   const [reservedCny, setReservedCny] = useState(0);
+  const [reserveRows, setReserveRows] = useState<ReserveRow[]>([]);
+  const [reserveOpen, setReserveOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null);
 
@@ -84,6 +99,7 @@ function ManagerCashFlowReportTab() {
       .then((data) => {
         setClients(data.clients ?? []);
         setReservedCny(data.reservedCny ?? 0);
+        setReserveRows(data.reserveRows ?? []);
       })
       .finally(() => setLoading(false));
   }, [month]);
@@ -124,17 +140,69 @@ function ManagerCashFlowReportTab() {
         </div>
         <div className="rounded-xl border border-border bg-surface p-4">
           <p className="text-xs text-text-secondary">Доход с выкупа за месяц</p>
-          <p className="mt-1 text-lg font-bold text-primary">¥ {money(totalIncomeCny - totalExpenseCny)}</p>
+          <p className="mt-1 text-lg font-bold text-primary">¥ {money(totalIncomeCny - totalExpenseCny - reservedCny)}</p>
+          {reservedCny > 0 && (
+            <p className="mt-1 text-[11px] text-text-secondary">(за вычетом резерва под выкуп ¥ {money(reservedCny)})</p>
+          )}
         </div>
       </div>
 
       {reservedCny > 0 && (
-        <p className="rounded-xl border border-dashed border-border bg-surface p-3 text-xs text-text-secondary">
-          Из общего прихода по вашим клиентам ¥ {money(reservedCny)} ещё не потрачено на закупку — это резерв под
-          выкуп, не прибыль (клиент оплатил, но товар ещё не куплен, или указан остаток к доплате поставщику). Не
-          зависит от выбранного месяца.
-        </p>
+        <button
+          type="button"
+          onClick={() => setReserveOpen(true)}
+          className="w-full rounded-xl border border-dashed border-border bg-surface p-3 text-left text-xs text-text-secondary underline decoration-dotted hover:text-text"
+        >
+          ¥ {money(reservedCny)} из общего прихода по вашим клиентам ещё не потрачено на закупку (клиент оплатил, но
+          товар ещё не куплен, или указан остаток к доплате поставщику) — уже вычтено из «Дохода с выкупа» выше, это
+          не прибыль. Резерв — состояние на сейчас по всем открытым просчётам, не зависит от выбранного месяца, в
+          отличие от прихода/расхода за месяц рядом. Нажмите, чтобы увидеть по каким просчётам.
+        </button>
       )}
+
+      <Dialog open={reserveOpen} onOpenChange={setReserveOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Резерв под выкуп по вашим просчётам</DialogTitle>
+            <DialogDescription>
+              Деньги клиентов, уже полученные за товар по открытым просчётам, но ещё реально не потраченные на
+              закупку.
+            </DialogDescription>
+          </DialogHeader>
+          {reserveRows.length === 0 ? (
+            <p className="text-sm text-text-secondary">Нет просчётов с неизрасходованным резервом.</p>
+          ) : (
+            <div className="max-h-[60vh] overflow-y-auto overflow-x-auto rounded-lg border border-border">
+              <table className="w-full min-w-2xl border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-bg text-left text-xs text-text-secondary">
+                    <th className="px-3 py-1.5 font-medium">Клиент</th>
+                    <th className="px-3 py-1.5 font-medium">Просчёт</th>
+                    <th className="px-3 py-1.5 font-medium">Оплачено, ¥</th>
+                    <th className="px-3 py-1.5 font-medium">Потрачено, ¥</th>
+                    <th className="px-3 py-1.5 font-medium">Резерв, ¥</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reserveRows.map((row) => (
+                    <tr key={row.quoteId} className="border-b border-border last:border-0">
+                      <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">
+                        №{row.clientDisplayId} {row.clientName}
+                      </td>
+                      <td className="max-w-60 truncate px-3 py-1.5 text-text-secondary" title={row.productName}>
+                        №{row.quoteDisplayId} — {row.productName}
+                      </td>
+                      <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">¥ {money(row.paidCny)}</td>
+                      <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">¥ {money(row.expenseCny)}</td>
+                      <td className="px-3 py-1.5 whitespace-nowrap font-medium text-text">¥ {money(row.reservedCny)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {loading ? (
         <p className="flex items-center gap-1.5 text-xs text-text-secondary">

@@ -208,5 +208,5 @@ export async function GET(req: NextRequest) {
 
   const reservedCny = clients.reduce((sum, c) => sum + c.reservedCny, 0);
 
-  return Response.json({ clients, reservedCny });
+  return Response.json({ clients, reservedCny, reserveRows });
 }
