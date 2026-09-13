@@ -4,13 +4,23 @@ import { canViewCash } from "@/lib/manager-scope";
 import { prisma } from "@/lib/prisma";
 import { fetchQuoteRealFinancials, emptyQuoteRealFinancials } from "@/lib/desk-services/quote-real-financials";
 
-// Резерв под выкуп — деньги клиентов, уже полученные за товар по ОТКРЫТЫМ
-// просчётам, но ещё реально не потраченные на закупку (max(0, оплачено −
-// потрачено) по каждому такому просчёту, суммарно). НЕ то же самое, что
-// QuoteGoodsOwedAmount (сколько должны поставщику) — это read-only
-// компания-wide аннотация к остатку Кассы, не привязана к одному счёту и
-// ничего не пишет в БД. См. план mellow-forging-kay.md, PB-V5 chat
-// 2026-09-12.
+// Резерв под выкуп — по каждому ОТКРЫТОМУ просчёту (buyoutFactConfirmed:
+// false), в порядке приоритета:
+//   1. Есть QuoteGoodsOwedAmount (менеджер явно указал остаток к доплате
+//      поставщику, см. app/api/manager-quotes/[id]/expense-order/route.ts)
+//      — берём ровно это число, оно уже самое точное, что есть.
+//   2. Оплата от клиента есть, а расхода на закупку — вообще ни одного —
+//      план по закупке ещё не тронут, берём ПЛАН из просчёта
+//      (Quote.totalPriceCny — "сумма закупа", не то, что клиент успел
+//      заплатить), а не то, что успели получить.
+//   3. И приход, и хотя бы один расход есть, отдельного остатка не
+//      указано — сделка закрыта штатно. Разница "оплачено минус
+//      потрачено" — это заработанная маржа/прибыль, а не зависшие деньги,
+//      в резерв НЕ попадает.
+// Раньше (до 2026-09-13) резерв считался как max(0, оплачено − потрачено)
+// для любого открытого просчёта — это неверно путало обычную прибыль по
+// сделке с реально непотраченными деньгами клиента. См. PB-V5 chat
+// 2026-09-13.
 export async function GET(req: NextRequest) {
   const session = await getManagerSessionFromRequest(req);
   if (!session || !(await canViewCash(session))) {
@@ -25,22 +35,19 @@ export async function GET(req: NextRequest) {
       id: true,
       displayId: true,
       productName: true,
+      totalPriceCny: true,
       client: { select: { id: true, name: true, displayId: true } },
       paymentAllocations: {
         where: { category: "goods" },
         select: { amountRub: true, cashOrder: { select: { cnyToCurrencyRate: true } } },
       },
+      goodsOwedAmount: { select: { amountCny: true } },
     },
   });
 
   const financials = await fetchQuoteRealFinancials(openQuotes.map((q) => q.id));
 
   let reservedCny = 0;
-  // Построчная разбивка — только просчёты, где реально есть что показать
-  // (резерв > 0), отсортировано по убыванию: то же самое max(0, оплачено −
-  // потрачено), что уже суммируется в reservedCny выше, но без схлопывания
-  // по клиентам, чтобы менеджер видел, по какому именно просчёту деньги ещё
-  // не потрачены. См. PB-V5 chat 2026-09-13.
   const rows: {
     quoteId: string;
     quoteDisplayId: number;
@@ -57,8 +64,19 @@ export async function GET(req: NextRequest) {
       const rate = Number(a.cashOrder.cnyToCurrencyRate) || 1;
       return sum + Number(a.amountRub) / rate;
     }, 0);
+    if (goodsPaidCny <= 0) continue; // клиент ничего не платил — резервировать нечего
+
     const goodsExpenseCny = (financials.get(q.id) ?? emptyQuoteRealFinancials()).goodsExpenseCny;
-    const reserved = Math.max(0, goodsPaidCny - goodsExpenseCny);
+
+    let reserved: number;
+    if (q.goodsOwedAmount && Number(q.goodsOwedAmount.amountCny) > 0) {
+      reserved = Number(q.goodsOwedAmount.amountCny);
+    } else if (goodsExpenseCny === 0) {
+      reserved = Number(q.totalPriceCny);
+    } else {
+      reserved = 0; // приход и расход есть, отдельного остатка не указано — сделка закрыта
+    }
+
     reservedCny += reserved;
     if (reserved > 0) {
       rows.push({
