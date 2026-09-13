@@ -144,20 +144,6 @@ export async function GET(req: NextRequest) {
     if (bucket) bucket.reservedCny += row.reservedCny;
   }
 
-  // "Доход с выкупа за месяц" = приход минус расход минус резерв — но
-  // резерв нужно брать только по тем просчётам, у которых оплата товара
-  // пришла ИМЕННО в этом месяце: резерв сам по себе — состояние "на
-  // сейчас" по всем открытым просчётам, а не движение за период, поэтому
-  // вычитать ВЕСЬ текущий резерв из каждого просматриваемого месяца
-  // давало бы для месяцев без этой активности отрицательные бессмысленные
-  // числа (сентябрьский резерв "утяжелял" бы и август, и июль). Премия
-  // менеджера считается от этой же цифры — за резерв премия не
-  // начисляется. См. PB-V5 chat 2026-09-13.
-  const quoteIdsWithIncomeThisMonth = new Set(incomeAllocations.map((a) => a.quoteId));
-  const reservedThisMonthCny = reserveRows
-    .filter((row) => quoteIdsWithIncomeThisMonth.has(row.quoteId))
-    .reduce((sum, row) => sum + row.reservedCny, 0);
-
   for (const inv of invoices) {
     const bucket = byClientId.get(inv.clientId);
     if (!bucket) continue;
@@ -222,5 +208,5 @@ export async function GET(req: NextRequest) {
 
   const reservedCny = clients.reduce((sum, c) => sum + c.reservedCny, 0);
 
-  return Response.json({ clients, reservedCny, reserveRows, reservedThisMonthCny });
+  return Response.json({ clients, reservedCny, reserveRows });
 }

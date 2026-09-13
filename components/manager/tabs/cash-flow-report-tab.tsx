@@ -89,11 +89,6 @@ function ManagerCashFlowReportTab() {
   const [reservedCny, setReservedCny] = useState(0);
   const [reserveRows, setReserveRows] = useState<ReserveRow[]>([]);
   const [reserveOpen, setReserveOpen] = useState(false);
-  // Резерв, относящийся именно к этому месяцу (только просчёты, по
-  // которым оплата товара пришла в выбранном месяце) — используется для
-  // "Дохода с выкупа", в отличие от reservedCny выше (резерв "на сейчас"
-  // по вообще всем открытым просчётам, для аннотации/диалога).
-  const [reservedThisMonthCny, setReservedThisMonthCny] = useState(0);
   const [loading, setLoading] = useState(true);
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null);
 
@@ -105,7 +100,6 @@ function ManagerCashFlowReportTab() {
         setClients(data.clients ?? []);
         setReservedCny(data.reservedCny ?? 0);
         setReserveRows(data.reserveRows ?? []);
-        setReservedThisMonthCny(data.reservedThisMonthCny ?? 0);
       })
       .finally(() => setLoading(false));
   }, [month]);
@@ -144,25 +138,21 @@ function ManagerCashFlowReportTab() {
           <p className="text-xs text-text-secondary">Расход за месяц</p>
           <p className="mt-1 text-lg font-bold text-error">¥ {money(totalExpenseCny)}</p>
         </div>
-        <div className="rounded-xl border border-border bg-surface p-4">
-          <p className="text-xs text-text-secondary">Доход с выкупа за месяц</p>
-          <p className="mt-1 text-lg font-bold text-primary">¥ {money(totalIncomeCny - totalExpenseCny - reservedThisMonthCny)}</p>
-          <p className="mt-1 text-[11px] text-text-secondary">это база расчёта премии — за резерв премия не начисляется</p>
-        </div>
-      </div>
-
-      {reservedCny > 0 && (
         <button
           type="button"
-          onClick={() => setReserveOpen(true)}
-          className="w-full rounded-xl border border-dashed border-border bg-surface p-3 text-left text-xs text-text-secondary underline decoration-dotted hover:text-text"
+          onClick={() => reservedCny > 0 && setReserveOpen(true)}
+          disabled={reservedCny === 0}
+          className="rounded-xl border border-border bg-surface p-4 text-left disabled:cursor-default"
         >
-          ¥ {money(reservedCny)} — резерв под выкуп на сейчас по всем вашим открытым просчётам (клиент оплатил, но
-          товар ещё не куплен, или указан остаток к доплате поставщику), из них ¥ {money(reservedThisMonthCny)}{" "}
-          относится к этому месяцу и уже вычтено из «Дохода с выкупа» выше. Резерв — не прибыль и не входит в базу
-          премии. Нажмите, чтобы увидеть по каким просчётам.
+          <p className="text-xs text-text-secondary">Резерв (оплачено, но не потрачено)</p>
+          <p className={cn("mt-1 text-lg font-bold", reservedCny > 0 ? "text-warning underline decoration-dotted" : "text-text")}>
+            ¥ {money(reservedCny)}
+          </p>
+          <p className="mt-1 text-[11px] text-text-secondary">
+            {reservedCny > 0 ? "на сейчас, по всем открытым просчётам — нажмите для списка" : "сейчас нет"}
+          </p>
         </button>
-      )}
+      </div>
 
       <Dialog open={reserveOpen} onOpenChange={setReserveOpen}>
         <DialogContent className="max-w-3xl">
