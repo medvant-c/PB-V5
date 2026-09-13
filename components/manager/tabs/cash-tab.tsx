@@ -570,6 +570,19 @@ function ManagerCashTab() {
 
   const profitCny = summary ? summary.closingBalanceCny - unallocatedCny : null;
 
+  // Резерв под выкуп — read-only аннотация "сколько из остатка на счетах
+  // это ещё не потраченные деньги клиентов за товар по открытым
+  // просчётам" (см. app/api/manager-cash-reserved-for-buyout/route.ts).
+  // Компания-wide, не зависит от filterAccountId/периода — не влияет ни на
+  // closingBalanceCny, ни на profitCny. См. план mellow-forging-kay.md.
+  const [reservedForBuyoutCny, setReservedForBuyoutCny] = useState(0);
+  useEffect(() => {
+    fetch("/api/manager-cash-reserved-for-buyout")
+      .then((res) => res.json())
+      .then((data) => setReservedForBuyoutCny(data.reservedCny ?? 0))
+      .catch(() => setReservedForBuyoutCny(0));
+  }, []);
+
   function openUaDialog() {
     if (filterAccountId === "all") return;
     setUaAmount(String(unallocatedCny));
@@ -928,6 +941,11 @@ function ManagerCashTab() {
         <Card className="p-4">
           <p className="text-xs text-text-secondary">Баланс на конец периода</p>
           <p className="mt-1 text-lg font-bold text-primary">{summary ? `¥ ${money(summary.closingBalanceCny)}` : "—"}</p>
+          {reservedForBuyoutCny > 0 && (
+            <p className="mt-1 text-[11px] text-text-secondary">
+              (из них резерв под выкуп клиентов: ¥ {money(reservedForBuyoutCny)})
+            </p>
+          )}
         </Card>
       </div>
 

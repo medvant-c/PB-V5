@@ -25,6 +25,7 @@ import {
 } from "@/lib/desk-services/quote-profit";
 import { buildPeriodReport } from "@/lib/desk-services/period-report";
 import { fetchQuoteRealFinancials, emptyQuoteRealFinancials, type QuoteRealFinancials } from "@/lib/desk-services/quote-real-financials";
+import { fetchQuoteGoodsOwedRub } from "@/lib/desk-services/quote-goods-owed";
 
 // Statuses that imply the buyout has actually happened — client's money
 // has already covered the goods, China delivery, buyout commission, and
@@ -136,6 +137,7 @@ function summarize(
   cnyProfitTiers: CnyProfitTiers,
   attachedServicesByQuoteId: Map<string, number>,
   quoteRealFinancials: Map<string, QuoteRealFinancials>,
+  goodsOwedRubByQuoteId: Map<string, number>,
 ) {
   const statusCounts: Record<string, number> = {};
   for (const status of QUOTE_STATUSES) statusCounts[status] = 0;
@@ -275,7 +277,11 @@ function summarize(
       // статуса — план из просчёта. См. PB-V5 chat 2026-08-11.
       const financials = quoteRealFinancials.get(q.id) ?? emptyQuoteRealFinancials();
       if (BUYOUT_REALIZED_STATUSES.includes(q.status)) {
-        const real = computeRealBuyoutProfit({ allocations: q.paymentAllocations, expenseRub: financials.buyoutExpenseRub });
+        const real = computeRealBuyoutProfit({
+          allocations: q.paymentAllocations,
+          expenseRub: financials.buyoutExpenseRub,
+          owedRub: goodsOwedRubByQuoteId.get(q.id),
+        });
         factualBuyoutRub += real.profitRub;
         // Приход — товар/доставка/комиссия/доп. услуги (real.incomeRub),
         // плюс просчёт (search_service/custom_production), уже учтённый
@@ -465,6 +471,12 @@ export async function GET(req: NextRequest) {
   // quote-real-financials.ts), используется в summarize() ниже вместо
   // ручного ввода/подтверждения. См. PB-V5 chat 2026-08-11.
   const quoteRealFinancials = await fetchQuoteRealFinancials(quotes.map((q) => q.id));
+  // Остаток к доплате поставщику за товар (см. QuoteGoodsOwedAmount) —
+  // тем же батчем, что и quoteRealFinancials выше, вычитается из
+  // profitRub в computeRealBuyoutProfit внутри summarize(), чтобы премия
+  // не завышалась по частично оплаченным закупкам. См. PB-V5 chat
+  // 2026-09-12.
+  const goodsOwedRubByQuoteId = await fetchQuoteGoodsOwedRub(quotes.map((q) => ({ id: q.id, cnyRateUsed: q.cnyRateUsed })));
 
   // "Готовые просчёты" — how many quotes each manager marked complete
   // (first reached pending_approval) today/this week/this month, per PB-V5
@@ -524,7 +536,7 @@ export async function GET(req: NextRequest) {
   }
 
   const overall = withFulfillmentPremium(
-    summarize(quotes, cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials),
+    summarize(quotes, cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials, goodsOwedRubByQuoteId),
     "all",
   );
 
@@ -561,7 +573,7 @@ export async function GET(req: NextRequest) {
     const dashboardTo = new Date(dashboardToParam);
     if (!Number.isNaN(dashboardFrom.getTime()) && !Number.isNaN(dashboardTo.getTime())) {
       const periodQuotes = quotes.filter((q) => q.createdAt >= dashboardFrom && q.createdAt < dashboardTo);
-      periodOverall = summarize(periodQuotes, cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials);
+      periodOverall = summarize(periodQuotes, cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials, goodsOwedRubByQuoteId);
       // buildPeriodReport теперь считается для ЛЮБОЙ роли — не только
       // владельца/старшего: это же periodOverall (через data.periodOverall ??
       // data.overall) отдаёт "Премию" и рядовому менеджеру на ЕГО собственном
@@ -617,7 +629,7 @@ export async function GET(req: NextRequest) {
         managerId: m.id,
         managerName: m.name,
         ...withFulfillmentPremium(
-          summarize(byManager.get(m.id) ?? [], cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials),
+          summarize(byManager.get(m.id) ?? [], cargoRates, premiumRates, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials, goodsOwedRubByQuoteId),
           m.id,
         ),
         completedToday: countCompletedSince(m.id, startOfDay),
@@ -780,7 +792,11 @@ export async function GET(req: NextRequest) {
 
       const buyoutRealized = BUYOUT_REALIZED_STATUSES.includes(q.status);
       const real = buyoutRealized
-        ? computeRealBuyoutProfit({ allocations: q.paymentAllocations, expenseRub: financials.buyoutExpenseRub })
+        ? computeRealBuyoutProfit({
+            allocations: q.paymentAllocations,
+            expenseRub: financials.buyoutExpenseRub,
+            owedRub: goodsOwedRubByQuoteId.get(q.id),
+          })
         : null;
       const servicesProfitRub = alreadyPaidProfit.proscetRub + (real ? real.profitRub : 0);
       // Ровно та же премия, что summarize() уже засчитывает менеджеру в

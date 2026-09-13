@@ -38,6 +38,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       chinaDeliveryRub: true,
       buyoutCommissionRub: true,
       cargoDeliveryRub: true,
+      cnyRateUsed: true,
       paymentAllocations: { select: { category: true, amountRub: true } },
     },
   });
@@ -48,12 +49,15 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     return Response.json({ error: "Нет доступа к этому просчёту." }, { status: 403 });
   }
 
-  const [attachedServiceSum, financials] = await Promise.all([
+  const [attachedServiceSum, financials, goodsOwedRow] = await Promise.all([
     prisma.quoteAttachedService.aggregate({ where: { quoteId: id }, _sum: { priceRub: true } }),
     fetchQuoteRealFinancials([id]),
+    prisma.quoteGoodsOwedAmount.findUnique({ where: { quoteId: id }, select: { amountCny: true } }),
   ]);
   const attachedServicesTotalRub = Number(attachedServiceSum._sum.priceRub ?? 0);
   const fin = financials.get(id) ?? emptyQuoteRealFinancials();
+  const goodsOwedCny = Number(goodsOwedRow?.amountCny ?? 0);
+  const goodsOwedRub = goodsOwedCny * Number(quote.cnyRateUsed);
 
   // "Реализован" — по статусу сделки (см. BUYOUT_REALIZED_STATUSES/
   // CARGO_REALIZED_STATUSES в lib/quote-statuses.ts), не по полноте
@@ -61,7 +65,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   // карго уже реально куплены. paidRub может быть меньше owedRub даже
   // после этого (например, аванс под производство под заказ) — это
   // нормально, отчёт просто показывает то, что реально прошло по Кассе.
-  const real = computeRealBuyoutProfit({ allocations: quote.paymentAllocations, expenseRub: fin.buyoutExpenseRub });
+  const real = computeRealBuyoutProfit({ allocations: quote.paymentAllocations, expenseRub: fin.buyoutExpenseRub, owedRub: goodsOwedRub });
   const realCargo = computeRealCargoProfit({ incomeRub: fin.cargoIncomeRub, expenseRub: fin.cargoExpenseRub });
 
   // "Заказ закрыт" — узкая проверка ТОЛЬКО по товару: оплата клиента за сам
@@ -80,6 +84,11 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       owedRub: Number(quote.totalPriceRub) + Number(quote.chinaDeliveryRub) + Number(quote.buyoutCommissionRub) + attachedServicesTotalRub,
       expenseRub: real.expenseRub,
       realized: BUYOUT_REALIZED_STATUSES.includes(quote.status),
+      // Сколько ещё должны поставщику за товар прямо сейчас (см.
+      // QuoteGoodsOwedAmount) — уже учтено в profitRub расчётов прибыли/
+      // премии на бэкенде, здесь только для предзаполнения формы/
+      // индикатора на карточке просчёта. См. PB-V5 chat 2026-09-12.
+      owedToSupplierCny: goodsOwedCny,
     },
     cargo: {
       paidRub: realCargo.incomeRub,
@@ -126,13 +135,14 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   } catch {
     return Response.json({ error: "Некорректный запрос." }, { status: 400 });
   }
-  const { accountId, date: dateRaw, goodsAmountCny, chinaDeliveryAmountCny, cargoAmountCny, comment: commentRaw } =
+  const { accountId, date: dateRaw, goodsAmountCny, chinaDeliveryAmountCny, cargoAmountCny, goodsOwedAmountCny, comment: commentRaw } =
     (body as {
       accountId?: unknown;
       date?: unknown;
       goodsAmountCny?: unknown;
       chinaDeliveryAmountCny?: unknown;
       cargoAmountCny?: unknown;
+      goodsOwedAmountCny?: unknown;
       comment?: unknown;
     }) ?? {};
 
@@ -152,8 +162,19 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     const amount = Number(raw);
     if (Number.isFinite(amount) && amount > 0) items.push({ amount, categoryName });
   }
-  if (items.length === 0) {
+  // Остаток поставщику можно поправить и без нового расходного ордера
+  // (например просто скорректировать сумму после переговоров) — поэтому
+  // "хотя бы одна сумма" не требуется, если это поле явно передано.
+  const hasGoodsOwedUpdate = goodsOwedAmountCny !== undefined && goodsOwedAmountCny !== null;
+  if (items.length === 0 && !hasGoodsOwedUpdate) {
     return Response.json({ error: "Укажите сумму закупки товара, доставки по Китаю или расхода по карго." }, { status: 400 });
+  }
+  let goodsOwedAmountNum = 0;
+  if (hasGoodsOwedUpdate) {
+    goodsOwedAmountNum = Number(goodsOwedAmountCny);
+    if (!Number.isFinite(goodsOwedAmountNum) || goodsOwedAmountNum < 0) {
+      return Response.json({ error: "Укажите остаток к доплате поставщику, ¥." }, { status: 400 });
+    }
   }
   const date = typeof dateRaw === "string" && dateRaw ? new Date(dateRaw) : new Date();
   const comment = typeof commentRaw === "string" ? commentRaw.trim() : "";
@@ -181,6 +202,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
           },
         }),
       );
+    }
+    if (hasGoodsOwedUpdate) {
+      await tx.quoteGoodsOwedAmount.upsert({
+        where: { quoteId: quote.id },
+        update: { amountCny: goodsOwedAmountNum, updatedByManagerId: session.managerId },
+        create: { quoteId: quote.id, amountCny: goodsOwedAmountNum, updatedByManagerId: session.managerId },
+      });
     }
     return orders;
   });

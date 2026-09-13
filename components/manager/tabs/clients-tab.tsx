@@ -646,7 +646,7 @@ function ClientQuotes({
   // app/api/manager-quotes/[id]/expense-order/route.ts, план
   // mellow-forging-kay.md, PB-V5 chat 2026-08-11.
   const [expenseDrafts, setExpenseDrafts] = useState<
-    Record<string, { goodsCny: string; chinaCny: string; cargoCny: string; accountId: string }>
+    Record<string, { goodsCny: string; chinaCny: string; cargoCny: string; owedCny: string; accountId: string }>
   >({});
   const [savingBuyoutId, setSavingBuyoutId] = useState<string | null>(null);
   // Прогресс реальной оплаты блоков Выкуп/Карго — подгружается лениво при
@@ -655,7 +655,7 @@ function ClientQuotes({
     Record<
       string,
       {
-        buyout: { paidRub: number; owedRub: number; expenseRub: number; realized: boolean };
+        buyout: { paidRub: number; owedRub: number; expenseRub: number; realized: boolean; owedToSupplierCny: number };
         cargo: { paidRub: number; owedRub: number; expenseRub: number; realized: boolean };
         goods: { paidRub: number; expenseRub: number; closed: boolean };
       }
@@ -1377,12 +1377,13 @@ function ClientQuotes({
     }
   }
 
-  function getExpenseDraft(quote: QuoteRecord): { goodsCny: string; chinaCny: string; cargoCny: string; accountId: string } {
+  function getExpenseDraft(quote: QuoteRecord): { goodsCny: string; chinaCny: string; cargoCny: string; owedCny: string; accountId: string } {
     return (
       expenseDrafts[quote.id] ?? {
         goodsCny: "",
         chinaCny: "",
         cargoCny: "",
+        owedCny: "",
         accountId: paymentAccounts[0]?.id ?? "",
       }
     );
@@ -1395,6 +1396,24 @@ function ClientQuotes({
       if (res.ok) {
         const data = await res.json();
         setPaymentProgress((current) => ({ ...current, [quoteId]: data }));
+        // Предзаполняем остаток поставщику текущим значением из бэкенда —
+        // только если менеджер ещё не открывал форму по этому просчёту
+        // (иначе затрём то, что он уже начал вводить). См. план
+        // mellow-forging-kay.md.
+        setExpenseDrafts((current) =>
+          current[quoteId]
+            ? current
+            : {
+                ...current,
+                [quoteId]: {
+                  goodsCny: "",
+                  chinaCny: "",
+                  cargoCny: "",
+                  owedCny: data.buyout?.owedToSupplierCny ? String(data.buyout.owedToSupplierCny) : "",
+                  accountId: paymentAccounts[0]?.id ?? "",
+                },
+              },
+        );
       }
     } finally {
       setLoadingProgressId(null);
@@ -1409,10 +1428,16 @@ function ClientQuotes({
     const goodsAmountCny = Number(draft.goodsCny);
     const chinaDeliveryAmountCny = Number(draft.chinaCny);
     const cargoAmountCny = Number(draft.cargoCny);
+    // Остаток поставщику — необязательное поле, можно поправить и без новой
+    // суммы расхода (например просто скорректировать после переговоров).
+    const owedCnyTrimmed = draft.owedCny.trim();
+    const goodsOwedAmountCny = owedCnyTrimmed === "" ? undefined : Number(owedCnyTrimmed);
+    const hasValidOwed = goodsOwedAmountCny !== undefined && Number.isFinite(goodsOwedAmountCny) && goodsOwedAmountCny >= 0;
     const hasAny =
       (Number.isFinite(goodsAmountCny) && goodsAmountCny > 0) ||
       (Number.isFinite(chinaDeliveryAmountCny) && chinaDeliveryAmountCny > 0) ||
-      (Number.isFinite(cargoAmountCny) && cargoAmountCny > 0);
+      (Number.isFinite(cargoAmountCny) && cargoAmountCny > 0) ||
+      hasValidOwed;
     if (!hasAny) return;
     setSavingBuyoutId(quoteId);
     try {
@@ -1424,11 +1449,15 @@ function ClientQuotes({
           goodsAmountCny,
           chinaDeliveryAmountCny,
           cargoAmountCny,
+          ...(hasValidOwed ? { goodsOwedAmountCny } : {}),
         }),
       });
       if (res.ok) {
         toast.success("Данные по выкупу сохранены и создан расходный ордер");
-        setExpenseDrafts((current) => ({ ...current, [quoteId]: { goodsCny: "", chinaCny: "", cargoCny: "", accountId: draft.accountId } }));
+        setExpenseDrafts((current) => ({
+          ...current,
+          [quoteId]: { goodsCny: "", chinaCny: "", cargoCny: "", owedCny: hasValidOwed ? String(goodsOwedAmountCny) : draft.owedCny, accountId: draft.accountId },
+        }));
         await Promise.all([load(), loadPaymentProgress(quoteId)]);
       }
     } finally {
@@ -2514,11 +2543,15 @@ function ClientQuotes({
                 const goodsCny = Number(draft.goodsCny);
                 const chinaCny = Number(draft.chinaCny);
                 const cargoCny = Number(draft.cargoCny);
+                const owedCnyTrimmed = draft.owedCny.trim();
+                const owedCnyNum = owedCnyTrimmed === "" ? undefined : Number(owedCnyTrimmed);
+                const owedCnyValid = owedCnyNum !== undefined && Number.isFinite(owedCnyNum) && owedCnyNum >= 0;
                 const draftValid =
                   Boolean(draft.accountId) &&
                   ((Number.isFinite(goodsCny) && goodsCny > 0) ||
                     (Number.isFinite(chinaCny) && chinaCny > 0) ||
-                    (Number.isFinite(cargoCny) && cargoCny > 0));
+                    (Number.isFinite(cargoCny) && cargoCny > 0) ||
+                    owedCnyValid);
                 const progress = paymentProgress[quote.id];
 
                 const progressBlock = (label: string, block: { paidRub: number; owedRub: number; expenseRub: number; realized: boolean } | undefined) => {
@@ -2567,6 +2600,11 @@ function ClientQuotes({
                           </p>
                         )}
                         {progressBlock("Выкуп", progress?.buyout)}
+                        {progress?.buyout && progress.buyout.owedToSupplierCny > 0 && (
+                          <p className="text-xs text-warning">
+                            Ещё должны поставщику: {progress.buyout.owedToSupplierCny}¥
+                          </p>
+                        )}
                         {Number(quote.cargoDeliveryRub) > 0 && progressBlock("Карго", progress?.cargo)}
                       </>
                     )}
@@ -2622,6 +2660,18 @@ function ClientQuotes({
                               className="w-36 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
                             />
                           )}
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="Остаток к доплате поставщику, ¥"
+                            value={draft.owedCny}
+                            onChange={(e) =>
+                              setExpenseDrafts((current) => ({ ...current, [quote.id]: { ...draft, owedCny: e.target.value } }))
+                            }
+                            title="Сколько ещё должны поставщику за товар — не идёт в расход, только уменьшает прибыль/премию до полной оплаты"
+                            className="w-52 rounded-md border border-border bg-bg px-2.5 py-1.5 text-sm text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
                         </div>
                         <button
                           type="button"

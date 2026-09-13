@@ -18,6 +18,7 @@ import {
   type QuoteProfitFields,
 } from "@/lib/desk-services/quote-profit";
 import { fetchQuoteRealFinancials, emptyQuoteRealFinancials, type QuoteRealFinancials } from "@/lib/desk-services/quote-real-financials";
+import { fetchQuoteGoodsOwedRub } from "@/lib/desk-services/quote-goods-owed";
 import { sumAllocationsRealCny } from "@/lib/desk-services/buyout-invoice-calc";
 import { BUYOUT_REALIZED_STATUSES, CARGO_REALIZED_STATUSES } from "@/lib/quote-statuses";
 
@@ -122,6 +123,7 @@ function computeQuoteBreakdown(
   cnyProfitTiers: CnyProfitTiers,
   attachedServicesTotalRub: number,
   financials: QuoteRealFinancials,
+  goodsOwedRub: number | undefined,
 ) {
   const fields: QuoteProfitFields = q;
   const alreadyPaidPremium = sumAlreadyPaidPremium(q.paymentAllocations);
@@ -182,7 +184,7 @@ function computeQuoteBreakdown(
   } else if (buyoutBought) {
     buyoutIncomeRub = q.paymentAllocations.reduce((sum, a) => sum + Number(a.amountRub), 0);
     buyoutExpenseRub = financials.buyoutExpenseRub;
-    const real = computeRealBuyoutProfit({ allocations: q.paymentAllocations, expenseRub: financials.buyoutExpenseRub });
+    const real = computeRealBuyoutProfit({ allocations: q.paymentAllocations, expenseRub: financials.buyoutExpenseRub, owedRub: goodsOwedRub });
     // Не ниже alreadyPaidPremium.buyoutRub — иначе премия менеджера могла
     // бы уменьшиться при переходе план→факт (см. PB-V5 chat 2026-08-12).
     managerServicesPremiumRub =
@@ -361,15 +363,16 @@ async function loadRatesAndQuotes(quoteIds: string[]) {
   });
   const attachedServicesByQuoteId = new Map(attachedServiceSums.map((s) => [s.quoteId, Number(s._sum.priceRub ?? 0)]));
   const quoteRealFinancials = await fetchQuoteRealFinancials(quotes.map((q) => q.id));
+  const goodsOwedRubByQuoteId = await fetchQuoteGoodsOwedRub(quotes.map((q) => ({ id: q.id, cnyRateUsed: q.cnyRateUsed })));
 
-  return { quotes, cargoRates, premiumRates, investors, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials };
+  return { quotes, cargoRates, premiumRates, investors, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials, goodsOwedRubByQuoteId };
 }
 
 // The single entry point both routes call — guarantees the on-screen report
 // and the downloaded PDF can never show different numbers for the same
 // selection.
 async function buildProfitReport(quoteIds: string[]) {
-  const { quotes, cargoRates, premiumRates, investors, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials } =
+  const { quotes, cargoRates, premiumRates, investors, cnyProfitTiers, attachedServicesByQuoteId, quoteRealFinancials, goodsOwedRubByQuoteId } =
     await loadRatesAndQuotes(quoteIds);
   const rows = quotes.map((q) =>
     computeQuoteBreakdown(
@@ -380,6 +383,7 @@ async function buildProfitReport(quoteIds: string[]) {
       cnyProfitTiers,
       attachedServicesByQuoteId.get(q.id) ?? 0,
       quoteRealFinancials.get(q.id) ?? emptyQuoteRealFinancials(),
+      goodsOwedRubByQuoteId.get(q.id),
     ),
   );
 

@@ -22,6 +22,7 @@ import {
 import { loadCnyRateHistory, cnyRateRubAsOf } from "@/lib/desk-services/historical-cny-rate";
 import { BUYOUT_REALIZED_STATUSES } from "@/lib/quote-statuses";
 import { fetchQuoteRealFinancials, emptyQuoteRealFinancials } from "@/lib/desk-services/quote-real-financials";
+import { fetchQuoteGoodsOwedRub } from "@/lib/desk-services/quote-goods-owed";
 
 // "Реальные деньги за период" — в отличие от app/api/manager-profit-report
 // (which asks "сколько заработаем НА ЭТИХ сделках, если/когда они
@@ -266,6 +267,7 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
       id: true,
       managerId: true,
       buyoutSelfSourcedBoost: true,
+      cnyRateUsed: true,
       client: { select: { id: true, selfSourcedConfirmed: true, createdByManagerId: true, vladShareRatePercentOverride: true } },
       paymentAllocations: { select: { category: true, amountRub: true, premiumRub: true } },
     },
@@ -273,10 +275,15 @@ async function buildPeriodReport({ from, to }: PeriodRange) {
   if (openBuyoutQuotes.length > 0) {
     const openQuoteIds = openBuyoutQuotes.map((q) => q.id);
     const openFinancials = await fetchQuoteRealFinancials(openQuoteIds);
+    const goodsOwedRubByQuoteId = await fetchQuoteGoodsOwedRub(openBuyoutQuotes.map((q) => ({ id: q.id, cnyRateUsed: q.cnyRateUsed })));
 
     for (const q of openBuyoutQuotes) {
       const financials = openFinancials.get(q.id) ?? emptyQuoteRealFinancials();
-      const real = computeRealBuyoutProfit({ allocations: q.paymentAllocations, expenseRub: financials.buyoutExpenseRub });
+      const real = computeRealBuyoutProfit({
+        allocations: q.paymentAllocations,
+        expenseRub: financials.buyoutExpenseRub,
+        owedRub: goodsOwedRubByQuoteId.get(q.id),
+      });
 
       const alreadyPaidProfit = sumAlreadyPaidProfitRub(q.paymentAllocations);
       const alreadyPaidPremium = sumAlreadyPaidPremium(q.paymentAllocations);

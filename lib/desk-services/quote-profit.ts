@@ -396,6 +396,15 @@ interface RealBuyoutInputs {
   // товара"/"Доставка по Китаю", уже переведённая в ₽ (см.
   // lib/desk-services/quote-real-financials.ts).
   expenseRub: number;
+  // Сколько ЕЩЁ должны поставщику за товар прямо сейчас (см.
+  // QuoteGoodsOwedAmount) — реальные деньги со счёта ещё не уходили, но
+  // это уже известное обязательство, поэтому вычитается из profitRub
+  // сразу, а не когда его наконец оплатят. НЕ входит в expenseRub (тот
+  // остаётся "реально потрачено деньгами" — используется отдельно для
+  // индикатора "заказ закрыт"). undefined/0 — обратная совместимость,
+  // ничего не меняет для просчётов, где остаток не заведён. См. PB-V5
+  // chat 2026-09-12.
+  owedRub?: number;
 }
 
 // Приход — те же 4 категории "Счёта на выкуп", что НЕ являются Просчётом
@@ -406,7 +415,8 @@ interface RealBuyoutInputs {
 function computeRealBuyoutProfit(q: RealBuyoutInputs): RealBlockResult {
   const alreadyPaid = sumAlreadyPaidRubByCategory(q.allocations);
   const incomeRub = alreadyPaid.goods + alreadyPaid.chinaDelivery + alreadyPaid.buyoutCommission + alreadyPaid.attachedServices;
-  return { incomeRub, expenseRub: q.expenseRub, profitRub: incomeRub - q.expenseRub };
+  const owedRub = q.owedRub ?? 0;
+  return { incomeRub, expenseRub: q.expenseRub, profitRub: incomeRub - q.expenseRub - owedRub };
 }
 
 interface RealCargoInputs {

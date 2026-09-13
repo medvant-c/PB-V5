@@ -425,7 +425,12 @@ function ManagerProfitReportTab() {
                     <td className="px-3 py-1.5 text-right text-text-secondary">{fmtCny(row.buyout.incomeCny)}</td>
                     <td className="px-3 py-1.5 text-right text-text-secondary">{fmtCny(row.buyout.expenseCny)}</td>
                     <td className="px-3 py-1.5 text-right text-text-secondary">{fmtCny(row.buyout.profitCny)}</td>
-                    <td className="px-3 py-1.5 text-right text-text-secondary">{fmtUsd(row.cargo.incomeUsd)}</td>
+                    <td className="px-3 py-1.5 text-right text-text-secondary">
+                      {fmtUsd(row.cargo.incomeUsd)}
+                      <div className={cn("text-[10px] font-medium", row.cargo.realized ? "text-success" : "text-warning")}>
+                        {row.cargo.realized ? "факт" : "план"}
+                      </div>
+                    </td>
                     <td className="px-3 py-1.5 text-right text-text-secondary">{fmtUsd(row.cargo.expenseUsd)}</td>
                     <td className="px-3 py-1.5 text-right text-text-secondary">{fmtUsd(row.cargo.profitUsd)}</td>
                     <td className={cn("px-3 py-1.5 text-right font-bold", row.totalProfitRub >= 0 ? "text-success" : "text-error")}>

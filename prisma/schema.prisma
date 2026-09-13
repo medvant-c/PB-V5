@@ -387,6 +387,7 @@ model Manager {
   quotePaymentAllocations QuotePaymentAllocation[]
   cashOpeningBalanceUpdates CashOpeningBalance[]
   cashUnallocatedAmountUpdates CashUnallocatedAmount[]
+  quoteGoodsOwedAmountUpdates QuoteGoodsOwedAmount[]
   cashTransfersCreated CashTransfer[]
   fulfillmentOrders FulfillmentOrder[]
   completedFulfillmentServices FulfillmentOrderItemService[]
@@ -1163,6 +1164,7 @@ model Quote {
   fulfillmentOrders FulfillmentOrder[]
   paymentAllocations QuotePaymentAllocation[]
   issuedInvoiceLinks IssuedInvoiceQuote[]
+  goodsOwedAmount QuoteGoodsOwedAmount?
 
   @@index([clientId])
   @@index([managerId])
@@ -1427,6 +1429,24 @@ model CashUnallocatedAmount {
   updatedByManagerId String
   updatedByManager   Manager     @relation(fields: [updatedByManagerId], references: [id])
   updatedAt          DateTime    @updatedAt
+}
+
+// Сколько СЕЙЧАС ещё должны поставщику за товар по этому просчёту —
+// текущее значение, не леджер частичных платежей (тот же паттерн, что и
+// CashUnallocatedAmount выше: менеджер переустанавливает число при
+// каждой доплате, а не система копит историю). Заполняется опциональным
+// полем в расходном ордере (goodsOwedAmountCny) — деньги при этом со
+// счёта НЕ уходят (это не CashOrder), только уменьшают расчётную прибыль/
+// премию по просчёту (см. computeRealBuyoutProfit), пока реально не
+// оплачены. См. PB-V5 chat 2026-09-12.
+model QuoteGoodsOwedAmount {
+  id                 String   @id @default(cuid())
+  quoteId            String   @unique
+  quote              Quote    @relation(fields: [quoteId], references: [id])
+  amountCny          Decimal  @default(0)
+  updatedByManagerId String
+  updatedByManager   Manager  @relation(fields: [updatedByManagerId], references: [id])
+  updatedAt          DateTime @updatedAt
 }
 
 // Перенос денег с одного счёта на другой (напр. "Александр передал Антону
