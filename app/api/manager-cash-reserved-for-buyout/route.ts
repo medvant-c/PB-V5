@@ -18,9 +18,14 @@ export async function GET(req: NextRequest) {
   }
 
   const openQuotes = await prisma.quote.findMany({
-    where: { buyoutFactConfirmed: false, deletedAt: null },
+    // reserveDismissal: null — просчёты, вручную помеченные как "разобрано,
+    // не настоящий резерв" (см. QuoteReserveDismissal), из отчёта исключены.
+    where: { buyoutFactConfirmed: false, deletedAt: null, reserveDismissal: null },
     select: {
       id: true,
+      displayId: true,
+      productName: true,
+      client: { select: { id: true, name: true, displayId: true } },
       paymentAllocations: {
         where: { category: "goods" },
         select: { amountRub: true, cashOrder: { select: { cnyToCurrencyRate: true } } },
@@ -31,14 +36,45 @@ export async function GET(req: NextRequest) {
   const financials = await fetchQuoteRealFinancials(openQuotes.map((q) => q.id));
 
   let reservedCny = 0;
+  // Построчная разбивка — только просчёты, где реально есть что показать
+  // (резерв > 0), отсортировано по убыванию: то же самое max(0, оплачено −
+  // потрачено), что уже суммируется в reservedCny выше, но без схлопывания
+  // по клиентам, чтобы менеджер видел, по какому именно просчёту деньги ещё
+  // не потрачены. См. PB-V5 chat 2026-09-13.
+  const rows: {
+    quoteId: string;
+    quoteDisplayId: number;
+    productName: string;
+    clientId: string;
+    clientName: string;
+    clientDisplayId: number;
+    paidCny: number;
+    expenseCny: number;
+    reservedCny: number;
+  }[] = [];
   for (const q of openQuotes) {
     const goodsPaidCny = q.paymentAllocations.reduce((sum, a) => {
       const rate = Number(a.cashOrder.cnyToCurrencyRate) || 1;
       return sum + Number(a.amountRub) / rate;
     }, 0);
     const goodsExpenseCny = (financials.get(q.id) ?? emptyQuoteRealFinancials()).goodsExpenseCny;
-    reservedCny += Math.max(0, goodsPaidCny - goodsExpenseCny);
+    const reserved = Math.max(0, goodsPaidCny - goodsExpenseCny);
+    reservedCny += reserved;
+    if (reserved > 0) {
+      rows.push({
+        quoteId: q.id,
+        quoteDisplayId: q.displayId,
+        productName: q.productName,
+        clientId: q.client.id,
+        clientName: q.client.name,
+        clientDisplayId: q.client.displayId,
+        paidCny: goodsPaidCny,
+        expenseCny: goodsExpenseCny,
+        reservedCny: reserved,
+      });
+    }
   }
+  rows.sort((a, b) => b.reservedCny - a.reservedCny);
 
-  return Response.json({ reservedCny });
+  return Response.json({ reservedCny, rows });
 }

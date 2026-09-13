@@ -27,6 +27,18 @@ interface CashCategoryRecord {
   linkedProfitCategory: QuotePaymentCategoryValue | null;
 }
 
+interface ReservedForBuyoutRow {
+  quoteId: string;
+  quoteDisplayId: number;
+  productName: string;
+  clientId: string;
+  clientName: string;
+  clientDisplayId: number;
+  paidCny: number;
+  expenseCny: number;
+  reservedCny: number;
+}
+
 const PROFIT_CATEGORY_LABEL: Record<QuotePaymentCategoryValue, string> = {
   goods: "Стоимость товара",
   china_delivery: "Доставка по Китаю",
@@ -576,11 +588,19 @@ function ManagerCashTab() {
   // Компания-wide, не зависит от filterAccountId/периода — не влияет ни на
   // closingBalanceCny, ни на profitCny. См. план mellow-forging-kay.md.
   const [reservedForBuyoutCny, setReservedForBuyoutCny] = useState(0);
+  const [reservedForBuyoutRows, setReservedForBuyoutRows] = useState<ReservedForBuyoutRow[]>([]);
+  const [reservedForBuyoutOpen, setReservedForBuyoutOpen] = useState(false);
   useEffect(() => {
     fetch("/api/manager-cash-reserved-for-buyout")
       .then((res) => res.json())
-      .then((data) => setReservedForBuyoutCny(data.reservedCny ?? 0))
-      .catch(() => setReservedForBuyoutCny(0));
+      .then((data) => {
+        setReservedForBuyoutCny(data.reservedCny ?? 0);
+        setReservedForBuyoutRows(data.rows ?? []);
+      })
+      .catch(() => {
+        setReservedForBuyoutCny(0);
+        setReservedForBuyoutRows([]);
+      });
   }, []);
 
   function openUaDialog() {
@@ -942,9 +962,13 @@ function ManagerCashTab() {
           <p className="text-xs text-text-secondary">Баланс на конец периода</p>
           <p className="mt-1 text-lg font-bold text-primary">{summary ? `¥ ${money(summary.closingBalanceCny)}` : "—"}</p>
           {reservedForBuyoutCny > 0 && (
-            <p className="mt-1 text-[11px] text-text-secondary">
+            <button
+              type="button"
+              onClick={() => setReservedForBuyoutOpen(true)}
+              className="mt-1 block text-[11px] text-text-secondary underline decoration-dotted hover:text-text"
+            >
               (из них резерв под выкуп клиентов: ¥ {money(reservedForBuyoutCny)})
-            </p>
+            </button>
           )}
         </Card>
       </div>
@@ -1579,6 +1603,49 @@ function ManagerCashTab() {
               {transferSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Перевести"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={reservedForBuyoutOpen} onOpenChange={setReservedForBuyoutOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Резерв под выкуп по просчётам</DialogTitle>
+            <DialogDescription>
+              Деньги клиентов, уже полученные за товар по открытым просчётам, но ещё реально не потраченные на закупку.
+            </DialogDescription>
+          </DialogHeader>
+          {reservedForBuyoutRows.length === 0 ? (
+            <p className="text-sm text-text-secondary">Нет просчётов с неизрасходованным резервом.</p>
+          ) : (
+            <div className="max-h-[60vh] overflow-y-auto overflow-x-auto rounded-lg border border-border">
+              <table className="w-full min-w-2xl border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-bg text-left text-xs text-text-secondary">
+                    <th className="px-3 py-1.5 font-medium">Клиент</th>
+                    <th className="px-3 py-1.5 font-medium">Просчёт</th>
+                    <th className="px-3 py-1.5 font-medium">Оплачено, ¥</th>
+                    <th className="px-3 py-1.5 font-medium">Потрачено, ¥</th>
+                    <th className="px-3 py-1.5 font-medium">Резерв, ¥</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reservedForBuyoutRows.map((row) => (
+                    <tr key={row.quoteId} className="border-b border-border last:border-0">
+                      <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">
+                        №{row.clientDisplayId} {row.clientName}
+                      </td>
+                      <td className="max-w-60 truncate px-3 py-1.5 text-text-secondary" title={row.productName}>
+                        №{row.quoteDisplayId} — {row.productName}
+                      </td>
+                      <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">¥ {money(row.paidCny)}</td>
+                      <td className="px-3 py-1.5 whitespace-nowrap text-text-secondary">¥ {money(row.expenseCny)}</td>
+                      <td className="px-3 py-1.5 whitespace-nowrap font-medium text-text">¥ {money(row.reservedCny)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

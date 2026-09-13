@@ -388,6 +388,7 @@ model Manager {
   cashOpeningBalanceUpdates CashOpeningBalance[]
   cashUnallocatedAmountUpdates CashUnallocatedAmount[]
   quoteGoodsOwedAmountUpdates QuoteGoodsOwedAmount[]
+  quoteReserveDismissals QuoteReserveDismissal[]
   cashTransfersCreated CashTransfer[]
   fulfillmentOrders FulfillmentOrder[]
   completedFulfillmentServices FulfillmentOrderItemService[]
@@ -1165,6 +1166,7 @@ model Quote {
   paymentAllocations QuotePaymentAllocation[]
   issuedInvoiceLinks IssuedInvoiceQuote[]
   goodsOwedAmount QuoteGoodsOwedAmount?
+  reserveDismissal QuoteReserveDismissal?
 
   @@index([clientId])
   @@index([managerId])
@@ -1447,6 +1449,27 @@ model QuoteGoodsOwedAmount {
   updatedByManagerId String
   updatedByManager   Manager  @relation(fields: [updatedByManagerId], references: [id])
   updatedAt          DateTime @updatedAt
+}
+
+// Пометка "этот просчёт разобран и не считается реальным резервом под
+// выкуп" — снимает старую сделку с отчёта app/api/manager-cash-reserved-
+// for-buyout, НЕ трогая реальные CashOrder/QuotePaymentAllocation: разница
+// оплачено/потрачено там часто просто историческая (неверное разнесение
+// расхода по другому ордеру/просчёту), а не настоящий незакупленный товар.
+// Заводить задним числом фиктивный расходный ордер, чтобы обнулить цифру,
+// нельзя — это исказило бы реальную кассу и прибыль. Присутствие строки =
+// "не учитывать при подсчёте резерва" вне зависимости от текущей разницы;
+// если оплата/расход по просчёту потом изменятся и разница снова появится,
+// отчёт её не покажет, пока пометку не снимут вручную. См. PB-V5 chat
+// 2026-09-13.
+model QuoteReserveDismissal {
+  id                 String   @id @default(cuid())
+  quoteId            String   @unique
+  quote              Quote    @relation(fields: [quoteId], references: [id])
+  reason             String?
+  dismissedByManagerId String
+  dismissedByManager Manager  @relation(fields: [dismissedByManagerId], references: [id])
+  dismissedAt        DateTime @default(now())
 }
 
 // Перенос денег с одного счёта на другой (напр. "Александр передал Антону
